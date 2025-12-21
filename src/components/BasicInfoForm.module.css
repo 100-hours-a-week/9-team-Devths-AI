@@ -1,0 +1,135 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1.5rem; 
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem; /* gap-8 */
+}
+@media (min-width: 768px) {
+  .grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.stack6 {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem; /* space-y-6 */
+}
+
+/* 텍스트 */
+.labelLg {
+  display: block;
+  font-size: 1.125rem; /* text-lg */
+  font-weight: 600; /* font-semibold */
+  color: #1f2937; /* text-gray-800 */
+  margin-bottom: 0.75rem; /* mb-3 */
+}
+
+.labelBase {
+  display: block;
+  font-size: 1rem; /* text-base */
+  font-weight: 500; /* font-medium */
+  color: #374151; /* text-gray-700 */
+  margin-bottom: 0.5rem; /* mb-2 */
+}
+
+.req {
+  color: #f43f5e; /* text-rose-500 */
+}
+
+.sectionTitle {
+  font-size: 1.25rem; /* text-xl */
+  font-weight: 700; /* font-bold */
+  color: #1f2937; /* text-gray-800 */
+  margin-bottom: 1rem; /* mb-4 */
+}
+
+/* 인풋류 */
+.input {
+  width: 100%;
+  padding: 1rem 1.25rem; /* py-4 px-5 */
+  border: 2px solid #e5e7eb; /* border-gray-200 */
+  border-radius: 0.75rem; /* rounded-xl */
+  font-size: 1.125rem; /* text-lg */
+  transition: border-color 150ms ease;
+}
+.input:focus {
+  outline: none;
+  border-color: #fb7185; /* rose-400 */
+}
+
+.textarea {
+  width: 100%;
+  padding: 1rem 1.25rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 0.75rem;
+  font-size: 1.125rem;
+  transition: border-color 150ms ease;
+  resize: none;
+}
+.textarea:focus {
+  outline: none;
+  border-color: #fb7185;
+}
+
+/* Divider */
+.divider {
+  border-top: 2px solid #f3f4f6; /* gray-100 */
+  padding-top: 2rem; /* pt-8 */
+}
+
+.dividerTitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 0.25rem; /* mb-1 */
+}
+
+.dividerHint {
+  font-size: 0.875rem; /* text-sm */
+  font-weight: 400; /* font-normal */
+  color: #6b7280; /* gray-500 */
+}
+
+.dividerDesc {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-bottom: 1.5rem; /* mb-6 */
+}
+
+.submitRow {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.primaryBtn {
+  width: min(320px, 100%);
+  height: 56px;
+  border-radius: 16px;
+  border: none;
+  font-weight: 800;
+  font-size: 16px;
+  color: #fff;
+  background: linear-gradient(135deg, #fb7185 0%, #f97316 65%, #f59e0b 100%);
+  box-shadow: 0 18px 50px rgba(249, 115, 22, 0.25);
+  cursor: pointer;
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.primaryBtn:not(:disabled):hover {
+  transform: translateY(-2px);
+  filter: brightness(1.02);
+}

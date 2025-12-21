@@ -1,0 +1,230 @@
+/* =========================
+   Mobile-first (기본: 모바일)
+   ========================= */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+/* ✅ 왼쪽(모바일에선 위): 추가 카드 */
+.addCard {
+  width: 200px;
+  height: 200px;
+  border-radius: 18px;
+  border: 2px dashed rgba(148, 163, 184, 0.85);
+  background: rgba(255, 250, 246, 0.55);
+  box-shadow: 0 22px 70px rgba(17, 24, 39, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.addCard::before {
+  background:
+    radial-gradient(35% 30% at 18% 22%,
+      rgba(255, 196, 165, 0.35) 0%,
+      rgba(255, 196, 165, 0) 62%),
+    radial-gradient(34% 28% at 85% 18%,
+      rgba(255, 182, 193, 0.28) 0%,
+      rgba(255, 182, 193, 0) 60%),
+    radial-gradient(40% 32% at 80% 88%,
+      rgba(255, 222, 173, 0.22) 0%,
+      rgba(255, 222, 173, 0) 62%);
+  filter: blur(30px);
+}
+
+.addCard:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.plus {
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 300;
+  color: rgba(100, 116, 139, 0.9);
+}
+
+.addText {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-black-light);
+}
+
+.count {
+  font-size: 16px;
+  font-weight: 500;
+  color: rgba(100, 116, 139, 0.9);
+}
+
+.hint {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(100, 116, 139, 0.85);
+}
+
+/* ✅ 오른쪽(모바일에선 아래): 가로 스크롤 리스트 */
+.list {
+  display: flex;
+  gap: 12px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 10px;
+  max-width: 100%;
+  min-width: 0;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x mandatory;
+}
+
+/* 스크롤바(선택) */
+.list::-webkit-scrollbar {
+  height: 10px;
+}
+.list::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+}
+.list::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+}
+
+.thumbItem {
+  flex: 0 0 auto;
+  width: 160px;
+  scroll-snap-align: start;
+}
+
+.thumb {
+  width: 200px;
+  height: 200px;
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.92);
+  box-shadow: 0 14px 40px rgba(17, 24, 39, 0.14);
+}
+
+.thumb img {
+  width: 200px;
+  height: 200px;
+  object-fit: cover;
+}
+
+.thumbFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 0 4px;
+}
+
+.thumbIndex {
+  font-weight: 900;
+  color: #111827;
+  font-size: 15px;
+}
+
+.removeBtn {
+  border: 0;
+  background: rgba(17, 24, 39, 0.06);
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.removeBtn:hover {
+  background: rgba(17, 24, 39, 0.12);
+}
+
+.emptyGuide {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  height: 220px;
+  min-width: 240px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  color: rgba(51, 65, 85, 0.9);
+  font-weight: 700;
+}
+
+/* hidden input */
+.hiddenInput {
+  display: none;
+}
+
+/* =========================
+   Tablet (>=768px)
+   ========================= */
+@media (min-width: 768px) {
+  .wrap {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 18px;
+  }
+
+  .addCard {
+    flex: 0 0 200px;
+    height: 200px;
+  }
+
+  .list {
+    flex: 1;
+    min-width: 0; /* ✅ overflow-x가 제대로 동작하게 */
+    gap: 14px;
+  }
+
+  .thumbItem {
+    width: 190px;
+  }
+
+  .thumb {
+    width: 200px;
+    height: 200px;
+  }
+
+  .emptyGuide {
+    height: 260px;
+  }
+}
+
+/* =========================
+   Desktop (>=1024px)
+   ========================= */
+@media (min-width: 1024px) {
+  .wrap {
+    gap: 24px;
+  }
+
+  .addCard {
+    flex-basis: 200px;
+    height: 200px;
+  }
+
+  .thumbItem {
+    width: 220px;
+  }
+
+  .thumb {
+    width: 200px;
+    height: 200px;
+  }
+
+  .emptyGuide {
+    height: 300px;
+  }
+}

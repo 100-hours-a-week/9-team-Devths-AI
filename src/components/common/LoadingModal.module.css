@@ -1,0 +1,201 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+
+  background: rgba(255, 248, 242, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.glow {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  background:
+    radial-gradient(35% 35% at 25% 25%, rgba(255, 198, 153, 0.45) 0%, rgba(255, 198, 153, 0) 60%),
+    radial-gradient(35% 35% at 75% 30%, rgba(255, 175, 200, 0.35) 0%, rgba(255, 175, 200, 0) 60%),
+    radial-gradient(40% 40% at 70% 75%, rgba(255, 232, 196, 0.35) 0%, rgba(255, 232, 196, 0) 65%);
+  filter: blur(40px);
+  opacity: 0.9;
+}
+
+.modal {
+  position: relative;
+  width: min(520px, 100%);
+  border-radius: 24px;
+  padding: 22px 20px 18px;
+
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 20px 60px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+
+  transform: translateY(6px);
+  animation: pop 260ms ease-out forwards;
+}
+
+@keyframes pop {
+  to {
+    transform: translateY(0);
+  }
+}
+
+.header {
+  text-align: center;
+  padding: 4px 4px 14px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(120, 60, 30, 0.95);
+
+  background: rgba(255, 210, 170, 0.45);
+  border: 1px solid rgba(255, 210, 170, 0.55);
+}
+
+.title {
+  margin-top: 10px;
+  font-size: 20px;
+  font-weight: 900;
+  color: rgba(45, 25, 20, 0.95);
+}
+
+.message {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(78, 50, 42, 0.85);
+}
+
+.center {
+  display: grid;
+  place-items: center;
+  gap: 14px;
+  padding: 6px 0 8px;
+}
+
+.ring {
+  position: relative;
+  width: 90px;
+  height: 90px;
+}
+
+.r1, .r2, .r3 {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 160, 120, 0.25);
+}
+
+.r1 {
+  border-top-color: rgba(255, 140, 100, 0.95);
+  animation: spin 1.05s linear infinite;
+}
+
+.r2 {
+  inset: 10px;
+  border-right-color: rgba(255, 190, 160, 0.95);
+  animation: spin 1.35s linear infinite reverse;
+}
+
+.r3 {
+  inset: 20px;
+  border-left-color: rgba(255, 170, 190, 0.9);
+  animation: spin 1.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.progressLine {
+  width: min(360px, 92%);
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+}
+
+.progressBar {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 160, 120, 0.0), rgba(255, 160, 120, 0.95), rgba(255, 170, 190, 0.95));
+  animation: sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0%   { transform: translateX(-80%); opacity: 0.7; }
+  50%  { opacity: 1; }
+  100% { transform: translateX(180%); opacity: 0.7; }
+}
+
+.hint {
+  font-size: 12px;
+  color: rgba(90, 60, 55, 0.75);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.pulseDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 140, 100, 0.95);
+  box-shadow: 0 0 0 0 rgba(255, 140, 100, 0.35);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 140, 100, 0.35); }
+  70%  { box-shadow: 0 0 0 14px rgba(255, 140, 100, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 140, 100, 0); }
+}
+
+.footerText {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(80, 55, 50, 0.75);
+}
+
+/* ✅ 모바일 최적화 */
+@media (max-width: 480px) {
+  .modal {
+    border-radius: 18px;
+    padding: 18px 16px 16px;
+  }
+  .title {
+    font-size: 18px;
+  }
+  .message {
+    font-size: 13px;
+  }
+  .ring {
+    width: 80px;
+    height: 80px;
+  }
+}

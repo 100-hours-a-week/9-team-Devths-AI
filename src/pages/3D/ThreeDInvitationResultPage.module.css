@@ -1,0 +1,213 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+  padding: 24px 16px 40px;
+}
+
+.bgOrbs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  filter: blur(20px);
+  opacity: 0.9;
+}
+
+.orb1, .orb2, .orb3 {
+  position: absolute;
+  border-radius: 999px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 120, 180, 0.55), rgba(255, 255, 255, 0));
+}
+
+.orb1 { top: -120px; left: -120px; }
+.orb2 {
+  bottom: -160px; right: -140px;
+  background: radial-gradient(circle at 30% 30%, rgba(120, 180, 255, 0.55), rgba(255, 255, 255, 0));
+}
+.orb3 {
+  top: 40%;
+  left: 55%;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle at 30% 30%, rgba(120, 255, 200, 0.45), rgba(255, 255, 255, 0));
+}
+
+.main {
+  position: relative;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 20px;
+  padding: 18px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.08);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: rgba(0,0,0,0.06);
+}
+
+.title {
+  font-size: 22px;
+  margin: 0;
+}
+
+.subTitle {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.85;
+  line-height: 1.5;
+}
+
+.viewerWrap {
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.65);
+}
+
+.canvas {
+  width: 100%;
+  height: 520px;
+  display: block;
+}
+
+.hint {
+  padding: 10px 12px;
+  font-size: 12px;
+  opacity: 0.75;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.7);
+}
+
+.meta {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: rgba(255,255,255,0.65);
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.metaLabel {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.metaValue {
+  font-size: 13px;
+}
+
+.metaValueEllipsis {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.primaryBtn, .secondaryBtn {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.primaryBtn {
+  background: rgba(0,0,0,0.92);
+  color: white;
+}
+
+.secondaryBtn {
+  background: rgba(0,0,0,0.08);
+  color: rgba(0,0,0,0.92);
+}
+
+.empty {
+  padding: 18px 10px;
+  border-radius: 14px;
+  border: 1px dashed rgba(0,0,0,0.18);
+  background: rgba(255,255,255,0.55);
+}
+
+.emptyTitle {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.emptyDesc {
+  font-size: 13px;
+  opacity: 0.85;
+  line-height: 1.6;
+}
+
+.loader {
+  min-width: 220px;
+  padding: 14px 14px;
+  border-radius: 14px;
+  background: rgba(0,0,0,0.72);
+  color: white;
+  text-align: center;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 10px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.25);
+  border-top-color: rgba(255,255,255,0.9);
+  animation: spin 0.9s linear infinite;
+}
+
+.loaderText {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.loaderSub {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+  .canvas { height: 420px; }
+  .metaRow { grid-template-columns: 90px 1fr; }
+}

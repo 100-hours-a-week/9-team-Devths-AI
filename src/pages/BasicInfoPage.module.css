@@ -1,0 +1,71 @@
+.page {
+  min-height: 100vh;
+  position: relative;
+  padding: 32px 16px 64px;
+  background: linear-gradient(180deg, #ffffff 0%, #fff6f8 45%, #f9fbff 100%);
+  overflow: hidden;
+}
+
+.page::before,
+.page::after {
+  content: "";
+  position: absolute;
+  width: 420px;
+  height: 420px;
+  border-radius: 999px;
+  filter: blur(48px);
+  opacity: 0.45;
+  z-index: 0;
+}
+
+.page::before {
+  left: -140px;
+  top: 60px;
+  background: radial-gradient(circle at 30% 30%, rgba(255, 179, 199, 0.65), transparent 65%);
+}
+
+.page::after {
+  right: -180px;
+  bottom: -120px;
+  background: radial-gradient(circle at 60% 40%, rgba(182, 217, 255, 0.55), transparent 68%);
+}
+
+.main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+  position: relative;
+  z-index: 1;
+}
+
+.card {
+  border-radius: 28px;
+  padding: 40px 36px 48px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 182, 193, 0.25);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.stepLabel {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #ff7a9e;
+  margin-bottom: 6px;
+}
+
+.pageTitle {
+  text-align: center;
+  font-size: 34px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
