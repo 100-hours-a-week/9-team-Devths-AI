@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.so
+.Python
+*.pyo
+*.pyd
+
+# Virtual Environment
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+nohup.out
+logs/
+*.log.*
+
+# Model files (대용량 파일)
+*.h5
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.pb
+*.onnx
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
