@@ -1,0 +1,146 @@
+name: Devths-AI CI 파이프라인
+
+on:
+  push:
+    branches: [develop, release, main]
+
+env:
+  PYTHON_VERSION: '3.10'
+
+jobs:
+  # 1. 코드 품질 검사 (Ruff)
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+          pip install -r requirements.txt
+
+      - name: Ruff Lint 검사
+        run: ruff check app/
+
+      - name: Ruff Format 검사
+        run: ruff format --check app/
+
+  # 2. 정적 분석 (CodeQL)
+  static-analysis:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: CodeQL 초기화
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: CodeQL 분석 수행
+        uses: github/codeql-action/analyze@v3
+
+      - name: 보안 취약점 결과 확인 및 차단
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "⏳ 분석 결과가 GitHub에 반영되기를 기다리는 중 (10초)..."
+          sleep 10
+
+          # 1. 현재 이벤트가 push인지 pr인지에 따라 검색할 REF 설정
+          # GITHUB_REF는 push일 땐 refs/heads/branch명, PR일 땐 refs/pull/번호/merge가 됩니다.
+          CURRENT_REF="${{ github.ref }}"
+          echo "📍 현재 Ref: $CURRENT_REF"
+
+          # 2. API 호출하여 High/Critical 등급의 Open 상태인 알림 조회
+          ALERTS=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?tool_name=CodeQL&state=open&ref=$CURRENT_REF" \
+            --jq '[.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical")]')
+
+          COUNT=$(echo "$ALERTS" | jq 'length')
+
+          if [ "$COUNT" -gt 0 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ 보안 검사 실패: 고위험(High/Critical) 취약점 $COUNT개 발견"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "$ALERTS" | jq -r '.[] | "- [\(.rule.security_severity_level)] \(.rule.description) \n   위치: \(.most_recent_instance.location.path)"'
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          else
+            echo "✅ 보안 검사 통과: 현재 커밋($CURRENT_REF)은 안전합니다."
+          fi
+
+  # 3. 의존성 및 Import 검증
+  validate:
+    name: validate
+    runs-on: ubuntu-22.04
+    needs: [lint, static-analysis]
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Python Import 검증
+        run: |
+          python -c "import app.main; print('✅ Main app imports successfully')"
+
+  # 4. 디스코드 통합 알림
+  notify-discord:
+    runs-on: ubuntu-22.04
+    needs: [lint, static-analysis, validate]
+    if: always()
+    steps:
+      - name: 데이터 준비
+        id: prep
+        env:
+          USER_MAP: ${{ secrets.USER_MAP_JSON }}
+        run: |
+          # 1. 커밋 메시지 추출 (Push 제목 대용)
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1)
+          echo "title=$COMMIT_MSG" >> $GITHUB_OUTPUT
+
+          # 2. 브랜치 정보
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: Discord 알림 전송
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ github.ref_name == 'main' && secrets.DISCORD_WEBHOOK_PROD_URL || secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
+          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 'success' || 'failure' }}
+          title: "${{ steps.prep.outputs.branch }} 결과 [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && '✅성공' || '❌실패' }}]"
+          description: |
+            **커밋 메시지**: ${{ steps.prep.outputs.title }}
+            **브랜치**: `${{ steps.prep.outputs.branch }}`
+
+            **📊 상세 결과**:
+            - Lint/Format: ${{ needs.lint.result == 'success' && ' ✅' || ' ❌' }}
+            - Static Analysis: ${{ needs.static-analysis.result == 'success' && ' ✅' || ' ❌' }}
+            - Validation: ${{ needs.validate.result == 'success' && ' ✅' || ' ❌' }}
+
+            **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+
+          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 65280 || 16711680 }}"
+          username: GitHub AI Merge Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
