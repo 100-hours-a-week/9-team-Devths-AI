@@ -16,6 +16,7 @@ sleep 1
 
 # 서버 시작 (--reload 제거)
 echo "Starting server on http://0.0.0.0:8000"
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Poetry를 사용하여 실행 (PYTHONPATH를 현재 디렉토리로 설정)
+PYTHONPATH=. poetry run python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 # 또는 개발 중이면 --reload 대신 수동으로 재시작하세요
