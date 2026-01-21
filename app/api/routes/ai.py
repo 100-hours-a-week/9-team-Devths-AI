@@ -33,6 +33,33 @@ from app.services.vllm_service import VLLMService
 
 logger = logging.getLogger(__name__)
 
+
+def sanitize_for_log(value: str, max_length: int = 100) -> str:
+    """
+    Sanitize user input for safe logging to prevent log injection attacks.
+
+    Args:
+        value: The string value to sanitize
+        max_length: Maximum length to truncate to
+
+    Returns:
+        Sanitized string safe for logging
+    """
+    if not value:
+        return ""
+
+    # Remove control characters and newlines that could be used for log injection
+    sanitized = "".join(
+        char if char.isprintable() and char not in "\n\r" else " " for char in value
+    )
+
+    # Truncate if too long
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+
+    return sanitized
+
+
 router = APIRouter(
     prefix="/ai",
     tags=["AI APIs (v3.0)"],
@@ -140,10 +167,10 @@ async def text_extract(request: TextExtractRequest):
             logger.info(f"{'='*80}")
             logger.info("=== 📄 텍스트 추출 시작 (파일 업로드) ===")
             logger.info(f"{'='*80}")
-            logger.info(f"📌 요청 모델: {model.upper()}")
-            logger.info(f"📌 문서 타입: {request.type}")
-            logger.info(f"📌 사용자 ID: {request.user_id}")
-            logger.info(f"📌 문서 ID: {request.document_id}")
+            logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
+            logger.info(f"📌 문서 타입: {sanitize_for_log(request.type, 50)}")
+            logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
+            logger.info(f"📌 문서 ID: {sanitize_for_log(str(request.document_id), 50)}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
 
             # 파일 URL이 있으면 OCR 처리
@@ -265,10 +292,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    logger.info(f"📌 요청 모델: {model.upper()}")
-    logger.info(f"📌 채팅 모드: {mode}")
-    logger.info(f"📌 사용자 ID: {request.user_id}")
-    logger.info(f"📌 채팅방 ID: {request.room_id}")
+    logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
+    logger.info(f"📌 채팅 모드: {sanitize_for_log(mode, 50)}")
+    logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
+    logger.info(f"📌 채팅방 ID: {sanitize_for_log(str(request.room_id), 50)}")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -296,7 +323,7 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
-                logger.info(f"🔍 분석 요청 감지: '{user_message[:50]}...'")
+                logger.info(f"🔍 분석 요청 감지: '{sanitize_for_log(user_message, 50)}'")
                 logger.info("")
 
                 # ---------------------------------------------------------------
@@ -317,7 +344,9 @@ async def generate_chat_stream(request: ChatRequest):
 
                     if not full_context:
                         error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
-                        logger.error(f"⚠️ VectorDB에 문서가 없습니다 (user_id: {request.user_id})")
+                        logger.error(
+                            f"⚠️ VectorDB에 문서가 없습니다 (user_id: {sanitize_for_log(request.user_id, 50)})"
+                        )
                         yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
                         full_response = error_msg
                     else:
@@ -397,7 +426,9 @@ async def generate_chat_stream(request: ChatRequest):
                 logger.info("")
 
                 # RAG를 사용하여 컨텍스트 검색 및 응답 생성
-                logger.info(f"🔍 [{model.upper()}] RAG 검색 및 응답 생성 시작...")
+                logger.info(
+                    f"🔍 [{sanitize_for_log(model, 20).upper()}] RAG 검색 및 응답 생성 시작..."
+                )
                 async for chunk in rag.chat_with_rag(
                     user_message=user_message,
                     user_id=request.user_id,
@@ -410,7 +441,7 @@ async def generate_chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
                 logger.info(
-                    f"✅ [{model.upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
+                    f"✅ [{sanitize_for_log(model, 20).upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
                 )
 
         except Exception as e:
