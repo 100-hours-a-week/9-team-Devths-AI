@@ -223,7 +223,8 @@ class RAGService:
                     user_message=user_message,
                     context=context,
                     history=history,
-                    system_prompt=system_prompt
+                    system_prompt=system_prompt,
+                    user_id=user_id,
                 ):
                     yield chunk
 
@@ -281,7 +282,7 @@ class RAGService:
                 raise ValueError("이력서 또는 채용공고를 찾을 수 없습니다")
 
             # Generate analysis
-            analysis = await self.llm.generate_analysis(resume_text, posting_text)
+            analysis = await self.llm.generate_analysis(resume_text, posting_text, user_id=user_id)
             return analysis
 
         except Exception as e:
@@ -330,7 +331,7 @@ class RAGService:
 
             # Generate question
             question = await self.llm.generate_interview_question(
-                resume_text, posting_text, interview_type
+                resume_text, posting_text, interview_type, user_id=user_id
             )
             return question
 

@@ -152,7 +152,8 @@ async def text_extract(request: TextExtractRequest):
                     logger.info(f"   → 비용 절감을 위해 pytesseract 사용 (Gemini Vision API 대신)")
                     ocr_result = await rag.vllm.extract_text_from_file(
                         file_url=str(request.file_url),
-                        file_type=file_type
+                        file_type=file_type,
+                        user_id=request.user_id
                     )
                     extracted_text = ocr_result["extracted_text"]
                     pages = [PageText(**page) for page in ocr_result["pages"]]
@@ -485,7 +486,8 @@ async def generate_chat_stream(request: ChatRequest):
                 user_message=question_prompt,
                 context=None,
                 history=[],
-                system_prompt="면접관입니다. 간단명료하게 질문만 생성하세요."
+                system_prompt="면접관입니다. 간단명료하게 질문만 생성하세요.",
+                user_id=request.user_id,
             ):
                 full_question += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"

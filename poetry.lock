@@ -2608,6 +2608,30 @@ adal = ["adal (>=1.0.2)"]
 google-auth = ["google-auth (>=1.0.1)"]
 
 [[package]]
+name = "langfuse"
+version = "3.12.0"
+description = "A client library for accessing langfuse"
+optional = false
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+files = [
+    {file = "langfuse-3.12.0-py3-none-any.whl", hash = "sha256:644d9bbfa842eb6775b1e069e23f77ad1087f5241682966b8168bbb01f9c357e"},
+    {file = "langfuse-3.12.0.tar.gz", hash = "sha256:0f75b3d21d4ef4014ebeaa8188eb0c855200412b4e4fb8cceca609a7ce465f91"},
+]
+
+[package.dependencies]
+backoff = ">=1.10.0"
+httpx = ">=0.15.4,<1.0"
+openai = ">=0.27.8"
+opentelemetry-api = ">=1.33.1,<2.0.0"
+opentelemetry-exporter-otlp-proto-http = ">=1.33.1,<2.0.0"
+opentelemetry-sdk = ">=1.33.1,<2.0.0"
+packaging = ">=23.2,<26.0"
+pydantic = ">=1.10.7,<3.0"
+requests = ">=2,<3"
+wrapt = ">=1.14,<2.0"
+
+[[package]]
 name = "lazy-loader"
 version = "0.4"
 description = "Makes it easy to load subpackages and functions on demand."
@@ -3818,6 +3842,30 @@ opentelemetry-exporter-otlp-proto-common = "1.39.1"
 opentelemetry-proto = "1.39.1"
 opentelemetry-sdk = ">=1.39.1,<1.40.0"
 typing-extensions = ">=4.6.0"
+
+[package.extras]
+gcp-auth = ["opentelemetry-exporter-credential-provider-gcp (>=0.59b0)"]
+
+[[package]]
+name = "opentelemetry-exporter-otlp-proto-http"
+version = "1.39.1"
+description = "OpenTelemetry Collector Protobuf over HTTP Exporter"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "opentelemetry_exporter_otlp_proto_http-1.39.1-py3-none-any.whl", hash = "sha256:d9f5207183dd752a412c4cd564ca8875ececba13be6e9c6c370ffb752fd59985"},
+    {file = "opentelemetry_exporter_otlp_proto_http-1.39.1.tar.gz", hash = "sha256:31bdab9745c709ce90a49a0624c2bd445d31a28ba34275951a6a362d16a0b9cb"},
+]
+
+[package.dependencies]
+googleapis-common-protos = ">=1.52,<2.0"
+opentelemetry-api = ">=1.15,<2.0"
+opentelemetry-exporter-otlp-proto-common = "1.39.1"
+opentelemetry-proto = "1.39.1"
+opentelemetry-sdk = ">=1.39.1,<1.40.0"
+requests = ">=2.7,<3.0"
+typing-extensions = ">=4.5.0"
 
 [package.extras]
 gcp-auth = ["opentelemetry-exporter-credential-provider-gcp (>=0.59b0)"]
@@ -7965,4 +8013,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.10.19"
-content-hash = "103232ff342e567ccf2134404904febbe55017e4d4bccb593058e4269b9ccf08"
+content-hash = "700f57776859c23ed91247b3206c1f9a2da6b9ba37a8c447af3f78b2a554cc7b"

@@ -13,6 +13,8 @@ from typing import List, Dict, Any, AsyncIterator, Optional
 from PIL import Image
 import pdf2image
 
+from app.utils.langfuse_client import trace_llm_call, create_generation
+
 logger = logging.getLogger(__name__)
 
 
@@ -227,7 +229,8 @@ class VLLMService:
     async def extract_text_from_file(
         self,
         file_url: str,
-        file_type: str = "pdf"
+        file_type: str = "pdf",
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Extract text from image or PDF file using pytesseract OCR
@@ -235,12 +238,26 @@ class VLLMService:
         Args:
             file_url: URL of the file (http(s):// or data:)
             file_type: "pdf" or "image"
+            user_id: User ID for Langfuse tracking
             
         Returns:
             Dict with extracted_text and pages list
         """
         try:
             import pytesseract
+            
+            # 파일 단위 trace 생성 (페이지/이미지 generation을 여기에 연결)
+            ocr_trace = trace_llm_call(
+                name="pytesseract_extract_text",
+                user_id=user_id,
+                metadata={
+                    "model": self.model_name,
+                    "type": "ocr",
+                    "file_type": file_type,
+                    "file_url_prefix": file_url[:100],
+                    "ocr_engine": "pytesseract",
+                },
+            )
             
             # Download file
             logger.info(f"[vLLM OCR] Downloading file from {file_url[:100]}...")
@@ -263,23 +280,65 @@ class VLLMService:
                         "text": page_text
                     })
                     full_text += f"\n\n[Page {page_num}]\n{page_text}"
+                    
+                    # 페이지 단위 generation 기록 (trace가 있을 때만)
+                    if ocr_trace is not None:
+                        create_generation(
+                            trace=ocr_trace,
+                            name=f"pytesseract_ocr_page_{page_num}",
+                            model=self.model_name,
+                            input_text=f"file_type=pdf page={page_num} file_url_prefix={file_url[:100]}",
+                            output_text=page_text[:4000],
+                            metadata={
+                                "type": "ocr",
+                                "file_type": "pdf",
+                                "page": page_num,
+                                "total_pages": len(images),
+                                "ocr_engine": "pytesseract",
+                            },
+                        )
                 
-                logger.info(f"[vLLM OCR] Extracted {len(full_text)} characters from {len(pages)} pages")
-                return {
+                result = {
                     "extracted_text": full_text.strip(),
                     "pages": pages
                 }
+                
+                # 파일 요약 generation (전체 텍스트는 너무 길 수 있어 4,000자까지만 저장)
+                if ocr_trace is not None:
+                    create_generation(
+                        trace=ocr_trace,
+                        name="pytesseract_ocr_pdf_summary",
+                        model=self.model_name,
+                        input_text=f"file_type=pdf file_url_prefix={file_url[:100]}",
+                        output_text=result["extracted_text"][:4000],
+                        metadata={"type": "ocr", "file_type": "pdf", "pages": len(pages), "ocr_engine": "pytesseract"},
+                    )
+                
+                logger.info(f"[vLLM OCR] Extracted {len(full_text)} characters from {len(pages)} pages")
+                return result
             else:
                 # Single image
                 logger.info("[vLLM OCR] Extracting text from image using pytesseract...")
                 image = Image.open(io.BytesIO(file_bytes))
                 text = pytesseract.image_to_string(image, lang='kor+eng')
                 
-                logger.info(f"[vLLM OCR] Extracted {len(text)} characters from image")
-                return {
+                result = {
                     "extracted_text": text,
                     "pages": [{"page": 1, "text": text}]
                 }
+                
+                if ocr_trace is not None:
+                    create_generation(
+                        trace=ocr_trace,
+                        name="pytesseract_ocr_image",
+                        model=self.model_name,
+                        input_text=f"file_type=image file_url_prefix={file_url[:100]}",
+                        output_text=text[:4000],
+                        metadata={"type": "ocr", "file_type": "image", "pages": 1, "ocr_engine": "pytesseract"},
+                    )
+                
+                logger.info(f"[vLLM OCR] Extracted {len(text)} characters from image")
+                return result
                 
         except Exception as e:
             logger.error(f"[vLLM OCR] Error extracting text from file: {e}")

@@ -15,6 +15,8 @@ from PIL import Image
 import pdf2image
 import tempfile
 
+from app.utils.langfuse_client import create_generation, trace_llm_call
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,12 +41,52 @@ class LLMService:
 
         logger.info(f"LLM Service initialized with model: {self.model_name}")
 
+    def _langfuse_trace_and_generation(
+        self,
+        *,
+        trace_name: str,
+        generation_name: str,
+        input_text: str,
+        output_text: str,
+        user_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Langfuse trace + generation 기록 헬퍼.
+
+        Langfuse 설정이 없거나 오류가 나더라도 서비스 로직은 중단되지 않도록 no-op로 동작합니다.
+        """
+        try:
+            trace = trace_llm_call(
+                name=trace_name,
+                user_id=user_id,
+                metadata={
+                    "model": self.model_name,
+                    **(metadata or {}),
+                },
+            )
+            if trace is None:
+                return
+
+            create_generation(
+                trace=trace,
+                name=generation_name,
+                model=self.model_name,
+                input_text=input_text,
+                output_text=output_text,
+                metadata=metadata or {},
+            )
+        except Exception:
+            # Langfuse 오류로 본 서비스가 죽지 않게 방어
+            return
+
     async def generate_response(
         self,
         user_message: str,
         context: Optional[str] = None,
         history: Optional[List[Dict[str, str]]] = None,
-        system_prompt: Optional[str] = None
+        system_prompt: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncIterator[str]:
         """
         Generate streaming response from LLM
@@ -58,6 +100,19 @@ class LLMService:
         Yields:
             Response chunks
         """
+        trace = trace_llm_call(
+            name="gemini_generate_response",
+            user_id=user_id,
+            metadata={
+                "model": self.model_name,
+                "has_context": bool(context),
+                "has_history": bool(history),
+            },
+        )
+
+        full_response = ""
+        final_message_for_trace = user_message
+
         try:
             # Build final user message with context
             final_message = user_message
@@ -68,6 +123,7 @@ class LLMService:
 질문: {user_message}
 
 위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
+            final_message_for_trace = final_message
 
             # Create contents using types.Content
             contents = [
@@ -95,17 +151,40 @@ class LLMService:
 
             # Stream chunks
             for chunk in response:
-                if hasattr(chunk, 'text') and chunk.text:
+                if hasattr(chunk, "text") and chunk.text:
+                    full_response += chunk.text
                     yield chunk.text
+
+            # Langfuse generation 기록 (스트리밍 완료 후)
+            if trace is not None:
+                create_generation(
+                    trace=trace,
+                    name="gemini_stream",
+                    model=self.model_name,
+                    input_text=final_message_for_trace,
+                    output_text=full_response,
+                    metadata={"streaming": True},
+                )
 
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
+            if trace is not None:
+                try:
+                    trace["client"].create_event(
+                        trace_context={"trace_id": trace["trace_id"]},
+                        name="error",
+                        level="ERROR",
+                        metadata={"error": str(e)},
+                    )
+                except Exception:
+                    pass
             yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
     async def generate_analysis(
         self,
         resume_text: str,
-        posting_text: str
+        posting_text: str,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate resume and job posting analysis
@@ -175,10 +254,19 @@ class LLMService:
 
             if start_idx != -1 and end_idx > start_idx:
                 json_str = result_text[start_idx:end_idx]
-                return json.loads(json_str)
+                parsed = json.loads(json_str)
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_analysis",
+                    generation_name="gemini_analysis",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={"temperature": 0.3, "type": "analysis"},
+                )
+                return parsed
             else:
                 logger.error("No JSON found in analysis response")
-                return {
+                fallback = {
                     "resume_analysis": {
                         "strengths": ["분석 결과를 파싱할 수 없습니다"],
                         "weaknesses": [],
@@ -197,6 +285,15 @@ class LLMService:
                         "missing_skills": []
                     }
                 }
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_analysis",
+                    generation_name="gemini_analysis",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={"temperature": 0.3, "type": "analysis", "parsed": False},
+                )
+                return fallback
 
         except Exception as e:
             logger.error(f"Error generating analysis: {e}")
@@ -206,7 +303,8 @@ class LLMService:
         self,
         resume_text: str,
         posting_text: str,
-        interview_type: str = "technical"
+        interview_type: str = "technical",
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate interview question
@@ -277,14 +375,37 @@ JSON 형식으로 질문을 제공해주세요:
 
             if start_idx != -1 and end_idx > start_idx:
                 json_str = result_text[start_idx:end_idx]
-                return json.loads(json_str)
+                parsed = json.loads(json_str)
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_interview_question",
+                    generation_name="gemini_interview_question",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={"temperature": 0.8, "type": "interview_question", "interview_type": interview_type},
+                )
+                return parsed
             else:
-                return {
+                fallback = {
                     "question": result_text,
                     "difficulty": "medium",
                     "category": interview_type,
                     "follow_up": False
                 }
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_interview_question",
+                    generation_name="gemini_interview_question",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={
+                        "temperature": 0.8,
+                        "type": "interview_question",
+                        "interview_type": interview_type,
+                        "parsed": False,
+                    },
+                )
+                return fallback
 
         except Exception as e:
             logger.error(f"Error generating interview question: {e}")
@@ -293,7 +414,8 @@ JSON 형식으로 질문을 제공해주세요:
     async def extract_text_from_file(
         self,
         file_url: str,
-        file_type: str = "pdf"
+        file_type: str = "pdf",
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Extract text from image or PDF file using Gemini Vision API
@@ -306,6 +428,18 @@ JSON 형식으로 질문을 제공해주세요:
             Dict with extracted_text and pages list
         """
         try:
+            # 파일 단위 trace 생성 (페이지/이미지 generation을 여기에 연결)
+            ocr_trace = trace_llm_call(
+                name="gemini_extract_text",
+                user_id=user_id,
+                metadata={
+                    "model": self.model_name,
+                    "type": "ocr",
+                    "file_type": file_type,
+                    "file_url_prefix": file_url[:100],
+                },
+            )
+
             # Download file
             logger.info(f"Downloading file from {file_url[:100]}...")
             file_bytes = await self._download_file(file_url)
@@ -321,27 +455,64 @@ JSON 형식으로 질문을 제공해주세요:
                 
                 for page_num, image in enumerate(images, start=1):
                     logger.info(f"Extracting text from page {page_num}/{len(images)}...")
-                    page_text = await self._extract_text_from_image(image)
+                    page_text = await self._extract_text_from_image(image, user_id=user_id, page_num=page_num)
                     pages.append({
                         "page": page_num,
                         "text": page_text
                     })
                     full_text += f"\n\n[Page {page_num}]\n{page_text}"
+
+                    # 페이지 단위 generation 기록 (trace가 있을 때만)
+                    if ocr_trace is not None:
+                        create_generation(
+                            trace=ocr_trace,
+                            name=f"gemini_ocr_page_{page_num}",
+                            model=self.model_name,
+                            input_text=f"file_type=pdf page={page_num} file_url_prefix={file_url[:100]}",
+                            output_text=page_text[:4000],
+                            metadata={
+                                "type": "ocr",
+                                "file_type": "pdf",
+                                "page": page_num,
+                                "total_pages": len(images),
+                            },
+                        )
                 
-                return {
+                result = {
                     "extracted_text": full_text.strip(),
                     "pages": pages
                 }
+                # 파일 요약 generation(전체 텍스트는 너무 길 수 있어 4,000자까지만 저장)
+                if ocr_trace is not None:
+                    create_generation(
+                        trace=ocr_trace,
+                        name="gemini_ocr_pdf_summary",
+                        model=self.model_name,
+                        input_text=f"file_type=pdf file_url_prefix={file_url[:100]}",
+                        output_text=result["extracted_text"][:4000],
+                        metadata={"type": "ocr", "file_type": "pdf", "pages": len(pages)},
+                    )
+                return result
             else:
                 # Single image
                 logger.info("Extracting text from image...")
                 image = Image.open(io.BytesIO(file_bytes))
-                text = await self._extract_text_from_image(image)
+                text = await self._extract_text_from_image(image, user_id=user_id, page_num=1)
                 
-                return {
+                result = {
                     "extracted_text": text,
                     "pages": [{"page": 1, "text": text}]
                 }
+                if ocr_trace is not None:
+                    create_generation(
+                        trace=ocr_trace,
+                        name="gemini_ocr_image",
+                        model=self.model_name,
+                        input_text=f"file_type=image file_url_prefix={file_url[:100]}",
+                        output_text=text[:4000],
+                        metadata={"type": "ocr", "file_type": "image", "pages": 1},
+                    )
+                return result
                 
         except Exception as e:
             logger.error(f"Error extracting text from file: {e}")
@@ -381,7 +552,12 @@ JSON 형식으로 질문을 제공해주세요:
         finally:
             os.unlink(tmp_path)
     
-    async def _extract_text_from_image(self, image: Image.Image) -> str:
+    async def _extract_text_from_image(
+        self,
+        image: Image.Image,
+        user_id: Optional[str] = None,
+        page_num: Optional[int] = None,
+    ) -> str:
         """Extract text from image using Gemini Vision API"""
         try:
             # Convert image to bytes
@@ -424,6 +600,16 @@ Return ONLY the extracted text, without any additional commentary or formatting.
             
             extracted_text = response.text.strip()
             logger.info(f"Extracted {len(extracted_text)} characters from image")
+
+            # 이미지 단위 OCR 호출도 별도 기록 (bytes는 남기지 않고, 메타만 남김)
+            self._langfuse_trace_and_generation(
+                trace_name="gemini_extract_text_from_image",
+                generation_name="gemini_ocr_image_call",
+                input_text="Extract all text from image (bytes omitted)",
+                output_text=extracted_text[:4000],
+                user_id=user_id,
+                metadata={"type": "ocr_image_call", "page": page_num},
+            )
             
             return extracted_text
             
