@@ -138,21 +138,21 @@ async def text_extract(request: TextExtractRequest):
 
             # 모델 선택 (기본값: gemini)
             model = request.model if hasattr(request, "model") and request.model else "gemini"
-            logger.info("")
-            logger.info(f"{'='*80}")
-            logger.info("=== 📄 텍스트 추출 시작 (파일 업로드) ===")
-            logger.info(f"{'='*80}")
-            logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
-            logger.info(f"📌 문서 타입: {sanitize_for_log(request.type, 50)}")
-            logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
-            logger.info(f"📌 문서 ID: {sanitize_for_log(str(request.document_id), 50)}")
-            logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
+            # logger.info("")
+            # logger.info(f"{'='*80}")
+            # logger.info("=== 📄 텍스트 추출 시작 (파일 업로드) ===")
+            # logger.info(f"{'='*80}")
+            # logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
+            # logger.info(f"📌 문서 타입: {sanitize_for_log(request.type, 50)}")
+            # logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
+            # logger.info(f"📌 문서 ID: {sanitize_for_log(str(request.document_id), 50)}")
+            # logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
 
             # 파일 URL이 있으면 OCR 처리
             if request.file_url:
                 file_type = request.file_type if hasattr(request, "file_type") else "pdf"
-                logger.info(f"📌 파일 타입: {sanitize_for_log(file_type, 20)}")
-                logger.info("")
+                # logger.info(f"📌 파일 타입: {sanitize_for_log(file_type, 20)}")
+                # logger.info("")
 
                 # vLLM 모드: pytesseract OCR 사용 (가성비)
                 if model == "vllm" and rag.vllm:
@@ -267,16 +267,16 @@ async def generate_chat_stream(request: ChatRequest):
 
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
-    logger.info("")
-    logger.info(f"{'='*80}")
-    logger.info("=== 💬 채팅 요청 시작 ===")
-    logger.info(f"{'='*80}")
-    logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
-    logger.info(f"📌 채팅 모드: {sanitize_for_log(mode, 50)}")
-    logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
-    logger.info(f"📌 채팅방 ID: {sanitize_for_log(str(request.room_id), 50)}")
-    logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
-    logger.info("")
+    # logger.info("")
+    # logger.info(f"{'='*80}")
+    # logger.info("=== 💬 채팅 요청 시작 ===")
+    # logger.info(f"{'='*80}")
+    # logger.info(f"📌 요청 모델: {sanitize_for_log(model, 20).upper()}")
+    # logger.info(f"📌 채팅 모드: {sanitize_for_log(mode, 50)}")
+    # logger.info(f"📌 사용자 ID: {sanitize_for_log(request.user_id, 50)}")
+    # logger.info(f"📌 채팅방 ID: {sanitize_for_log(str(request.room_id), 50)}")
+    # logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
+    # logger.info("")
 
     # 1. 일반 대화 (RAG 활용)
     if mode == ChatMode.GENERAL:
@@ -302,8 +302,8 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
-                logger.info(f"🔍 분석 요청 감지: '{sanitize_for_log(user_message, 50)}'")
-                logger.info("")
+                # logger.info(f"🔍 분석 요청 감지: '{sanitize_for_log(user_message, 50)}'")
+                # logger.info("")
 
                 # ---------------------------------------------------------------
                 # vLLM 모드 (가성비): OCR(pytesseract) → VectorDB → Llama 분석
@@ -323,9 +323,9 @@ async def generate_chat_stream(request: ChatRequest):
 
                     if not full_context:
                         error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
-                        logger.error(
-                            f"⚠️ VectorDB에 문서가 없습니다 (user_id: {sanitize_for_log(request.user_id, 50)})"
-                        )
+                        # logger.error(
+                        #     f"⚠️ VectorDB에 문서가 없습니다 (user_id: {sanitize_for_log(request.user_id, 50)})"
+                        # )
                         yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
                         full_response = error_msg
                     else:
@@ -405,9 +405,9 @@ async def generate_chat_stream(request: ChatRequest):
                 logger.info("")
 
                 # RAG를 사용하여 컨텍스트 검색 및 응답 생성
-                logger.info(
-                    f"🔍 [{sanitize_for_log(model, 20).upper()}] RAG 검색 및 응답 생성 시작..."
-                )
+                # logger.info(
+                #     f"🔍 [{sanitize_for_log(model, 20).upper()}] RAG 검색 및 응답 생성 시작..."
+                # )
                 async for chunk in rag.chat_with_rag(
                     user_message=user_message,
                     user_id=request.user_id,
@@ -419,9 +419,9 @@ async def generate_chat_stream(request: ChatRequest):
                     full_response += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
-                logger.info(
-                    f"✅ [{sanitize_for_log(model, 20).upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
-                )
+                # logger.info(
+                #     f"✅ [{sanitize_for_log(model, 20).upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
+                # )
 
         except Exception as e:
             safe_error = sanitize_for_log(str(e), 200)
