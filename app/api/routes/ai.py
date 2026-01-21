@@ -30,34 +30,9 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
+from app.utils.log_sanitizer import sanitize_for_log
 
 logger = logging.getLogger(__name__)
-
-
-def sanitize_for_log(value: str, max_length: int = 100) -> str:
-    """
-    Sanitize user input for safe logging to prevent log injection attacks.
-
-    Args:
-        value: The string value to sanitize
-        max_length: Maximum length to truncate to
-
-    Returns:
-        Sanitized string safe for logging
-    """
-    if not value:
-        return ""
-
-    # Remove control characters and newlines that could be used for log injection
-    sanitized = "".join(
-        char if char.isprintable() and char not in "\n\r" else " " for char in value
-    )
-
-    # Truncate if too long
-    if len(sanitized) > max_length:
-        sanitized = sanitized[:max_length] + "..."
-
-    return sanitized
 
 
 router = APIRouter(
@@ -90,7 +65,7 @@ def get_services():
 
         try:
             if gcp_vllm_url:
-                logger.info(f"🌐 GCP vLLM 서버 연결: {gcp_vllm_url}")
+                logger.info(f"🌐 GCP vLLM 서버 연결: {sanitize_for_log(gcp_vllm_url, 100)}")
                 vllm_service = VLLMService()
                 logger.info("✅ vLLM service initialized (GCP GPU server)")
             else:
@@ -99,7 +74,7 @@ def get_services():
                 vllm_service = VLLMService(ocr_only=True)
                 logger.info("✅ vLLM service initialized (OCR-only mode)")
         except Exception as e:
-            logger.warning(f"vLLM service initialization failed: {e}")
+            logger.warning(f"vLLM service initialization failed: {sanitize_for_log(str(e), 200)}")
             vllm_service = None
 
         rag_service = RAGService(llm_service, vectordb_service, vllm_service)
@@ -176,7 +151,7 @@ async def text_extract(request: TextExtractRequest):
             # 파일 URL이 있으면 OCR 처리
             if request.file_url:
                 file_type = request.file_type if hasattr(request, "file_type") else "pdf"
-                logger.info(f"📌 파일 타입: {file_type}")
+                logger.info(f"📌 파일 타입: {sanitize_for_log(file_type, 20)}")
                 logger.info("")
 
                 # vLLM 모드: pytesseract OCR 사용 (가성비)
@@ -232,9 +207,13 @@ async def text_extract(request: TextExtractRequest):
                 raise ValueError("No text extracted")
 
         except Exception as e:
-            logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
+            error_msg = sanitize_for_log(str(e), 200)
+            logger.error(f"텍스트 추출 오류: {error_msg}", exc_info=True)
             tasks_db[task_id]["status"] = TaskStatus.FAILED
-            tasks_db[task_id]["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
+            tasks_db[task_id]["error"] = {
+                "code": ErrorCode.PROCESSING_ERROR,
+                "message": sanitize_for_log(str(e), 500),
+            }
 
     asyncio.create_task(process_text_extract())
 
@@ -445,7 +424,9 @@ async def generate_chat_stream(request: ChatRequest):
                 )
 
         except Exception as e:
-            error_msg = f"오류가 발생했습니다: {str(e)}"
+            safe_error = sanitize_for_log(str(e), 200)
+            error_msg = f"오류가 발생했습니다: {safe_error}"
+            logger.error(f"채팅 처리 오류: {safe_error}", exc_info=True)
             yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
             full_response = error_msg
 
@@ -489,7 +470,9 @@ async def generate_chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
-            error_result = {"success": False, "mode": "analysis", "error": str(e)}
+            safe_error = sanitize_for_log(str(e), 200)
+            logger.error(f"분석 처리 오류: {safe_error}", exc_info=True)
+            error_result = {"success": False, "mode": "analysis", "error": safe_error}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
     # 3. 면접 모드 - 맞춤형 질문 생성 및 대화
@@ -536,8 +519,9 @@ async def generate_chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
-            logger.error(f"Interview question generation error: {e}")
-            error_result = {"success": False, "mode": "interview_question", "error": str(e)}
+            safe_error = sanitize_for_log(str(e), 200)
+            logger.error(f"Interview question generation error: {safe_error}", exc_info=True)
+            error_result = {"success": False, "mode": "interview_question", "error": safe_error}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
     # 4. 면접 리포트 (Pydantic AI 사용)

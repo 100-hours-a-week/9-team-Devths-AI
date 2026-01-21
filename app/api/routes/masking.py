@@ -21,6 +21,7 @@ from app.schemas.masking import (
 )
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
+from app.utils.log_sanitizer import sanitize_for_log
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,7 @@ async def masking_draft(request: MaskingDraftRequest):
                     )
                 except ValueError:
                     # enum에 없는 타입은 건너뛰기
-                    logger.warning(f"Unknown PII type: {pii_type}")
+                    logger.warning(f"Unknown PII type: {sanitize_for_log(str(pii_type), 50)}")
 
             task_data = task_store.get(task_id)
             task_data["status"] = TaskStatus.COMPLETED
@@ -225,11 +226,15 @@ async def masking_draft(request: MaskingDraftRequest):
             logger.info(f"Task {task_id} completed with {len(detected_pii)} PII detections")
 
         except Exception as e:
-            logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
+            safe_error = sanitize_for_log(str(e), 200)
+            logger.error(f"Task {task_id} failed: {safe_error}", exc_info=True)
             task_data = task_store.get(task_id) or {}
             task_data["status"] = TaskStatus.FAILED
-            task_data["message"] = f"마스킹 작업 실패: {str(e)}"
-            task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
+            task_data["message"] = f"마스킹 작업 실패: {safe_error}"
+            task_data["error"] = {
+                "code": ErrorCode.PROCESSING_ERROR,
+                "message": sanitize_for_log(str(e), 500),
+            }
             task_store.save(task_id, task_data)
 
     # asyncio.create_task로 작업 생성 및 추적
@@ -315,8 +320,9 @@ async def masking_health_check():
             "provider": "Google Gemini 3 Flash Preview",
         }
     except Exception as e:
-        logger.error(f"Gemini health check failed: {e}")
-        health_status["models"]["gemini"] = {"status": "error", "error": str(e)}
+        safe_error = sanitize_for_log(str(e), 200)
+        logger.error(f"Gemini health check failed: {safe_error}", exc_info=True)
+        health_status["models"]["gemini"] = {"status": "error", "error": safe_error}
 
     # Chandra 체크
     try:
@@ -326,8 +332,9 @@ async def masking_health_check():
             "provider": "datalab-to/chandra",
         }
     except Exception as e:
-        logger.error(f"Chandra health check failed: {e}")
-        health_status["models"]["chandra"] = {"status": "error", "error": str(e)}
+        safe_error = sanitize_for_log(str(e), 200)
+        logger.error(f"Chandra health check failed: {safe_error}", exc_info=True)
+        health_status["models"]["chandra"] = {"status": "error", "error": safe_error}
 
     # 모든 모델이 실패하면 전체 상태 error
     if all(m.get("status") == "error" for m in health_status["models"].values()):
