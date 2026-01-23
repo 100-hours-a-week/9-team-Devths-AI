@@ -136,6 +136,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ 테스트 실패: {e}")
         import traceback
+
         traceback.print_exc()
 
 
