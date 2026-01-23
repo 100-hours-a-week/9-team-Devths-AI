@@ -41,9 +41,7 @@ class RAGService:
         self.vectordb = vectordb_service
         logger.info("RAG Service initialized")
 
-    async def retrieve_all_documents(
-        self, user_id: str, context_types: list[str] = None
-    ) -> str:
+    async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
         """
         Retrieve ALL documents for a user (for analysis mode)
 

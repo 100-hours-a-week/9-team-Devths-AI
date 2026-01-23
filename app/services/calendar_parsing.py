@@ -33,7 +33,9 @@ class JobPostingInfo(BaseModel):
     company: str = Field(..., description="회사명")
     position: str = Field(..., description="포지션/직무")
     schedules: list[ScheduleInfo] = Field(default_factory=list, description="전형 일정 목록")
-    hashtags: list[str] = Field(default_factory=list, description="해시태그 (회사명, 직무, 경력 등)")
+    hashtags: list[str] = Field(
+        default_factory=list, description="해시태그 (회사명, 직무, 경력 등)"
+    )
 
 
 class CalendarParsingService:
@@ -239,7 +241,9 @@ JSON 형식:
             # Gemini API 호출
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=[types.Content(role="user", parts=[types.Part.from_text(text=user_message)])],
+                contents=[
+                    types.Content(role="user", parts=[types.Part.from_text(text=user_message)])
+                ],
                 config=types.GenerateContentConfig(
                     temperature=0.2,  # 낮은 온도로 일관성 있는 결과
                     response_mime_type="application/json",

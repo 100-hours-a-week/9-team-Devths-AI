@@ -58,7 +58,9 @@ def plt_imshow(title="image", img=None, figsize=(8, 5)):
         plt.show()
 
 
-def make_scan_image(image, width, ksize=(5, 5), min_threshold=75, max_threshold=200, org_image=None):
+def make_scan_image(
+    image, width, ksize=(5, 5), min_threshold=75, max_threshold=200, org_image=None
+):
     """
     NOTE: 이 함수는 테스트/예제 코드에서 사용됩니다.
     실제 서비스(PIIMaskingService)에서는 사용하지 않습니다.
