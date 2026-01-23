@@ -8,8 +8,36 @@ env:
   PYTHON_VERSION: '3.10'
 
 jobs:
+  # 0. main 브랜치 PR 가드
+  main-branch-guard:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: main PR 브랜치 검증
+        run: |
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+
+          echo "📌 대상 브랜치: $BASE"
+          echo "📌 소스 브랜치: $HEAD"
+
+          # main이 아닐 땐 통과
+          if [ "$BASE" != "main" ]; then
+            echo "✅ 브랜치 정책 통과 (main 아님)"
+            exit 0
+          fi
+
+          # main일 때 허용 브랜치: release, hotfix/*
+          if [[ "$HEAD" =~ ^release$ || "$HEAD" =~ ^hotfix\/.+$ ]]; then
+            echo "✅ 브랜치 정책 통과 (허용된 소스 브랜치)"
+            exit 0
+          fi
+
+          echo "❌ 정책 위반: main에는 release 또는 hotfix/* 브랜치만 PR 가능"
+          exit 1
+
   # 1. 코드 품질 검사 (Ruff)
   lint:
+    needs: [main-branch-guard]
     runs-on: ubuntu-22.04
     steps:
       - name: 체크아웃
@@ -44,6 +72,7 @@ jobs:
 
   # 2. 정적 분석 (CodeQL)
   static-analysis:
+    needs: [main-branch-guard]
     runs-on: ubuntu-22.04
     permissions:
       actions: read
@@ -128,8 +157,9 @@ jobs:
 
   # 4. 디스코드 통합 알림
   notify-discord:
+    name: notify
     runs-on: ubuntu-22.04
-    needs: [lint, static-analysis, validate]
+    needs: [main-branch-guard, lint, static-analysis, validate]
     if: always()
     steps:
       - name: 데이터 준비
@@ -137,26 +167,39 @@ jobs:
         env:
           USER_MAP: ${{ secrets.USER_MAP_JSON }}
         run: |
-          # 1. 작성자 멘션화
+          # 브랜치 가드 재평가 (main은 release/hotfix/*만 허용)
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+          if [ "$BASE" == "main" ] && [[ ! "$HEAD" =~ ^release$ && ! "$HEAD" =~ ^hotfix\/.+$ ]]; then
+            GUARD_ALLOWED=false
+            GUARD_REASON="main에는 release 또는 hotfix/* 브랜치만 PR 가능"
+          else
+            GUARD_ALLOWED=true
+            GUARD_REASON="정책 통과"
+          fi
+
+          echo "branch_guard_allowed=$GUARD_ALLOWED" >> $GITHUB_OUTPUT
+          echo "branch_guard_reason=$GUARD_REASON" >> $GITHUB_OUTPUT
+
+          # 1. 작성자 매핑
           LOGIN_ID="${{ github.event.pull_request.user.login }}"
-          AUTHOR_RAW=$(echo "$USER_MAP" | jq -r --arg id "$LOGIN_ID" '.[$id] // $id')
-          [[ $AUTHOR_RAW =~ (<@[^>]+>) ]] && AUTHOR_TAG="${BASH_REMATCH[1]}" || AUTHOR_TAG="$AUTHOR_RAW"
+          AUTHOR_TAG=$(echo "$USER_MAP" | jq -r --arg id "$LOGIN_ID" '.[$id] // $id')
           echo "author=$AUTHOR_TAG" >> $GITHUB_OUTPUT
 
-          # 2. 리뷰어 멘션화
+          # 2. 리뷰어 매핑
           REVIEWERS_JSON='${{ toJson(github.event.pull_request.requested_reviewers) }}'
           REVIEWER_TAGS=$(echo "$REVIEWERS_JSON" | jq -r --argjson map "$USER_MAP" '
-            [.[].login | ($map[.] // .)]
-            | map(if test("<@[^>]+>") then sub(".*(?=<@)"; "") | sub("(?<=>).*"; "") else . end)
-            | join(", ")
+            [.[].login | ($map[.] // .)] | join(", ")
           ')
           echo "reviewers=${REVIEWER_TAGS:-없음}" >> $GITHUB_OUTPUT
 
-          # 3. 작업 내용 요약 (정규식 수정 완료)
+          # 3. 작업 내용 
           PR_RAW_BODY=$(cat << 'EOF'
           ${{ github.event.pull_request.body }}
           EOF
           )
+
+          # 필요없는 문구 삭제
           DESC=$(echo "$PR_RAW_BODY" | \
             perl -0777 -pe 's///gs' | \
             sed 's/이 PR에서 변경된 내용을 간략히 작성해주세요\.//g' | \
@@ -166,25 +209,29 @@ jobs:
             head -c 300)
           echo "description=${DESC:-내용 없음}" >> $GITHUB_OUTPUT
 
-      - name: Discord 알림 전송
+      - name: Discord 빌드 알림
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 'success' || 'failure' }}
+          status: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success' && 'success' || 'failure' }}
           title: "${{ github.event.pull_request.base.ref }} AI PR [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && '✅성공' || '❌실패' }}]"
           description: |
             **PR 제목**: ${{ github.event.pull_request.title }}
+            **브랜치 가드**: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && '✅ 통과' || '❌ 차단' }} (이유: ${{ steps.prep.outputs.branch_guard_reason }})
             **작성자**: ${{ steps.prep.outputs.author }}
             **리뷰어**: ${{ steps.prep.outputs.reviewers }}
-            **작업 내용**: ${{ steps.prep.outputs.description }}
+            **작업 내용**: ${{ steps.prep.outputs.description }}...
             **경로**: `${{ github.event.pull_request.head.ref }}` → `${{ github.event.pull_request.base.ref }}`
 
             **📊 상세 결과**:
-            - Lint/Format: ${{ needs.lint.result == 'success' && ' ✅' || ' ❌' }}
-            - Static Analysis: ${{ needs.static-analysis.result == 'success' && ' ✅' || ' ❌' }}
-            - Validation: ${{ needs.validate.result == 'success' && ' ✅' || ' ❌' }}
+            - Branch Guard: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && ' ✅' || ' ❌' }}
+            - Lint: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && (needs.lint.result == 'success' && '✅' || '❌') || ' ⚪️ (브랜치 가드 차단)' }}
+            - Static Analysis: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && (needs.static-analysis.result == 'success' && '✅' || '❌') || ' ⚪️ (브랜치 가드 차단)' }}
+            - Validation: ${{ steps.prep.outputs.branch_guard_allowed == 'true' && (needs.validate.result == 'success' && '✅' || '❌') || ' ⚪️ (브랜치 가드 차단)' }}
+
+            ${{ needs.static-analysis.result != 'success' && '⚠️ **정적 분석 실패로 인해 파이프라인이 중단되었습니다.**' || '' }}
 
             **🔗 링크**: [PR 확인하기](${{ github.event.pull_request.html_url }})
-          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 65280 || 16711680 }}"
-          username: GitHub AI Bot
+          color: "${{ steps.prep.outputs.branch_guard_allowed == 'true' && needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success' && 65280 || 16711680 }}"
+          username: GitHub PR Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
