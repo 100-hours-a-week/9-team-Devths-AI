@@ -8,8 +8,6 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-logger = logging.getLogger(__name__)
-
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
     AnalysisResult,
@@ -27,6 +25,8 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/ai",
@@ -578,9 +578,9 @@ async def chat(request: ChatRequest):
     description="""
     캘린더 모달에서 파일/텍스트를 분석하여 일정 정보를 추출합니다 (폼 자동 채우기용).
 
-    **처리 방식:** 동기 - 간단한 파싱 작업
+    **처리 방식:** 동기 - Gemini Flash API 사용
 
-    **Pydantic AI 사용:** CalendarParseResult
+    **Gemini API 사용:** 채용공고 이미지/텍스트에서 정보 추출
 
     **사용 시나리오:**
     - 모달에서 채용공고 파일/텍스트 첨부 → 일정 정보 추출
@@ -600,18 +600,37 @@ async def calendar_parse(request: CalendarParseRequest):
             },
         )
 
-    # Pydantic AI로 구조화된 결과 반환
-    return CalendarParseResponse(
-        success=True,
-        company="카카오",
-        position="백엔드 개발자",
-        schedules=[
-            {"stage": "서류 마감", "date": "2026-01-15", "time": None},
-            {"stage": "코딩테스트", "date": "2026-01-20", "time": "14:00"},
-            {"stage": "1차 면접", "date": "2026-01-25", "time": None},
-        ],
-        hashtags=["#카카오", "#백엔드", "#신입"],
-    )
+    try:
+        # CalendarParsingService 사용하여 실제 파싱
+        from app.services.calendar_parsing import CalendarParsingService
+
+        parsing_service = CalendarParsingService()
+        result = await parsing_service.parse_job_posting(
+            file_url=str(request.file_url) if request.file_url else None,
+            text=request.text,
+        )
+
+        # Gemini API 결과를 CalendarParseResponse로 변환
+        return CalendarParseResponse(
+            success=True,
+            company=result.company,
+            position=result.position,
+            schedules=[
+                {"stage": schedule.stage, "date": schedule.date, "time": schedule.time}
+                for schedule in result.schedules
+            ],
+            hashtags=result.hashtags,
+        )
+
+    except Exception as e:
+        logger.error(f"Calendar parsing failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": ErrorCode.PARSE_ERROR,
+                "message": f"채용공고 파싱 실패: {str(e)}",
+            },
+        ) from e
 
 
 # ============================================================================

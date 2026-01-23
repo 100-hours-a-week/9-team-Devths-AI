@@ -4,6 +4,7 @@ LLM Service using Gemini Flash API
 Provides chat functionality and OCR using Google's Gemini 1.5 Flash model.
 """
 
+import contextlib
 import io
 import logging
 import os
@@ -166,15 +167,13 @@ class LLMService:
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             if trace is not None:
-                try:
+                with contextlib.suppress(Exception):
                     trace["client"].create_event(
                         trace_context={"trace_id": trace["trace_id"]},
                         name="error",
                         level="ERROR",
                         metadata={"error": str(e)},
                     )
-                except Exception:
-                    pass
             yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
     async def generate_analysis(
@@ -511,7 +510,7 @@ JSON 형식으로 질문을 제공해주세요:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
+                raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL
         async with httpx.AsyncClient() as client:
@@ -553,8 +552,8 @@ JSON 형식으로 질문을 제공해주세요:
 
             # Create prompt for OCR
             prompt = types.Part.from_text(
-                text="""Extract all text from this image. 
-                
+                text="""Extract all text from this image.
+
 Return the text exactly as it appears, preserving the layout and structure.
 Include all visible text including names, addresses, phone numbers, emails, dates, and any other information.
 

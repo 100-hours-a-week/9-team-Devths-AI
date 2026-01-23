@@ -17,6 +17,7 @@ class ErrorCode(str, Enum):
     VECTORDB_ERROR = "VECTORDB_ERROR"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     MASKING_ERROR = "MASKING_ERROR"
+    PARSE_ERROR = "PARSE_ERROR"
 
 
 class ErrorDetail(BaseModel):

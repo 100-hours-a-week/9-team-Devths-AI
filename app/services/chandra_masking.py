@@ -96,7 +96,7 @@ class ChandraPIIMaskingService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
+                raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL 처리
         async with httpx.AsyncClient() as client:

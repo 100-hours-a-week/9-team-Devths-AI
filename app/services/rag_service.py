@@ -42,7 +42,7 @@ class RAGService:
         logger.info("RAG Service initialized")
 
     async def retrieve_all_documents(
-        self, user_id: str, context_types: list[str] = ["resume", "job_posting"]
+        self, user_id: str, context_types: list[str] = None
     ) -> str:
         """
         Retrieve ALL documents for a user (for analysis mode)
@@ -54,6 +54,8 @@ class RAGService:
         Returns:
             Formatted context string with all documents (truncated if needed)
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -108,7 +110,7 @@ class RAGService:
         self,
         query: str,
         user_id: str,
-        context_types: list[str] = ["resume", "job_posting"],
+        context_types: list[str] = None,
         n_results: int = 3,
     ) -> str:
         """
@@ -123,6 +125,8 @@ class RAGService:
         Returns:
             Formatted context string
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -167,7 +171,7 @@ class RAGService:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_rag: bool = True,
-        context_types: list[str] = ["resume", "job_posting"],
+        context_types: list[str] = None,
         model: str = "gemini",
         n_results: int = 1,  # 기본값을 1로 설정하여 속도 개선
     ) -> AsyncIterator[str]:
@@ -185,6 +189,8 @@ class RAGService:
         Yields:
             Response chunks
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             context = None
 
