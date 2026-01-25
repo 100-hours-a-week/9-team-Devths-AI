@@ -156,7 +156,7 @@ jobs:
         id: package
         run: |
           echo "📦 Creating deployment package..."
-          ARTIFACT_NAME="devths-ai-${{ steps.timestamp.outputs.value }}.zip"
+          ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
           mkdir -p deploy-package
 
           # 필요한 파일들 복사
@@ -275,7 +275,7 @@ jobs:
   notify-discord-cd:
     runs-on: ubuntu-22.04
     needs: [deploy]
-    if: always() && needs.deploy.result != 'skipped'
+    if: always() && needs.deploy.result != 'skipped' && (github.ref_name == 'develop' || github.ref_name == 'release')
     steps:
       - name: 데이터 준비
         id: prep
