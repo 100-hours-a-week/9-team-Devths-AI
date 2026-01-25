@@ -167,6 +167,16 @@ jobs:
           cp appspec.yml deploy-package/
           cp .env.example deploy-package/
 
+          # 브랜치 정보를 포함한 배포 환경 파일 생성
+          cat > deploy-package/.deploy-env << EOF
+          DEPLOY_BRANCH=${{ github.ref_name }}
+          DEPLOY_TIMESTAMP=${{ steps.timestamp.outputs.value }}
+          DEPLOY_SHA=${{ github.sha }}
+          EOF
+
+          echo "✅ Deploy environment file created"
+          cat deploy-package/.deploy-env
+
           # ZIP 압축
           cd deploy-package
           zip -r ../$ARTIFACT_NAME .

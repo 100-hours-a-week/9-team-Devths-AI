@@ -16,9 +16,33 @@ cd "$APP_DIR"
 
 echo "📥 Loading environment variables..."
 
-# Parameter Store 경로 설정 (환경에 따라 변경 가능)
-# develop 브랜치 -> /Dev/AI/, release 브랜치 -> /Stg/AI/, main 브랜치 -> /Prod/AI/
-export PARAMETER_STORE_PATH="${PARAMETER_STORE_PATH:-/Prod/AI/}"
+# .deploy-env 파일에서 브랜치 정보 읽기
+if [ -f "$APP_DIR/.deploy-env" ]; then
+    source "$APP_DIR/.deploy-env"
+    echo "📋 Deploy info: branch=$DEPLOY_BRANCH, timestamp=$DEPLOY_TIMESTAMP"
+
+    # 브랜치에 따라 Parameter Store 경로 설정
+    case "$DEPLOY_BRANCH" in
+        develop)
+            export PARAMETER_STORE_PATH="/Dev/AI/"
+            ;;
+        release)
+            export PARAMETER_STORE_PATH="/Stg/AI/"
+            ;;
+        main)
+            export PARAMETER_STORE_PATH="/Prod/AI/"
+            ;;
+        *)
+            echo "⚠️  Unknown branch: $DEPLOY_BRANCH, using default /Prod/AI/"
+            export PARAMETER_STORE_PATH="/Prod/AI/"
+            ;;
+    esac
+else
+    echo "⚠️  .deploy-env file not found, using default /Prod/AI/"
+    export PARAMETER_STORE_PATH="${PARAMETER_STORE_PATH:-/Prod/AI/}"
+fi
+
+echo "📍 Parameter Store Path: $PARAMETER_STORE_PATH"
 
 # 환경변수 로드 스크립트 실행
 if [ -f "$APP_DIR/deploy/load_env_from_parameter_store.sh" ]; then
