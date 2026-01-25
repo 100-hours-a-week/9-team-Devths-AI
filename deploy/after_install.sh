@@ -7,9 +7,24 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 APP_DIR="/home/ubuntu/ai"
 cd "$APP_DIR"
 
-# 1. Python 버전 확인
+# 1. Python 버전 확인 및 pyenv 설정
 echo "🐍 Checking Python version..."
+
+# pyenv 경로 설정 (존재하는 경우)
+if [ -d "/home/ubuntu/.local/share/pyenv" ]; then
+    export PYENV_ROOT="/home/ubuntu/.local/share/pyenv"
+    export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
+    echo "✅ pyenv found, adding to PATH"
+
+    # pyenv 초기화
+    if command -v pyenv &> /dev/null; then
+        eval "$(pyenv init -)"
+        echo "✅ pyenv initialized"
+    fi
+fi
+
 python3 --version
+PYTHON_PATH=$(which python3)
 
 # 2. Poetry 설치 확인 및 설치
 if ! command -v poetry &> /dev/null; then
@@ -32,7 +47,27 @@ poetry --version
 echo "⚙️  Configuring Poetry..."
 poetry config virtualenvs.in-project true
 
-# 4. 의존성 설치 (production 환경이므로 dev 제외)
+# 4. Poetry에 Python 버전 명시적으로 지정
+echo "🔧 Setting Python version for Poetry..."
+echo "📍 Using Python: $PYTHON_PATH"
+poetry env use "$PYTHON_PATH"
+
+# 5. Lock 파일 업데이트 (Python 버전 호환성 보장)
+echo "🔄 Updating poetry.lock for current Python version..."
+if [ -f "pyproject.toml" ]; then
+    # Python 버전 호환성을 위해 lock 파일만 업데이트 (의존성 버전은 유지)
+    poetry lock --no-update --no-interaction --no-ansi
+    if [ $? -eq 0 ]; then
+        echo "✅ poetry.lock updated successfully"
+    else
+        echo "⚠️  Failed to update poetry.lock, attempting install anyway..."
+    fi
+else
+    echo "❌ pyproject.toml not found!"
+    exit 1
+fi
+
+# 6. 의존성 설치 (production 환경이므로 dev 제외)
 echo "📚 Installing Python dependencies..."
 if [ -f "pyproject.toml" ] && [ -f "poetry.lock" ]; then
     poetry install --only main --no-interaction --no-ansi
@@ -42,12 +77,12 @@ else
     exit 1
 fi
 
-# 5. 파일 권한 설정
+# 7. 파일 권한 설정
 echo "🔐 Setting file permissions..."
 chown -R ubuntu:ubuntu "$APP_DIR"
 chmod +x "$APP_DIR/deploy/"*.sh
 
-# 6. Import 검증
+# 8. Import 검증
 echo "🧪 Validating Python imports..."
 if poetry run python -c "import app.main; print('✅ Main app imports successfully')" 2>/dev/null; then
     echo "✅ Import validation passed"
