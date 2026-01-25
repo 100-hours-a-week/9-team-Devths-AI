@@ -8,7 +8,7 @@ APP_DIR="/home/ubuntu/ai"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/fastapi-app.log"
 
-cd "$APP_DIR"
+cd "$APP_DIR" || exit 1
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 1. 환경변수 로드 (AWS Parameter Store)
@@ -16,29 +16,60 @@ cd "$APP_DIR"
 
 echo "📥 Loading environment variables..."
 
-# .deploy-env 파일에서 브랜치 정보 읽기
+# .deploy-env 파일에서 배포 정보 읽기
 if [ -f "$APP_DIR/.deploy-env" ]; then
+    echo "📄 Found .deploy-env file, loading deployment info..."
     source "$APP_DIR/.deploy-env"
-    echo "📋 Deploy info: branch=$DEPLOY_BRANCH, timestamp=$DEPLOY_TIMESTAMP"
+    echo "📋 Deploy info: group=$CODEDEPLOY_DEPLOYMENT_GROUP, branch=$DEPLOY_BRANCH, timestamp=$DEPLOY_TIMESTAMP, sha=${DEPLOY_SHA:0:7}"
 
-    # 브랜치에 따라 Parameter Store 경로 설정
-    case "$DEPLOY_BRANCH" in
-        develop)
+    # 1순위: CodeDeploy Deployment Group에 따라 Parameter Store 경로 설정
+    if [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
+        DEPLOYMENT_GROUP_LOWER=$(echo "$CODEDEPLOY_DEPLOYMENT_GROUP" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
             export PARAMETER_STORE_PATH="/Dev/AI/"
-            ;;
-        release)
+            echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"stg"* ]] || [[ "$DEPLOYMENT_GROUP_LOWER" == *"staging"* ]]; then
             export PARAMETER_STORE_PATH="/Stg/AI/"
-            ;;
-        main)
+            echo "🧪 Environment: Staging (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
             export PARAMETER_STORE_PATH="/Prod/AI/"
-            ;;
-        *)
-            echo "⚠️  Unknown branch: $DEPLOY_BRANCH, using default /Prod/AI/"
-            export PARAMETER_STORE_PATH="/Prod/AI/"
-            ;;
-    esac
+            echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        else
+            echo "⚠️  Unknown deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP"
+        fi
+    fi
+
+    # 2순위: Deployment Group 매칭 실패 시 브랜치 기반 Fallback
+    if [ -z "$PARAMETER_STORE_PATH" ] && [ -n "$DEPLOY_BRANCH" ]; then
+        echo "💡 Falling back to branch-based detection..."
+        case "$DEPLOY_BRANCH" in
+            develop)
+                export PARAMETER_STORE_PATH="/Dev/AI/"
+                echo "🛠️  Environment: Development (from branch: $DEPLOY_BRANCH)"
+                ;;
+            release)
+                export PARAMETER_STORE_PATH="/Stg/AI/"
+                echo "🧪 Environment: Staging (from branch: $DEPLOY_BRANCH)"
+                ;;
+            main)
+                export PARAMETER_STORE_PATH="/Prod/AI/"
+                echo "🚀 Environment: Production (from branch: $DEPLOY_BRANCH)"
+                ;;
+            *)
+                echo "⚠️  Unknown branch: $DEPLOY_BRANCH"
+                ;;
+        esac
+    fi
+
+    # 3순위: 여전히 결정되지 않았으면 기본값 사용
+    if [ -z "$PARAMETER_STORE_PATH" ]; then
+        echo "⚠️  Could not determine environment, using default /Prod/AI/"
+        export PARAMETER_STORE_PATH="/Prod/AI/"
+    fi
 else
-    echo "⚠️  .deploy-env file not found, using default /Prod/AI/"
+    echo "⚠️  .deploy-env file not found at $APP_DIR/.deploy-env"
+    echo "💡 Using default Parameter Store path: /Prod/AI/"
     export PARAMETER_STORE_PATH="${PARAMETER_STORE_PATH:-/Prod/AI/}"
 fi
 
@@ -66,9 +97,21 @@ else
 fi
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 2. Poetry 경로 설정
+# 2. Python 및 Poetry 경로 설정
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# pyenv 경로 설정 (존재하는 경우)
+if [ -d "/home/ubuntu/.local/share/pyenv" ]; then
+    export PYENV_ROOT="/home/ubuntu/.local/share/pyenv"
+    export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"
+
+    # pyenv 초기화
+    if command -v pyenv &> /dev/null; then
+        eval "$(pyenv init -)"
+    fi
+fi
+
+# Poetry 경로 추가
 export PATH="/home/ubuntu/.local/bin:$PATH"
 
 # Poetry 설치 확인
@@ -78,6 +121,7 @@ if ! command -v poetry &> /dev/null; then
 fi
 
 echo "✅ Poetry version: $(poetry --version)"
+echo "✅ Python version: $(python3 --version)"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 3. 로그 파일 초기화
