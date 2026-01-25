@@ -9,13 +9,24 @@ APP_DIR="/home/ubuntu/ai"
 # 1. 이전 배포 백업 (옵션)
 BACKUP_BASE_DIR="$APP_DIR/backups"
 if [ -d "$APP_DIR" ]; then
-    BACKUP_DIR="$BACKUP_BASE_DIR/ai-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_DIR="$BACKUP_BASE_DIR/$(date +%Y%m%d-%H%M%S)"
     echo "📦 Backing up existing deployment to $BACKUP_DIR"
-    mkdir -p "$BACKUP_BASE_DIR"
-    cp -r "$APP_DIR" "$BACKUP_DIR" || true
+    mkdir -p "$BACKUP_DIR"
+
+    # rsync로 백업 (backups, logs, .venv 제외하여 재귀 복사 방지)
+    rsync -a \
+        --exclude='backups' \
+        --exclude='logs' \
+        --exclude='.venv' \
+        --exclude='__pycache__' \
+        --exclude='*.pyc' \
+        "$APP_DIR/" "$BACKUP_DIR/" 2>/dev/null || true
+
+    echo "✅ Backup completed"
 
     # 오래된 백업 삭제 (7일 이상)
-    find "$BACKUP_BASE_DIR" -name "ai-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+    echo "🗑️  Cleaning old backups (older than 7 days)..."
+    find "$BACKUP_BASE_DIR" -maxdepth 1 -type d -mtime +7 ! -name "backups" -exec rm -rf {} + 2>/dev/null || true
 fi
 
 # 2. 임시 파일 정리
