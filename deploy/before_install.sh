@@ -7,14 +7,15 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 APP_DIR="/home/ubuntu/ai"
 
 # 1. 이전 배포 백업 (옵션)
+BACKUP_BASE_DIR="$APP_DIR/backups"
 if [ -d "$APP_DIR" ]; then
-    BACKUP_DIR="/home/ubuntu/backups/ai-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_DIR="$BACKUP_BASE_DIR/ai-$(date +%Y%m%d-%H%M%S)"
     echo "📦 Backing up existing deployment to $BACKUP_DIR"
-    mkdir -p /home/ubuntu/backups
+    mkdir -p "$BACKUP_BASE_DIR"
     cp -r "$APP_DIR" "$BACKUP_DIR" || true
 
     # 오래된 백업 삭제 (7일 이상)
-    find /home/ubuntu/backups -name "ai-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+    find "$BACKUP_BASE_DIR" -name "ai-*" -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 fi
 
 # 2. 임시 파일 정리
