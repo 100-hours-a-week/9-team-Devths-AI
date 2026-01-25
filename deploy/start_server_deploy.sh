@@ -22,20 +22,49 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
     source "$APP_DIR/.deploy-env"
     echo "📋 Deploy info: group=$CODEDEPLOY_DEPLOYMENT_GROUP, branch=$DEPLOY_BRANCH, timestamp=$DEPLOY_TIMESTAMP, sha=${DEPLOY_SHA:0:7}"
 
-    # CodeDeploy Deployment Group에 따라 Parameter Store 경로 설정
-    DEPLOYMENT_GROUP_LOWER=$(echo "$CODEDEPLOY_DEPLOYMENT_GROUP" | tr '[:upper:]' '[:lower:]')
+    # 1순위: CodeDeploy Deployment Group에 따라 Parameter Store 경로 설정
+    if [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
+        DEPLOYMENT_GROUP_LOWER=$(echo "$CODEDEPLOY_DEPLOYMENT_GROUP" | tr '[:upper:]' '[:lower:]')
 
-    if [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
-        export PARAMETER_STORE_PATH="/Dev/AI/"
-        echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
-    elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"stg"* ]] || [[ "$DEPLOYMENT_GROUP_LOWER" == *"staging"* ]]; then
-        export PARAMETER_STORE_PATH="/Stg/AI/"
-        echo "🧪 Environment: Staging (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
-    elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
-        export PARAMETER_STORE_PATH="/Prod/AI/"
-        echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
-    else
-        echo "⚠️  Unknown deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP, using default /Prod/AI/"
+        if [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
+            export PARAMETER_STORE_PATH="/Dev/AI/"
+            echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"stg"* ]] || [[ "$DEPLOYMENT_GROUP_LOWER" == *"staging"* ]]; then
+            export PARAMETER_STORE_PATH="/Stg/AI/"
+            echo "🧪 Environment: Staging (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
+            export PARAMETER_STORE_PATH="/Prod/AI/"
+            echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        else
+            echo "⚠️  Unknown deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP"
+        fi
+    fi
+
+    # 2순위: Deployment Group 매칭 실패 시 브랜치 기반 Fallback
+    if [ -z "$PARAMETER_STORE_PATH" ] && [ -n "$DEPLOY_BRANCH" ]; then
+        echo "💡 Falling back to branch-based detection..."
+        case "$DEPLOY_BRANCH" in
+            develop)
+                export PARAMETER_STORE_PATH="/Dev/AI/"
+                echo "🛠️  Environment: Development (from branch: $DEPLOY_BRANCH)"
+                ;;
+            release)
+                export PARAMETER_STORE_PATH="/Stg/AI/"
+                echo "🧪 Environment: Staging (from branch: $DEPLOY_BRANCH)"
+                ;;
+            main)
+                export PARAMETER_STORE_PATH="/Prod/AI/"
+                echo "🚀 Environment: Production (from branch: $DEPLOY_BRANCH)"
+                ;;
+            *)
+                echo "⚠️  Unknown branch: $DEPLOY_BRANCH"
+                ;;
+        esac
+    fi
+
+    # 3순위: 여전히 결정되지 않았으면 기본값 사용
+    if [ -z "$PARAMETER_STORE_PATH" ]; then
+        echo "⚠️  Could not determine environment, using default /Prod/AI/"
         export PARAMETER_STORE_PATH="/Prod/AI/"
     fi
 else
