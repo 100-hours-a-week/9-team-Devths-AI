@@ -1,4 +1,4 @@
-name: Devths-AI CI 파이프라인
+name: Devths-AI CICD 파이프라인
 
 on:
   push:
@@ -70,7 +70,6 @@ jobs:
           sleep 10
 
           # 1. 현재 이벤트가 push인지 pr인지에 따라 검색할 REF 설정
-          # GITHUB_REF는 push일 땐 refs/heads/branch명, PR일 땐 refs/pull/번호/merge가 됩니다.
           CURRENT_REF="${{ github.ref }}"
           echo "📍 현재 Ref: $CURRENT_REF"
 
@@ -125,8 +124,120 @@ jobs:
         run: |
           poetry run python -c "import app.main; print('✅ Main app imports successfully')"
 
-  # 4. 디스코드 통합 알림
-  notify-discord:
+  # 4. 배포 패키지 생성 및 CodeDeploy (develop, release만 자동 배포)
+  deploy:
+    name: deploy
+    runs-on: ubuntu-22.04
+    needs: [validate]
+    if: github.ref_name == 'develop' || github.ref_name == 'release'
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: |
+          echo "📦 Creating deployment package..."
+          mkdir -p deploy-package
+
+          # 필요한 파일들 복사
+          cp -r app/ deploy-package/
+          cp -r deploy/ deploy-package/
+          cp pyproject.toml deploy-package/
+          cp poetry.lock deploy-package/
+          cp appspec.yml deploy-package/
+          cp .env.example deploy-package/
+
+          # ZIP 압축
+          cd deploy-package
+          zip -r ../devths-ai-${{ github.sha }}.zip .
+          cd ..
+
+          echo "✅ Package created: devths-ai-${{ github.sha }}.zip"
+          ls -lh devths-ai-${{ github.sha }}.zip
+
+      - name: AWS 자격증명 설정
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: S3에 업로드
+        run: |
+          echo "☁️ Uploading to S3..."
+          aws s3 cp devths-ai-${{ github.sha }}.zip \
+            s3://${{ secrets.S3_BUCKET_NAME }}/devths-ai/${{ github.ref_name }}/devths-ai-${{ github.sha }}.zip
+          echo "✅ Upload complete"
+
+      - name: CodeDeploy 배포 시작
+        id: deploy
+        run: |
+          echo "🚀 Starting CodeDeploy deployment..."
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ secrets.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name ${{ secrets.CODEDEPLOY_GROUP_NAME }} \
+            --s3-location bucket=${{ secrets.S3_BUCKET_NAME }},key=devths-ai/${{ github.ref_name }}/devths-ai-${{ github.sha }}.zip,bundleType=zip \
+            --description "Deploy from GitHub Actions - ${{ github.ref_name }} branch" \
+            --query 'deploymentId' \
+            --output text)
+          
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Deployment started: $DEPLOYMENT_ID"
+          
+          # 배포 상태 모니터링
+          echo "⏳ Waiting for deployment to complete..."
+          aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID
+          echo "✅ Deployment completed successfully!"
+
+  # 5. Main 브랜치용 - S3 업로드만 (수동 배포용)
+  package-for-manual-deploy:
+    name: package-for-manual-deploy
+    runs-on: ubuntu-22.04
+    needs: [validate]
+    if: github.ref_name == 'main'
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 배포 패키지 생성
+        run: |
+          echo "📦 Creating deployment package for manual deploy..."
+          mkdir -p deploy-package
+
+          # 필요한 파일들 복사
+          cp -r app/ deploy-package/
+          cp -r deploy/ deploy-package/
+          cp pyproject.toml deploy-package/
+          cp poetry.lock deploy-package/
+          cp appspec.yml deploy-package/
+          cp .env.example deploy-package/
+
+          # ZIP 압축
+          cd deploy-package
+          zip -r ../devths-ai-${{ github.sha }}.zip .
+          cd ..
+
+          echo "✅ Package created: devths-ai-${{ github.sha }}.zip"
+          ls -lh devths-ai-${{ github.sha }}.zip
+
+      - name: AWS 자격증명 설정
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: S3에 업로드 (수동 배포용)
+        run: |
+          echo "☁️ Uploading to S3 for manual deployment..."
+          aws s3 cp devths-ai-${{ github.sha }}.zip \
+            s3://${{ secrets.S3_BUCKET_NAME }}/devths-ai/${{ github.ref_name }}/devths-ai-${{ github.sha }}.zip
+          echo "✅ Upload complete - Ready for manual deployment"
+          echo "📝 To deploy manually, use:"
+          echo "   Deployment package: s3://${{ secrets.S3_BUCKET_NAME }}/devths-ai/${{ github.ref_name }}/devths-ai-${{ github.sha }}.zip"
+
+  # 6. 디스코드 통합 알림 - CI
+  notify-discord-ci:
     runs-on: ubuntu-22.04
     needs: [lint, static-analysis, validate]
     if: always()
@@ -143,12 +254,12 @@ jobs:
           # 2. 브랜치 정보
           echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      - name: Discord 알림 전송
+      - name: Discord 알림 전송 (CI)
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ github.ref_name == 'main' && secrets.DISCORD_WEBHOOK_PROD_URL || secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
           status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 'success' || 'failure' }}
-          title: "${{ steps.prep.outputs.branch }} 결과 [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && '✅성공' || '❌실패' }}]"
+          title: "${{ steps.prep.outputs.branch }} CI 결과 [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && '✅성공' || '❌실패' }}]"
           description: |
             **커밋 메시지**: ${{ steps.prep.outputs.title }}
             **브랜치**: `${{ steps.prep.outputs.branch }}`
@@ -161,5 +272,47 @@ jobs:
             **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
 
           color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 65280 || 16711680 }}"
-          username: GitHub AI Merge Bot
+          username: GitHub AI CI Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+
+  # 7. 디스코드 통합 알림 - CD
+  notify-discord-cd:
+    runs-on: ubuntu-22.04
+    needs: [deploy, package-for-manual-deploy]
+    if: always() && (needs.deploy.result != 'skipped' || needs.package-for-manual-deploy.result != 'skipped')
+    steps:
+      - name: 데이터 준비
+        id: prep
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1)
+          echo "title=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          
+          # 배포 타입 결정
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "deploy_type=Manual Deploy Package" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_type=Auto Deploy" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Discord 알림 전송 (CD)
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ github.ref_name == 'main' && secrets.DISCORD_WEBHOOK_PROD_URL || secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
+          status: ${{ (needs.deploy.result == 'success' || needs.package-for-manual-deploy.result == 'success') && 'success' || 'failure' }}
+          title: "${{ steps.prep.outputs.branch }} 배포 [${{ (needs.deploy.result == 'success' || needs.package-for-manual-deploy.result == 'success') && '✅성공' || '❌실패' }}]"
+          description: |
+            **커밋 메시지**: ${{ steps.prep.outputs.title }}
+            **브랜치**: `${{ steps.prep.outputs.branch }}`
+            **배포 타입**: ${{ steps.prep.outputs.deploy_type }}
+
+            **📊 상세 결과**:
+            ${{ github.ref_name == 'main' && '- S3 Upload: ' || '- CodeDeploy: ' }}${{ (needs.deploy.result == 'success' || needs.package-for-manual-deploy.result == 'success') && ' ✅' || ' ❌' }}
+            
+            ${{ github.ref_name == 'main' && '**📝 수동 배포 필요**: AWS Console에서 CodeDeploy를 수동으로 실행하세요.' || '**🚀 자동 배포 완료**: 서비스가 업데이트되었습니다.' }}
+
+            **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+
+          color: "${{ (needs.deploy.result == 'success' || needs.package-for-manual-deploy.result == 'success') && 65280 || 16711680 }}"
+          username: GitHub AI CD Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
