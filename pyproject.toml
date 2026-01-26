@@ -8,6 +8,10 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = "~3.10.19"
+
+# ============================================
+# Core Dependencies (서빙 전용 - 최소 필수)
+# ============================================
 # FastAPI and server
 fastapi = "^0.109.0"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
@@ -28,35 +32,47 @@ Pillow = "^10.2.0"
 pdf2image = "^1.17.0"
 pdfplumber = "^0.11.0"
 
+# Environment variables
+python-dotenv = "^1.0.0"
+
+# Numpy (lightweight, commonly needed)
+numpy = ">=1.24.0,<2.0.0"
+
+# ============================================
+# ML Dependencies (선택적 - 모델 추론/학습용)
+# poetry install --with ml 로 설치
+# ============================================
+[tool.poetry.group.ml]
+optional = true
+
+[tool.poetry.group.ml.dependencies]
 # OCR
 easyocr = "^1.7.0"
 pytesseract = "^0.3.10"
 
-# Google Gemini API (required for face detection)
+# Google Gemini API (face detection)
 google-genai = "*"
 
-# OpenCV for face detection (fallback)
+# OpenCV for face detection
 opencv-python = "^4.8.0"
 
-# Microsoft Presidio (for text PII detection)
+# Microsoft Presidio (PII detection)
 presidio-analyzer = "*"
 presidio-image-redactor = "*"
 spacy = "^3.0.0"
 
-# Chandra OCR model (datalab-to/chandra)
+# Chandra OCR model
 transformers = "^4.30.0"
 torch = "^2.0.0"
 chandra-ocr = {git = "https://github.com/datalab-to/chandra.git"}
 
-# RAG and VectorDB (required for chatbot)
+# RAG and VectorDB
 chromadb = "^0.4.24"
-numpy = ">=1.24.0,<2.0.0"  # ChromaDB 0.4.24 requires NumPy 1.x
 
 # Hugging Face datasets
 datasets = "^2.14.0"
 
-# Environment variables
-python-dotenv = "^1.0.0"
+# LLM Observability
 langfuse = "^3.12.0"
 openai = "^2.15.0"
 
