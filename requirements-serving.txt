@@ -36,3 +36,6 @@ google-genai
 # LLM Observability (서빙에 필수)
 langfuse>=3.12.0
 openai>=2.15.0
+
+# RAG and VectorDB (서빙에 필수)
+chromadb==0.4.24

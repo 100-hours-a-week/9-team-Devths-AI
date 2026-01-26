@@ -21,8 +21,5 @@ transformers>=4.30.0
 torch>=2.0.0
 git+https://github.com/datalab-to/chandra.git
 
-# RAG and VectorDB
-chromadb==0.4.24
-
 # Hugging Face datasets
 datasets>=2.14.0
