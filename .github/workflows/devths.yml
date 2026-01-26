@@ -1,0 +1,316 @@
+name: Devths-AI CICD 파이프라인
+
+on:
+  push:
+    branches: [develop, release, main]
+
+env:
+  PYTHON_VERSION: '3.10'
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+  S3_PREFIX: AI/${{ github.ref_name }}
+  CODEDEPLOY_APP_NAME: ${{ secrets.CODEDEPLOY_APP_NAME }}
+  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ github.ref_name == 'main' && secrets.CODEDEPLOY_GROUP_NAME_PROD || (github.ref_name == 'release' && secrets.CODEDEPLOY_GROUP_NAME_STAGING || secrets.CODEDEPLOY_GROUP_NAME_DEV) }}
+
+jobs:
+  # 1. 코드 품질 검사 (Ruff)
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Poetry 설치
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Poetry 캐시 설정
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: 의존성 설치
+        run: poetry install --with dev
+
+      - name: Ruff Lint 검사
+        run: poetry run ruff check app/
+
+      - name: Ruff Format 검사
+        run: poetry run ruff format --check app/
+
+  # 2. 정적 분석 (CodeQL)
+  static-analysis:
+    runs-on: ubuntu-22.04
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: CodeQL 초기화
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: CodeQL 분석 수행
+        uses: github/codeql-action/analyze@v3
+
+      - name: 보안 취약점 결과 확인 및 차단
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "⏳ 분석 결과가 GitHub에 반영되기를 기다리는 중 (10초)..."
+          sleep 10
+
+          # 1. 현재 이벤트가 push인지 pr인지에 따라 검색할 REF 설정
+          CURRENT_REF="${{ github.ref }}"
+          echo "📍 현재 Ref: $CURRENT_REF"
+
+          # 2. API 호출하여 High/Critical 등급의 Open 상태인 알림 조회
+          ALERTS=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?tool_name=CodeQL&state=open&ref=$CURRENT_REF" \
+            --jq '[.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical")]')
+
+          COUNT=$(echo "$ALERTS" | jq 'length')
+
+          if [ "$COUNT" -gt 0 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ 보안 검사 실패: 고위험(High/Critical) 취약점 $COUNT개 발견"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "$ALERTS" | jq -r '.[] | "- [\(.rule.security_severity_level)] \(.rule.description) \n   위치: \(.most_recent_instance.location.path)"'
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          else
+            echo "✅ 보안 검사 통과: 현재 커밋($CURRENT_REF)은 안전합니다."
+          fi
+
+  # 3. 의존성 및 Import 검증
+  validate:
+    name: validate
+    runs-on: ubuntu-22.04
+    needs: [lint, static-analysis]
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Poetry 설치
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Poetry 캐시 설정
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: 의존성 설치
+        run: poetry install
+
+      - name: Python Import 검증
+        run: |
+          poetry run python -c "import app.main; print('✅ Main app imports successfully')"
+
+  # 4. 배포 패키지 생성 및 S3 업로드 (develop, release는 자동 배포, main은 수동 배포용)
+  deploy:
+    name: deploy
+    runs-on: ubuntu-22.04
+    needs: [validate]
+    outputs:
+      deployment_id: ${{ steps.codedeploy.outputs.deployment_id }}
+      deployment_status: ${{ steps.codedeploy.outputs.deployment_status }}
+      deployment_error: ${{ steps.codedeploy.outputs.deployment_error }}
+      s3_key: ${{ steps.upload.outputs.s3_key }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 타임스탬프 생성
+        id: timestamp
+        run: |
+          # SHA의 앞 7자리만 변수에 저장
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          # 날짜와 SHORT_SHA를 결합하여 OUTPUT에 저장
+          echo "value=$(date +'%Y%m%d_%H%M%S')-$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: 배포 패키지 생성
+        id: package
+        run: |
+          echo "📦 Creating deployment package..."
+          ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
+          mkdir -p deploy-package
+
+          # 필요한 파일들 복사
+          cp -r app/ deploy-package/
+          cp -r deploy/ deploy-package/
+          cp pyproject.toml deploy-package/
+          cp poetry.lock deploy-package/
+          cp appspec.yml deploy-package/
+          cp .env.example deploy-package/
+
+          # 브랜치 정보 및 배포 그룹을 포함한 배포 환경 파일 생성
+          echo "export DEPLOY_BRANCH=\"${{ github.ref_name }}\"" > deploy-package/.deploy-env
+          echo "export DEPLOY_TIMESTAMP=\"${{ steps.timestamp.outputs.value }}\"" >> deploy-package/.deploy-env
+          echo "export DEPLOY_SHA=\"${{ github.sha }}\"" >> deploy-package/.deploy-env
+          echo "export CODEDEPLOY_DEPLOYMENT_GROUP=\"${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }}\"" >> deploy-package/.deploy-env
+
+          echo "✅ Deploy environment file created"
+          cat deploy-package/.deploy-env
+
+          # ZIP 압축
+          cd deploy-package
+          zip -r ../$ARTIFACT_NAME .
+          cd ..
+
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Package created: $ARTIFACT_NAME"
+          ls -lh $ARTIFACT_NAME
+
+      - name: AWS 자격증명 설정
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: S3에 업로드
+        id: upload
+        run: |
+          echo "☁️ Uploading to S3..."
+          ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
+          S3_KEY="${{ env.S3_PREFIX }}/$ARTIFACT_NAME"
+          aws s3 cp $ARTIFACT_NAME \
+            s3://${{ env.S3_BUCKET }}/$S3_KEY
+          echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.ref_name }}" == "main" ]; then
+            echo "✅ Upload complete - Ready for manual deployment"
+            echo "📝 To deploy manually, use:"
+            echo "   Deployment package: s3://${{ env.S3_BUCKET }}/$S3_KEY"
+          else
+            echo "✅ Upload complete"
+          fi
+
+      - name: CodeDeploy 배포 시작
+        id: codedeploy
+        if: github.ref_name == 'develop' || github.ref_name == 'release'
+        run: |
+          echo "🚀 Starting CodeDeploy deployment..."
+          S3_KEY="${{ steps.upload.outputs.s3_key }}"
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }} \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=$S3_KEY,bundleType=zip \
+            --description "Deploy from GitHub Actions - ${{ github.ref_name }} branch" \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Deployment started: $DEPLOYMENT_ID"
+
+          # 배포 상태 모니터링
+          echo "⏳ Waiting for deployment to complete..."
+          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
+            echo "deployment_status=Success" >> $GITHUB_OUTPUT
+            echo "✅ Deployment completed successfully!"
+          else
+            ERROR_MSG=$(aws deploy get-deployment --deployment-id $DEPLOYMENT_ID --query 'deploymentInfo.errorInformation.message' --output text 2>&1 || echo "Unknown error")
+            echo "deployment_status=Failed" >> $GITHUB_OUTPUT
+            echo "deployment_error=$ERROR_MSG" >> $GITHUB_OUTPUT
+            echo "❌ Deployment failed: $ERROR_MSG"
+            exit 1
+          fi
+
+  # 5. 디스코드 통합 알림 - CI
+  notify-discord-ci:
+    runs-on: ubuntu-22.04
+    needs: [lint, static-analysis, validate]
+    if: always()
+    steps:
+      - name: 데이터 준비
+        id: prep
+        env:
+          USER_MAP: ${{ secrets.USER_MAP_JSON }}
+        run: |
+          # 1. 커밋 메시지 추출 (Push 제목 대용)
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1)
+          echo "title=$COMMIT_MSG" >> $GITHUB_OUTPUT
+
+          # 2. 브랜치 정보
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: Discord 알림 전송
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ github.ref_name == 'main' && secrets.DISCORD_WEBHOOK_PROD_URL || secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
+          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 'success' || 'failure' }}
+          title: "${{ steps.prep.outputs.branch }} CI 결과 [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && '✅성공' || '❌실패' }}]"
+          description: |
+            **커밋 메시지**: ${{ steps.prep.outputs.title }}
+            **브랜치**: `${{ steps.prep.outputs.branch }}`
+            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (github.ref_name == 'release' && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
+
+            **📊 상세 결과**:
+            - Lint/Format: ${{ needs.lint.result == 'success' && '✅' || '❌' }}
+            - Static Analysis: ${{ needs.static-analysis.result == 'success' && '✅' || '❌' }}
+            - Validation: ${{ needs.validate.result == 'success' && '✅' || '❌' }}
+
+            **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+
+          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.validate.result == 'success') && 65280 || 16711680 }}"
+          username: GitHub AI Merge Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+
+  # 6. 디스코드 통합 알림 - CD
+  notify-discord-cd:
+    runs-on: ubuntu-22.04
+    needs: [deploy]
+    if: always() && needs.deploy.result != 'skipped' && (github.ref_name == 'develop' || github.ref_name == 'release')
+    steps:
+      - name: 데이터 준비
+        id: prep
+        run: |
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1)
+          echo "title=$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+
+      - name: Discord 알림 전송
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ github.ref_name == 'main' && secrets.DISCORD_WEBHOOK_PROD_URL || secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
+          status: ${{ needs.deploy.result == 'success' && 'success' || 'failure' }}
+          title: "${{ steps.prep.outputs.branch }} CD 결과 [${{ needs.deploy.result == 'success' && '✅성공' || '❌실패' }}]"
+          description: |
+            **커밋 메시지**: ${{ steps.prep.outputs.title }}
+            **브랜치**: `${{ steps.prep.outputs.branch }}`
+            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (github.ref_name == 'release' && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
+
+            **📦 아티팩트**: `${{ needs.deploy.outputs.artifact_name }}`
+            **🪣 S3 Key**: `${{ needs.deploy.outputs.s3_key }}`
+            **🚀 배포 결과**: ${{ needs.deploy.outputs.deployment_status || (github.ref_name == 'main' && 'Manual Deploy Ready' || 'N/A') }}
+            **🆔 Deployment ID**: `${{ needs.deploy.outputs.deployment_id || 'N/A' }}`
+            **🧾 에러**: ${{ needs.deploy.outputs.deployment_error || '없음' }}
+
+            **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+          color: "${{ needs.deploy.result == 'success' && 65280 || 16711680 }}"
+          username: GitHub AI Deploy Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png

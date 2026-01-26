@@ -9,10 +9,12 @@ Implements the RAG pipeline following the architecture diagram:
 """
 
 import logging
-from typing import List, Dict, Any, Optional, AsyncIterator, Union
+from collections.abc import AsyncIterator
+from typing import Any
+
 from .llm_service import LLMService
-from .vllm_service import VLLMService
 from .vectordb_service import VectorDBService
+from .vllm_service import VLLMService
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +23,10 @@ class RAGService:
     """RAG Service for chatbot with VectorDB context retrieval"""
 
     def __init__(
-        self, 
-        llm_service: LLMService, 
+        self,
+        llm_service: LLMService,
         vectordb_service: VectorDBService,
-        vllm_service: Optional[VLLMService] = None
+        vllm_service: VLLMService | None = None,
     ):
         """
         Initialize RAG Service
@@ -39,11 +41,7 @@ class RAGService:
         self.vectordb = vectordb_service
         logger.info("RAG Service initialized")
 
-    async def retrieve_all_documents(
-        self,
-        user_id: str,
-        context_types: List[str] = ["resume", "job_posting"]
-    ) -> str:
+    async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
         """
         Retrieve ALL documents for a user (for analysis mode)
 
@@ -54,6 +52,8 @@ class RAGService:
         Returns:
             Formatted context string with all documents (truncated if needed)
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -64,8 +64,7 @@ class RAGService:
                     continue
 
                 docs = await self.vectordb.get_all_documents_by_user(
-                    user_id=user_id,
-                    collection_type=collection_type
+                    user_id=user_id, collection_type=collection_type
                 )
                 all_results.extend([(collection_type, doc) for doc in docs])
 
@@ -76,16 +75,16 @@ class RAGService:
             context_parts = []
             total_length = 0
             max_context_length = 4000  # ~1000 tokens (4 chars ≈ 1 token)
-            
+
             for collection_type, doc in all_results:
                 source = {
                     "resume": "이력서",
                     "job_posting": "채용공고",
-                    "portfolio": "포트폴리오"
+                    "portfolio": "포트폴리오",
                 }.get(collection_type, collection_type)
 
-                doc_text = doc['text']
-                
+                doc_text = doc["text"]
+
                 # 컨텍스트 길이 제한 (vLLM 8192 토큰 제한 고려)
                 if total_length + len(doc_text) > max_context_length:
                     remaining = max_context_length - total_length
@@ -93,7 +92,7 @@ class RAGService:
                         doc_text = doc_text[:remaining] + "... (생략)"
                         context_parts.append(f"[출처: {source}]\n{doc_text}")
                     break
-                
+
                 context_parts.append(f"[출처: {source}]\n{doc_text}")
                 total_length += len(doc_text)
 
@@ -109,8 +108,8 @@ class RAGService:
         self,
         query: str,
         user_id: str,
-        context_types: List[str] = ["resume", "job_posting"],
-        n_results: int = 3
+        context_types: list[str] = None,
+        n_results: int = 3,
     ) -> str:
         """
         Retrieve relevant context from VectorDB
@@ -124,6 +123,8 @@ class RAGService:
         Returns:
             Formatted context string
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -133,12 +134,12 @@ class RAGService:
                 where_filter = None
                 if collection_type != "portfolio" and user_id:
                     where_filter = {"user_id": user_id}
-                
+
                 results = await self.vectordb.query(
                     query_text=query,
                     collection_type=collection_type,
                     n_results=n_results,
-                    where=where_filter
+                    where=where_filter,
                 )
                 all_results.extend([(collection_type, r) for r in results])
 
@@ -151,7 +152,7 @@ class RAGService:
                 source = {
                     "resume": "이력서",
                     "job_posting": "채용공고",
-                    "portfolio": "포트폴리오"
+                    "portfolio": "포트폴리오",
                 }.get(collection_type, collection_type)
 
                 context_parts.append(f"[출처: {source}]\n{result['text']}")
@@ -166,11 +167,11 @@ class RAGService:
         self,
         user_message: str,
         user_id: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         use_rag: bool = True,
-        context_types: List[str] = ["resume", "job_posting"],
+        context_types: list[str] = None,
         model: str = "gemini",
-        n_results: int = 1  # 기본값을 1로 설정하여 속도 개선
+        n_results: int = 1,  # 기본값을 1로 설정하여 속도 개선
     ) -> AsyncIterator[str]:
         """
         Chat with RAG context retrieval
@@ -186,6 +187,8 @@ class RAGService:
         Yields:
             Response chunks
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             context = None
 
@@ -196,7 +199,7 @@ class RAGService:
                     query=user_message,
                     user_id=user_id,
                     context_types=context_types,
-                    n_results=n_results
+                    n_results=n_results,
                 )
 
                 if context:
@@ -205,7 +208,9 @@ class RAGService:
                     logger.info("No context found, using general knowledge")
 
             # System prompt for job search assistant
-            system_prompt = "당신은 취업 준비생을 돕는 AI 비서입니다. 간결하고 명확하게 답변해주세요."
+            system_prompt = (
+                "당신은 취업 준비생을 돕는 AI 비서입니다. 간결하고 명확하게 답변해주세요."
+            )
 
             # Select model
             if model == "vllm" and self.vllm:
@@ -214,7 +219,7 @@ class RAGService:
                     user_message=user_message,
                     context=context,
                     history=history,
-                    system_prompt=system_prompt
+                    system_prompt=system_prompt,
                 ):
                     yield chunk
             else:
@@ -233,11 +238,8 @@ class RAGService:
             yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
     async def analyze_resume_and_posting(
-        self,
-        user_id: str,
-        resume_id: Optional[str] = None,
-        posting_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, user_id: str, resume_id: str | None = None, posting_id: str | None = None
+    ) -> dict[str, Any]:
         """
         Analyze resume and job posting match
 
@@ -253,30 +255,30 @@ class RAGService:
             # Get resume text
             if resume_id:
                 resume_doc = await self.vectordb.get_document(resume_id, "resume")
-                resume_text = resume_doc['text'] if resume_doc else ""
+                resume_text = resume_doc["text"] if resume_doc else ""
             else:
                 # Search for user's resume
                 resume_results = await self.vectordb.query(
                     query_text="이력서 전체 내용",
                     collection_type="resume",
                     n_results=1,
-                    where={"user_id": user_id}
+                    where={"user_id": user_id},
                 )
-                resume_text = resume_results[0]['text'] if resume_results else ""
+                resume_text = resume_results[0]["text"] if resume_results else ""
 
             # Get posting text
             if posting_id:
                 posting_doc = await self.vectordb.get_document(posting_id, "job_posting")
-                posting_text = posting_doc['text'] if posting_doc else ""
+                posting_text = posting_doc["text"] if posting_doc else ""
             else:
                 # Search for recent posting
                 posting_results = await self.vectordb.query(
                     query_text="채용공고 전체 내용",
                     collection_type="job_posting",
                     n_results=1,
-                    where={"user_id": user_id}
+                    where={"user_id": user_id},
                 )
-                posting_text = posting_results[0]['text'] if posting_results else ""
+                posting_text = posting_results[0]["text"] if posting_results else ""
 
             if not resume_text or not posting_text:
                 raise ValueError("이력서 또는 채용공고를 찾을 수 없습니다")
@@ -290,10 +292,8 @@ class RAGService:
             raise
 
     async def generate_interview_question(
-        self,
-        user_id: str,
-        interview_type: str = "technical"
-    ) -> Dict[str, Any]:
+        self, user_id: str, interview_type: str = "technical"
+    ) -> dict[str, Any]:
         """
         Generate interview question based on user's resume and job posting
 
@@ -310,18 +310,18 @@ class RAGService:
                 query_text="이력서 전체 내용",
                 collection_type="resume",
                 n_results=1,
-                where={"user_id": user_id}
+                where={"user_id": user_id},
             )
-            resume_text = resume_results[0]['text'] if resume_results else ""
+            resume_text = resume_results[0]["text"] if resume_results else ""
 
             # Get posting
             posting_results = await self.vectordb.query(
                 query_text="채용공고 전체 내용",
                 collection_type="job_posting",
                 n_results=1,
-                where={"user_id": user_id}
+                where={"user_id": user_id},
             )
-            posting_text = posting_results[0]['text'] if posting_results else ""
+            posting_text = posting_results[0]["text"] if posting_results else ""
 
             if not resume_text:
                 resume_text = "정보 없음"
@@ -340,10 +340,7 @@ class RAGService:
             raise
 
     async def evaluate_interview_answer(
-        self,
-        question: str,
-        answer: str,
-        history: Optional[List[Dict[str, str]]] = None
+        self, question: str, answer: str, history: list[dict[str, str]] | None = None
     ) -> AsyncIterator[str]:
         """
         Evaluate interview answer and provide feedback
@@ -370,13 +367,12 @@ class RAGService:
 
 친절하고 건설적으로 피드백해주세요."""
 
-            system_prompt = "당신은 면접 평가 전문가입니다. 답변을 분석하고 건설적인 피드백을 제공하세요."
+            system_prompt = (
+                "당신은 면접 평가 전문가입니다. 답변을 분석하고 건설적인 피드백을 제공하세요."
+            )
 
             async for chunk in self.llm.generate_response(
-                user_message=prompt,
-                context=None,
-                history=history,
-                system_prompt=system_prompt
+                user_message=prompt, context=None, history=history, system_prompt=system_prompt
             ):
                 yield chunk
 
