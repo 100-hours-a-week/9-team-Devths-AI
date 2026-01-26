@@ -38,6 +38,9 @@ python-dotenv = "^1.0.0"
 # Numpy (lightweight, commonly needed)
 numpy = ">=1.24.0,<2.0.0"
 
+# Google Gemini API (서빙에 필수)
+google-genai = "*"
+
 # ============================================
 # ML Dependencies (선택적 - 모델 추론/학습용)
 # poetry install --with ml 로 설치
@@ -49,9 +52,6 @@ optional = true
 # OCR
 easyocr = "^1.7.0"
 pytesseract = "^0.3.10"
-
-# Google Gemini API (face detection)
-google-genai = "*"
 
 # OpenCV for face detection
 opencv-python = "^4.8.0"

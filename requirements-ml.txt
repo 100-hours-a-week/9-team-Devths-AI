@@ -8,9 +8,6 @@
 easyocr==1.7.0
 pytesseract==0.3.10
 
-# Google Gemini API (face detection)
-google-genai
-
 # OpenCV for face detection
 opencv-python>=4.8.0
 
