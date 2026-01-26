@@ -1,0 +1,25 @@
+# ============================================
+# ML/OCR Dependencies (모델 추론/학습용)
+# 서빙 전용 의존성 + 이 파일 함께 설치 필요
+# pip install -r requirements-serving.txt -r requirements-ml.txt
+# ============================================
+
+# OCR
+easyocr==1.7.0
+pytesseract==0.3.10
+
+# OpenCV for face detection
+opencv-python>=4.8.0
+
+# Microsoft Presidio (PII detection)
+presidio-analyzer
+presidio-image-redactor
+spacy>=3.0.0
+
+# Chandra OCR model
+transformers>=4.30.0
+torch>=2.0.0
+git+https://github.com/datalab-to/chandra.git
+
+# Hugging Face datasets
+datasets>=2.14.0
