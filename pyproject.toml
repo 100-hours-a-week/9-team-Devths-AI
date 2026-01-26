@@ -41,6 +41,10 @@ numpy = ">=1.24.0,<2.0.0"
 # Google Gemini API (서빙에 필수)
 google-genai = "*"
 
+# LLM Observability (서빙에 필수)
+langfuse = "^3.12.0"
+openai = "^2.15.0"
+
 # ============================================
 # ML Dependencies (선택적 - 모델 추론/학습용)
 # poetry install --with ml 로 설치
@@ -71,10 +75,6 @@ chromadb = "^0.4.24"
 
 # Hugging Face datasets
 datasets = "^2.14.0"
-
-# LLM Observability
-langfuse = "^3.12.0"
-openai = "^2.15.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.0"
