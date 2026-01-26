@@ -111,5 +111,34 @@ else
     echo "⚠️  Import validation failed, but continuing..."
 fi
 
+# 9. 로그 로테이트 설정 (Cron Job)
+echo "🔄 Setting up log rotation..."
+ROTATE_SCRIPT="$APP_DIR/deploy/rotate_logs.sh"
+CRON_LOG="$APP_DIR/logs/cron-rotate.log"
+
+if [ -f "$ROTATE_SCRIPT" ]; then
+    chmod +x "$ROTATE_SCRIPT"
+
+    # Cron job 설정 (매일 새벽 3시)
+    CRON_SCHEDULE="0 3 * * *"
+    CRON_COMMAND="$CRON_SCHEDULE cd $APP_DIR && /bin/bash $ROTATE_SCRIPT >> $CRON_LOG 2>&1"
+
+    # 기존 crontab에서 rotate_logs 제거 후 추가
+    TEMP_CRON=$(mktemp)
+    crontab -l > "$TEMP_CRON" 2>/dev/null || true
+    sed -i.bak '/rotate_logs.sh/d' "$TEMP_CRON"
+    echo "$CRON_COMMAND" >> "$TEMP_CRON"
+
+    if crontab "$TEMP_CRON" 2>/dev/null; then
+        echo "✅ Log rotation cron job configured (daily at 3:00 AM)"
+    else
+        echo "⚠️  Cron job setup failed, but continuing..."
+    fi
+
+    rm -f "$TEMP_CRON" "${TEMP_CRON}.bak"
+else
+    echo "⚠️  rotate_logs.sh not found, skipping log rotation setup"
+fi
+
 echo "✅ After-install steps completed"
 exit 0

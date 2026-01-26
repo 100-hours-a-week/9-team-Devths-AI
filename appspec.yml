@@ -24,6 +24,12 @@ permissions:
     mode: 755
     type:
       - file
+  - object: /home/ubuntu/ai/logs
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
 
 hooks:
   ApplicationStop:
