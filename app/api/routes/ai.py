@@ -279,8 +279,8 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
-            safe_user_id = sanitize_log_input(request.user_id)
-            logger.info("📌 사용자 ID: %s", safe_user_id)
+            # 사용자 ID는 로그에 포함하지 않음 (보안)
+            logger.info("📌 사용자 ID: [REDACTED]")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -494,10 +494,9 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info(f"📌 요청 모델: {model.upper()}")
     logger.info(f"📌 채팅 모드: {mode}")
-    safe_user_id = sanitize_log_input(request.user_id)
-    logger.info("📌 사용자 ID: %s", safe_user_id)
-    safe_room_id = sanitize_log_input(request.room_id)
-    logger.info("📌 채팅방 ID: %s", safe_room_id)
+    # 사용자 ID와 채팅방 ID는 로그에 포함하지 않음 (보안)
+    logger.info("📌 사용자 ID: [REDACTED]")
+    logger.info("📌 채팅방 ID: [REDACTED]")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -533,8 +532,8 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
-                safe_message = sanitize_log_input(user_message[:50])
-                logger.info("🔍 분석 요청 감지: %s...", safe_message)
+                # 사용자 메시지는 로그에 포함하지 않음 (보안)
+                logger.info("🔍 분석 요청 감지")
                 logger.info("")
 
                 # ---------------------------------------------------------------
@@ -553,9 +552,8 @@ async def generate_chat_stream(request: ChatRequest):
 
                     if not full_context:
                         error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
-                        logger.error(
-                            f"⚠️ VectorDB에 문서가 없습니다 (user_id: {sanitize_log_input(request.user_id)})"
-                        )
+                        # 사용자 ID는 로그에 포함하지 않음 (보안)
+                        logger.error("⚠️ VectorDB에 문서가 없습니다")
                         yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
                         full_response = error_msg
                     else:
@@ -670,7 +668,9 @@ async def generate_chat_stream(request: ChatRequest):
                     logger.info("")
 
                     # RAG를 사용하여 컨텍스트 검색 및 응답 생성
-                    logger.info(f"🔍 [{model.upper()}] RAG 검색 및 응답 생성 시작...")
+                    # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
+                    safe_model = str(model).upper() if model else "UNKNOWN"
+                    logger.info("🔍 [%s] RAG 검색 및 응답 생성 시작...", safe_model)
                     async for chunk in rag.chat_with_rag(
                         user_message=user_message,
                         user_id=request.user_id,
@@ -682,8 +682,10 @@ async def generate_chat_stream(request: ChatRequest):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
+                    # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
+                    safe_model = str(model).upper() if model else "UNKNOWN"
                     logger.info(
-                        f"✅ [{model.upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
+                        "✅ [%s] 일반 대화 완료 (응답 길이: %d자)", safe_model, len(full_response)
                     )
 
         except Exception as e:

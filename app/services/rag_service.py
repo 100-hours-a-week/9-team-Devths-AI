@@ -18,7 +18,6 @@ from app.prompts import (
     SYSTEM_RAG_CHAT,
     create_followup_prompt,
 )
-from app.utils.log_sanitizer import sanitize_log_input
 
 from .llm_service import LLMService
 from .vectordb_service import VectorDBService
@@ -198,8 +197,8 @@ class RAGService:
 
             # Retrieve context if RAG is enabled
             if use_rag:
-                safe_user_id = sanitize_log_input(user_id)
-                logger.info("Retrieving RAG context for user %s", safe_user_id)
+                # 사용자 ID는 로그에 포함하지 않음 (보안)
+                logger.info("Retrieving RAG context for user")
                 context = await self.retrieve_context(
                     query=user_message,
                     user_id=user_id,
@@ -422,10 +421,12 @@ class RAGService:
             )
 
             logger.info("🔍 [꼬리질문 생성] 시작")
-            safe_question = sanitize_log_input(original_question[:50])
-            logger.info("   원본 질문: %s...", safe_question)
-            logger.info(f"   답변 길이: {len(candidate_answer)}자")
-            logger.info(f"   모델: {model}")
+            # 사용자 입력은 로그에 포함하지 않음 (보안)
+            logger.info("   원본 질문: [REDACTED]")
+            logger.info("   답변 길이: %d자", len(candidate_answer))
+            # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
+            safe_model = str(model) if model else "UNKNOWN"
+            logger.info("   모델: %s", safe_model)
 
             # vLLM 또는 Gemini 선택
             if model == "vllm" and self.vllm:
