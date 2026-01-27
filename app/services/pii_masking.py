@@ -23,7 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 logger = logging.getLogger(__name__)
 
 
-def plt_imshow(title='image', img=None, figsize=(8 ,5)):
+def plt_imshow(title="image", img=None, figsize=(8, 5)):
     plt.figure(figsize=figsize)
 
     if isinstance(img, list):
@@ -58,71 +58,75 @@ def plt_imshow(title='image', img=None, figsize=(8 ,5)):
         plt.show()
 
 
-def make_scan_image(image, width, ksize=(5,5), min_threshold=75, max_threshold=200):
-  image_list_title = []
-  image_list = []
+def make_scan_image(
+    image, width, ksize=(5, 5), min_threshold=75, max_threshold=200, org_image=None
+):
+    image_list_title = []
+    image_list = []
 
-  image = imutils.resize(image, width=width)
-  ratio = org_image.shape[1] / float(image.shape[1])
+    if org_image is None:
+        org_image = image
 
-  # 이미지를 grayscale로 변환하고 blur를 적용
-  # 모서리를 찾기위한 이미지 연산
-  gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-  blurred = cv2.GaussianBlur(gray, ksize, 0)
-  edged = cv2.Canny(blurred, min_threshold, max_threshold)
+    image = imutils.resize(image, width=width)
+    ratio = org_image.shape[1] / float(image.shape[1])
 
-  image_list_title = ['gray', 'blurred', 'edged']
-  image_list = [gray, blurred, edged]
+    # 이미지를 grayscale로 변환하고 blur를 적용
+    # 모서리를 찾기위한 이미지 연산
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, ksize, 0)
+    edged = cv2.Canny(blurred, min_threshold, max_threshold)
 
-  # contours를 찾아 크기순으로 정렬
-  cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-  cnts = imutils.grab_contours(cnts)
-  cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+    image_list_title = ["gray", "blurred", "edged"]
+    image_list = [gray, blurred, edged]
 
-  findCnt = None
+    # contours를 찾아 크기순으로 정렬
+    cnts = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
 
-  # 정렬된 contours를 반복문으로 수행하며 4개의 꼭지점을 갖는 도형을 검출
-  for c in cnts:
-    peri = cv2.arcLength(c, True)
-    approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+    findCnt = None
 
-    # contours가 크기순으로 정렬되어 있기때문에 제일 첫번째 사각형을 영역으로 판단하고 break
-    if len(approx) == 4:
-      findCnt = approx
-      break
+    # 정렬된 contours를 반복문으로 수행하며 4개의 꼭지점을 갖는 도형을 검출
+    for c in cnts:
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
 
+        # contours가 크기순으로 정렬되어 있기때문에 제일 첫번째 사각형을 영역으로 판단하고 break
+        if len(approx) == 4:
+            findCnt = approx
+            break
 
-  # 만약 추출한 윤곽이 없을 경우 오류
-  if findCnt is None:
-    raise Exception("Could not find outline.")
+    # 만약 추출한 윤곽이 없을 경우 오류
+    if findCnt is None:
+        raise Exception("Could not find outline.")
 
+    output = image.copy()
+    cv2.drawContours(output, [findCnt], -1, (0, 255, 0), 2)
 
-  output = image.copy()
-  cv2.drawContours(output, [findCnt], -1, (0, 255, 0), 2)
+    image_list_title.append("Outline")
+    image_list.append(output)
 
-  image_list_title.append("Outline")
-  image_list.append(output)
+    # 원본 이미지에 찾은 윤곽을 기준으로 이미지를 보정
+    transform_image = four_point_transform(org_image, findCnt.reshape(4, 2) * ratio)
 
-  # 원본 이미지에 찾은 윤곽을 기준으로 이미지를 보정
-  transform_image = four_point_transform(org_image, findCnt.reshape(4, 2) * ratio)
+    plt_imshow(image_list_title, image_list)
+    plt_imshow("Transform", transform_image)
 
-  plt_imshow(image_list_title, image_list)
-  plt_imshow("Transform", transform_image)
+    return transform_image
 
-  return transform_image
 
 def putText(cv_img, text, x, y, color=(0, 0, 0), font_size=22):
-  # Colab이 아닌 Local에서 수행 시에는 gulim.ttc 를 사용하면 됩니다.
-  # font = ImageFont.truetype("fonts/gulim.ttc", font_size)
-  font = ImageFont.truetype('/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf', font_size)
-  img = Image.fromarray(cv_img)
+    # Colab이 아닌 Local에서 수행 시에는 gulim.ttc 를 사용하면 됩니다.
+    # font = ImageFont.truetype("fonts/gulim.ttc", font_size)
+    font = ImageFont.truetype("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", font_size)
+    img = Image.fromarray(cv_img)
 
-  draw = ImageDraw.Draw(img)
-  draw.text((x, y), text, font=font, fill=color)
+    draw = ImageDraw.Draw(img)
+    draw.text((x, y), text, font=font, fill=color)
 
-  cv_img = np.array(img)
+    cv_img = np.array(img)
 
-  return cv_img
+    return cv_img
 
 
 # NOTE: 아래 코드는 테스트/예제 코드입니다. 실제 서비스에서는 사용하지 않습니다.
@@ -242,7 +246,7 @@ class PIIMaskingService:
             # 주의: Space의 실제 API 구조에 따라 수정 필요
             result = self.client.predict(
                 image=handle_file(tmp_path),
-                api_name="/predict"  # Space의 실제 API 엔드포인트에 맞게 수정
+                api_name="/predict",  # Space의 실제 API 엔드포인트에 맞게 수정
             )
 
             # 결과 파싱 (Space 출력 형식에 따라 다름)
@@ -264,7 +268,9 @@ class PIIMaskingService:
         finally:
             os.unlink(tmp_path)
 
-    def _fallback_local_masking(self, image: Image.Image) -> tuple[Image.Image, list[dict[str, Any]]]:
+    def _fallback_local_masking(
+        self, image: Image.Image
+    ) -> tuple[Image.Image, list[dict[str, Any]]]:
         """
         로컬 PII 감지 및 마스킹 (fallback)
 
@@ -279,9 +285,12 @@ class PIIMaskingService:
         logger.warning("Using fallback local masking (EasyOCR)")
 
         try:
+            from easyocr import Reader
             from PIL import ImageDraw
 
-            # EasyOCR Reader는 이미 import되어 있음 (line 21)
+            # EasyOCR Reader 초기화 (한국어 + 영어)
+            reader = Reader(["ko", "en"], gpu=True)
+
             # EasyOCR로 텍스트 및 위치 추출
             img_array = np.array(image)
             results = reader.readtext(img_array)
@@ -291,7 +300,7 @@ class PIIMaskingService:
             masked_image = image.copy()
             draw = ImageDraw.Draw(masked_image)
 
-            for (bbox, text, conf) in results:
+            for bbox, text, conf in results:
                 if text.strip():
                     # bbox: [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
                     (tl, tr, br, bl) = bbox
@@ -303,23 +312,27 @@ class PIIMaskingService:
                     # 전화번호 패턴 감지 (예: 010-1234-5678)
                     if self._is_phone_number(text):
                         # 검은색 박스로 마스킹
-                        draw.rectangle([x, y, x+w, y+h], fill='black')
-                        detections.append({
-                            "type": "phone",
-                            "coordinates": [x, y, x+w, y+h],
-                            "confidence": conf,
-                            "text": text
-                        })
+                        draw.rectangle([x, y, x + w, y + h], fill="black")
+                        detections.append(
+                            {
+                                "type": "phone",
+                                "coordinates": [x, y, x + w, y + h],
+                                "confidence": conf,
+                                "text": text,
+                            }
+                        )
 
                     # 이메일 패턴 감지
-                    elif '@' in text and '.' in text:
-                        draw.rectangle([x, y, x+w, y+h], fill='black')
-                        detections.append({
-                            "type": "email",
-                            "coordinates": [x, y, x+w, y+h],
-                            "confidence": conf,
-                            "text": text
-                        })
+                    elif "@" in text and "." in text:
+                        draw.rectangle([x, y, x + w, y + h], fill="black")
+                        detections.append(
+                            {
+                                "type": "email",
+                                "coordinates": [x, y, x + w, y + h],
+                                "confidence": conf,
+                                "text": text,
+                            }
+                        )
 
             return masked_image, detections
 
@@ -330,11 +343,12 @@ class PIIMaskingService:
     def _is_phone_number(self, text: str) -> bool:
         """전화번호 패턴 감지"""
         import re
+
         # 한국 전화번호 패턴
         patterns = [
-            r'\d{3}-\d{4}-\d{4}',  # 010-1234-5678
-            r'\d{3}\d{4}\d{4}',    # 01012345678
-            r'\d{2,3}-\d{3,4}-\d{4}',  # 02-1234-5678
+            r"\d{3}-\d{4}-\d{4}",  # 010-1234-5678
+            r"\d{3}\d{4}\d{4}",  # 01012345678
+            r"\d{2,3}-\d{3,4}-\d{4}",  # 02-1234-5678
         ]
         return any(re.match(pattern, text) for pattern in patterns)
 
@@ -357,24 +371,22 @@ class PIIMaskingService:
         # RGB 모드로 변환 (PDF 저장을 위해)
         rgb_images = []
         for img in images:
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             rgb_images.append(img)
 
         # PDF로 저장
         rgb_images[0].save(
             output,
-            format='PDF',
+            format="PDF",
             save_all=True,
-            append_images=rgb_images[1:] if len(rgb_images) > 1 else []
+            append_images=rgb_images[1:] if len(rgb_images) > 1 else [],
         )
 
         return output.getvalue()
 
     async def mask_pdf(
-        self,
-        file_url: str,
-        use_space: bool = True
+        self, file_url: str, use_space: bool = True
     ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         PDF 파일 마스킹 처리 (전체 플로우)
@@ -414,7 +426,7 @@ class PIIMaskingService:
 
             # 페이지 정보 추가
             for det in detections:
-                det['page'] = page_num
+                det["page"] = page_num
             all_detections.extend(detections)
 
         # 4. 마스킹된 이미지를 PDF로 변환
@@ -426,7 +438,7 @@ class PIIMaskingService:
         thumbnail = masked_images[0].copy()
         thumbnail.thumbnail((300, 400))
         thumb_io = io.BytesIO()
-        thumbnail.save(thumb_io, format='PNG')
+        thumbnail.save(thumb_io, format="PNG")
         thumbnail_bytes = thumb_io.getvalue()
 
         logger.info(f"Masking complete: {len(all_detections)} PII items detected")
@@ -434,9 +446,7 @@ class PIIMaskingService:
         return masked_pdf_bytes, thumbnail_bytes, all_detections
 
     async def mask_image_file(
-        self,
-        file_url: str,
-        use_space: bool = True
+        self, file_url: str, use_space: bool = True
     ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         이미지 파일 마스킹 처리
@@ -465,19 +475,19 @@ class PIIMaskingService:
 
         # 3. 바이트로 변환
         output = io.BytesIO()
-        masked_image.save(output, format='PNG')
+        masked_image.save(output, format="PNG")
         masked_bytes = output.getvalue()
 
         # 4. 썸네일 생성
         thumbnail = masked_image.copy()
         thumbnail.thumbnail((300, 400))
         thumb_io = io.BytesIO()
-        thumbnail.save(thumb_io, format='PNG')
+        thumbnail.save(thumb_io, format="PNG")
         thumbnail_bytes = thumb_io.getvalue()
 
         # 페이지 정보 추가
         for det in detections:
-            det['page'] = 1
+            det["page"] = 1
 
         logger.info(f"Masking complete: {len(detections)} PII items detected")
 
