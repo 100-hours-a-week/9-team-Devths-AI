@@ -421,7 +421,7 @@ class RAGService:
             )
 
             logger.info("🔍 [꼬리질문 생성] 시작")
-            logger.info(f"   원본 질문: {original_question[:50]}...")
+            logger.info(f"   원본 질문: {sanitize_log_input(original_question[:50])}...")
             logger.info(f"   답변 길이: {len(candidate_answer)}자")
             logger.info(f"   모델: {model}")
 

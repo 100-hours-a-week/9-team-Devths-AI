@@ -295,7 +295,7 @@ async def text_extract(request: TextExtractRequest):
                     file_type = doc_input.get_file_type_simple() or "pdf"
                     logger.info(f"   → 파일 타입 (MIME): {doc_input.file_type}")
                     logger.info(f"   → 파일 타입 (단순): {file_type}")
-                    logger.info(f"   → S3 키: {doc_input.s3_key}")
+                    logger.info(f"   → S3 키: {sanitize_log_input(doc_input.s3_key)}")
 
                     # vLLM 모드: EasyOCR 사용 (가성비)
                     if model == "vllm" and rag.vllm:
@@ -344,7 +344,7 @@ async def text_extract(request: TextExtractRequest):
                             "created_at": datetime.now().isoformat(),
                         },
                     )
-                    logger.info(f"   ✅ VectorDB 저장 완료: {document_id}")
+                    logger.info(f"   ✅ VectorDB 저장 완료: {sanitize_log_input(document_id)}")
 
                 return DocumentExtractResult(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
@@ -619,8 +619,8 @@ async def generate_chat_stream(request: ChatRequest):
                     candidate_answer = history_dict[-1].get("content", "")
 
                     logger.info("🔍 [꼬리질문 생성] 감지")
-                    logger.info(f"   원본 질문: {original_question[:50]}...")
-                    logger.info(f"   답변: {candidate_answer[:50]}...")
+                    logger.info(f"   원본 질문: {sanitize_log_input(original_question[:50])}...")
+                    logger.info(f"   답변: {sanitize_log_input(candidate_answer[:50])}...")
                     logger.info("")
 
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
