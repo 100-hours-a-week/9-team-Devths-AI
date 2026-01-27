@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 try:
     from presidio_analyzer import AnalyzerEngine
     from presidio_image_redactor import ImageAnalyzerEngine, ImageRedactorEngine
+
     PRESIDIO_AVAILABLE = True
 except ImportError:
     PRESIDIO_AVAILABLE = False
@@ -70,10 +71,10 @@ class GeminiPIIMaskingService:
             파일 바이트 데이터
         """
         # data: URL 처리
-        if file_url.startswith('data:'):
+        if file_url.startswith("data:"):
             # data:image/png;base64,... 형식
             try:
-                header, encoded = file_url.split(',', 1)
+                header, encoded = file_url.split(",", 1)
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
@@ -98,6 +99,7 @@ class GeminiPIIMaskingService:
         """
         # PIL의 decompression bomb 제한 해제 (큰 이미지 처리 허용)
         from PIL import Image as PILImage
+
         PILImage.MAX_IMAGE_PIXELS = None
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
@@ -140,7 +142,7 @@ class GeminiPIIMaskingService:
             gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
             # Haar Cascade 분류기 로드
-            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
             face_cascade = cv2.CascadeClassifier(cascade_path)
 
             if face_cascade.empty():
@@ -156,7 +158,7 @@ class GeminiPIIMaskingService:
                 scaleFactor=1.1,
                 minNeighbors=5,
                 minSize=(30, 30),
-                flags=cv2.CASCADE_SCALE_IMAGE
+                flags=cv2.CASCADE_SCALE_IMAGE,
             )
 
             logger.info(f"OpenCV detected {len(faces)} face(s)")
@@ -164,12 +166,14 @@ class GeminiPIIMaskingService:
             detections = []
             for idx, (x, y, w, h) in enumerate(faces):
                 logger.info(f"OpenCV Face {idx+1}: x={x}, y={y}, w={w}, h={h}")
-                detections.append({
-                    "type": "face",
-                    "coordinates": [int(x), int(y), int(x + w), int(y + h)],
-                    "confidence": 0.85,  # OpenCV는 confidence를 제공하지 않으므로 고정값 사용
-                    "text": ""
-                })
+                detections.append(
+                    {
+                        "type": "face",
+                        "coordinates": [int(x), int(y), int(x + w), int(y + h)],
+                        "confidence": 0.85,  # OpenCV는 confidence를 제공하지 않으므로 고정값 사용
+                        "text": "",
+                    }
+                )
 
             logger.info(f"✅ OpenCV fallback detected {len(detections)} face(s)")
             return detections
@@ -200,15 +204,17 @@ class GeminiPIIMaskingService:
 
             # 이미지를 바이트로 변환
             buffered = io.BytesIO()
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            if image.mode != "RGB":
+                image = image.convert("RGB")
             image.save(buffered, format="JPEG", quality=95)
             img_bytes = buffered.getvalue()
 
             # Gemini 클라이언트 초기화 (GEMINI_API_KEY 또는 GOOGLE_API_KEY)
-            api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if not api_key:
-                logger.error("No Gemini API key found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable.")
+                logger.error(
+                    "No Gemini API key found. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
+                )
                 logger.info("Falling back to OpenCV due to missing API key")
                 return await asyncio.to_thread(self.detect_faces_with_opencv, image)
 
@@ -232,23 +238,18 @@ If no faces: {"faces": []}"""
             contents = [
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-                        prompt
-                    ]
+                    parts=[types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), prompt],
                 )
             ]
 
             # JSON 응답 요청
-            generation_config = types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
+            generation_config = types.GenerateContentConfig(response_mime_type="application/json")
 
             response = await asyncio.to_thread(
                 client.models.generate_content,
-                model='gemini-3-flash-preview',
+                model="gemini-3-flash-preview",
                 contents=contents,
-                config=generation_config
+                config=generation_config,
             )
 
             # 응답 파싱
@@ -259,31 +260,33 @@ If no faces: {"faces": []}"""
             logger.info(f"Gemini bounding_box response: {text[:500]}")
 
             # JSON 추출
-            json_match = re.search(r'\{[\s\S]*\}', text)
+            json_match = re.search(r"\{[\s\S]*\}", text)
             if not json_match:
                 logger.warning("No JSON found in Gemini response, falling back to OpenCV")
                 return await asyncio.to_thread(self.detect_faces_with_opencv, image)
 
             result = json.loads(json_match.group())
-            faces = result.get('faces', [])
+            faces = result.get("faces", [])
 
             detections = []
             for idx, face in enumerate(faces, 1):
-                box = face.get('box', {})
-                x = box.get('x', 0)
-                y = box.get('y', 0)
-                w = box.get('width', 0)
-                h = box.get('height', 0)
-                confidence = face.get('confidence', 0.9)
+                box = face.get("box", {})
+                x = box.get("x", 0)
+                y = box.get("y", 0)
+                w = box.get("width", 0)
+                h = box.get("height", 0)
+                confidence = face.get("confidence", 0.9)
 
                 if w > 0 and h > 0:
                     logger.info(f"Gemini Face {idx}: x={x}, y={y}, w={w}, h={h}, conf={confidence}")
-                    detections.append({
-                        "type": "face",
-                        "coordinates": [int(x), int(y), int(x + w), int(y + h)],
-                        "confidence": confidence,
-                        "text": ""
-                    })
+                    detections.append(
+                        {
+                            "type": "face",
+                            "coordinates": [int(x), int(y), int(x + w), int(y + h)],
+                            "confidence": confidence,
+                            "text": "",
+                        }
+                    )
 
             if len(detections) == 0:
                 logger.warning("Gemini detected no faces, falling back to OpenCV")
@@ -297,7 +300,9 @@ If no faces: {"faces": []}"""
             logger.info("Falling back to OpenCV due to error")
             return await asyncio.to_thread(self.detect_faces_with_opencv, image)
 
-    def extract_pii_from_pdf_page(self, pdf_bytes: bytes, page_num: int = 0) -> list[dict[str, Any]]:
+    def extract_pii_from_pdf_page(
+        self, pdf_bytes: bytes, page_num: int = 0
+    ) -> list[dict[str, Any]]:
         """
         EasyOCR + Regex로 PDF 이미지에서 텍스트 PII 감지
         (전화번호, 이메일, URL, 한글 이름, 주소, 대학교명)
@@ -326,18 +331,20 @@ If no faces: {"faces": []}"""
             image = images[page_num]
 
             # PII 패턴 정의
-            phone_pattern = re.compile(r'\b0\d{1,2}-?\d{3,4}-?\d{4}\b')  # 한국 전화번호
-            email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')  # 이메일
-            url_pattern = re.compile(r'https?://[^\s]+')  # URL
-            korean_name_pattern = re.compile(r'^[가-힣]{2,4}$')  # 2-4글자 한글 이름
-            address_pattern = re.compile(r'[가-힣]+시\s*[가-힣]+구')  # 서울특별시 강남구 형식
-            university_pattern = re.compile(r'[가-힣]+대학교')  # 대학교명
+            phone_pattern = re.compile(r"\b0\d{1,2}-?\d{3,4}-?\d{4}\b")  # 한국 전화번호
+            email_pattern = re.compile(
+                r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+            )  # 이메일
+            url_pattern = re.compile(r"https?://[^\s]+")  # URL
+            korean_name_pattern = re.compile(r"^[가-힣]{2,4}$")  # 2-4글자 한글 이름
+            address_pattern = re.compile(r"[가-힣]+시\s*[가-힣]+구")  # 서울특별시 강남구 형식
+            university_pattern = re.compile(r"[가-힣]+대학교")  # 대학교명
 
             # 학과명 패턴 추가
-            major_pattern = re.compile(r'[가-힣]+학과')  # XX학과
+            major_pattern = re.compile(r"[가-힣]+학과")  # XX학과
 
             # EasyOCR Reader 초기화 (한국어 + 영어)
-            reader = Reader(['ko', 'en'], gpu=True)
+            reader = Reader(["ko", "en"], gpu=True)
 
             # EasyOCR로 텍스트 및 좌표 추출
             img_array = np.array(image)
@@ -349,7 +356,7 @@ If no faces: {"faces": []}"""
             found_name = False
 
             # 각 OCR 박스에서 PII 패턴 검색
-            for (bbox, text, conf) in ocr_results:
+            for bbox, text, conf in ocr_results:
                 if not text.strip():
                     continue
 
@@ -394,10 +401,12 @@ If no faces: {"faces": []}"""
                         "type": pii_type,
                         "coordinates": [x, y, x + w, y + h],
                         "confidence": conf,
-                        "text": text
+                        "text": text,
                     }
                     detections.append(detection)
-                    logger.info(f"Found {pii_type.upper()}: '{text}' at [{x}, {y}, {x+w}, {y+h}] (conf: {conf:.2f})")
+                    logger.info(
+                        f"Found {pii_type.upper()}: '{text}' at [{x}, {y}, {x+w}, {y+h}] (conf: {conf:.2f})"
+                    )
 
             logger.info(f"EasyOCR + Regex found {len(detections)} PII items")
             return detections
@@ -406,7 +415,9 @@ If no faces: {"faces": []}"""
             logger.error(f"Error extracting PII from PDF with EasyOCR: {e}", exc_info=True)
             return []
 
-    async def detect_text_pii_with_pdfplumber(self, pdf_bytes: bytes, page_num: int = 0) -> list[dict[str, Any]]:
+    async def detect_text_pii_with_pdfplumber(
+        self, pdf_bytes: bytes, page_num: int = 0
+    ) -> list[dict[str, Any]]:
         """
         비동기 래퍼: pdfplumber + Presidio로 텍스트 PII 감지
 
@@ -418,6 +429,7 @@ If no faces: {"faces": []}"""
             감지된 PII 정보 리스트
         """
         import asyncio
+
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.extract_pii_from_pdf_page, pdf_bytes, page_num)
 
@@ -437,6 +449,7 @@ If no faces: {"faces": []}"""
 
         try:
             import asyncio
+
             loop = asyncio.get_event_loop()
 
             def _detect():
@@ -444,7 +457,7 @@ If no faces: {"faces": []}"""
                 from easyocr import Reader
 
                 # EasyOCR Reader 초기화 (한국어 + 영어)
-                reader = Reader(['ko', 'en'], gpu=True)
+                reader = Reader(["ko", "en"], gpu=True)
 
                 # EasyOCR로 텍스트 추출
                 img_array = np.array(image)
@@ -458,7 +471,7 @@ If no faces: {"faces": []}"""
                 # 전체 텍스트에서 PII 분석 (문맥 기반)
                 all_results = self.presidio_analyzer.analyze(
                     text=full_text,
-                    language='en',
+                    language="en",
                     entities=[
                         "PHONE_NUMBER",
                         "EMAIL_ADDRESS",
@@ -469,25 +482,25 @@ If no faces: {"faces": []}"""
                         "US_DRIVER_LICENSE",
                         "US_PASSPORT",
                         "NRP",  # Named Entity Recognition Patterns
-                    ]
+                    ],
                 )
 
                 # 감지된 PII 텍스트 집합
                 pii_texts = set()
                 for result in all_results:
-                    pii_text = full_text[result.start:result.end]
+                    pii_text = full_text[result.start : result.end]
                     pii_texts.add(pii_text.lower().strip())
                     logger.info(f"Presidio found in context: {result.entity_type} = '{pii_text}'")
 
                 # OCR 박스와 매칭
-                for (bbox, text, _conf) in ocr_results:
+                for bbox, text, _conf in ocr_results:
                     if not text.strip():
                         continue
 
                     # 개별 단어도 체크
                     word_results = self.presidio_analyzer.analyze(
                         text=text,
-                        language='en',
+                        language="en",
                         entities=[
                             "PHONE_NUMBER",
                             "EMAIL_ADDRESS",
@@ -495,7 +508,7 @@ If no faces: {"faces": []}"""
                             "LOCATION",
                             "US_SSN",
                             "CREDIT_CARD",
-                        ]
+                        ],
                     )
 
                     # 문맥에서 찾은 PII와 매칭되는지 확인
@@ -529,10 +542,12 @@ If no faces: {"faces": []}"""
                             "type": entity_type.lower(),
                             "coordinates": [x, y, x + w, y + h],
                             "confidence": confidence,
-                            "text": text
+                            "text": text,
                         }
                         detections.append(detection)
-                        logger.info(f"Presidio detected {entity_type}: {text} at [{x}, {y}, {x+w}, {y+h}]")
+                        logger.info(
+                            f"Presidio detected {entity_type}: {text} at [{x}, {y}, {x+w}, {y+h}]"
+                        )
 
                 return detections
 
@@ -545,9 +560,7 @@ If no faces: {"faces": []}"""
             return []
 
     def mask_image_with_detections(
-        self,
-        image: Image.Image,
-        detections: list[dict[str, Any]]
+        self, image: Image.Image, detections: list[dict[str, Any]]
     ) -> Image.Image:
         """
         감지된 PII 영역을 마스킹 처리
@@ -571,8 +584,8 @@ If no faces: {"faces": []}"""
             return masked
 
         for idx, detection in enumerate(detections):
-            coords = detection['coordinates']
-            pii_type = detection.get('type', 'unknown')
+            coords = detection["coordinates"]
+            pii_type = detection.get("type", "unknown")
 
             # 좌표 추출
             x1, y1, x2, y2 = coords
@@ -582,7 +595,7 @@ If no faces: {"faces": []}"""
             logger.info(f"  Size: {x2-x1}x{y2-y1}")
 
             # PII 타입별 마스킹 처리
-            if pii_type == 'face':
+            if pii_type == "face":
                 # 얼굴은 원형으로 마스킹
                 # 중심점 계산
                 center_x = (x1 + x2) // 2
@@ -595,10 +608,9 @@ If no faces: {"faces": []}"""
 
                 # 원형 마스킹
                 draw.ellipse(
-                    [center_x - radius, center_y - radius,
-                     center_x + radius, center_y + radius],
-                    fill='black',
-                    outline='black'
+                    [center_x - radius, center_y - radius, center_x + radius, center_y + radius],
+                    fill="black",
+                    outline="black",
                 )
                 logger.info(f"  Circle: center=({center_x}, {center_y}), radius={radius}")
             else:
@@ -609,7 +621,7 @@ If no faces: {"faces": []}"""
                 x2_pad = min(image.width, x2 + padding)
                 y2_pad = min(image.height, y2 + padding)
 
-                draw.rectangle([x1_pad, y1_pad, x2_pad, y2_pad], fill='black', outline='black')
+                draw.rectangle([x1_pad, y1_pad, x2_pad, y2_pad], fill="black", outline="black")
                 logger.info(f"  Rectangle with padding ({padding}px)")
 
             logger.info("  ✓ Masked successfully")
@@ -635,24 +647,21 @@ If no faces: {"faces": []}"""
         # RGB 모드로 변환
         rgb_images = []
         for img in images:
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             rgb_images.append(img)
 
         # PDF로 저장
         rgb_images[0].save(
             output,
-            format='PDF',
+            format="PDF",
             save_all=True,
-            append_images=rgb_images[1:] if len(rgb_images) > 1 else []
+            append_images=rgb_images[1:] if len(rgb_images) > 1 else [],
         )
 
         return output.getvalue()
 
-    async def mask_image_file(
-        self,
-        file_url: str
-    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
+    async def mask_image_file(self, file_url: str) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         이미지 파일 마스킹 처리
 
@@ -677,28 +686,25 @@ If no faces: {"faces": []}"""
 
         # 4. 바이트로 변환
         output = io.BytesIO()
-        masked_image.save(output, format='PNG')
+        masked_image.save(output, format="PNG")
         masked_bytes = output.getvalue()
 
         # 5. 썸네일 생성
         thumbnail = masked_image.copy()
         thumbnail.thumbnail((300, 400))
         thumb_io = io.BytesIO()
-        thumbnail.save(thumb_io, format='PNG')
+        thumbnail.save(thumb_io, format="PNG")
         thumbnail_bytes = thumb_io.getvalue()
 
         # 페이지 정보 추가
         for det in detections:
-            det['page'] = 1
+            det["page"] = 1
 
         logger.info(f"Masking complete: {len(detections)} PII items detected")
 
         return masked_bytes, thumbnail_bytes, detections
 
-    async def mask_pdf(
-        self,
-        file_url: str
-    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
+    async def mask_pdf(self, file_url: str) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         PDF 파일 마스킹 처리 (얼굴 감지 전용)
 
@@ -742,7 +748,7 @@ If no faces: {"faces": []}"""
 
                 # 페이지 정보 추가
                 for det in detections:
-                    det['page'] = page_num
+                    det["page"] = page_num
                 all_detections.extend(detections)
 
                 logger.info(f"First page: detected {len(detections)} face(s)")
@@ -760,7 +766,7 @@ If no faces: {"faces": []}"""
         thumbnail = masked_images[0].copy()
         thumbnail.thumbnail((300, 400))
         thumb_io = io.BytesIO()
-        thumbnail.save(thumb_io, format='PNG')
+        thumbnail.save(thumb_io, format="PNG")
         thumbnail_bytes = thumb_io.getvalue()
 
         logger.info(f"Masking complete: {len(all_detections)} PII items detected")

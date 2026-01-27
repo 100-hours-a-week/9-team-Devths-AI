@@ -46,11 +46,13 @@ router = APIRouter(
 tasks_db = {}
 task_id_counter = 0  # 정수 task_id 카운터
 
+
 def get_next_task_id() -> int:
     """Get next task_id as integer"""
     global task_id_counter
     task_id_counter += 1
     return task_id_counter
+
 
 # Initialize services
 llm_service = None
@@ -94,16 +96,14 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     """API 키 검증"""
     # 실제로는 환경변수나 DB에서 확인
     if x_api_key != "your-api-key-here":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     return x_api_key
 
 
 # ============================================================================
 # API 1: 텍스트 추출 + 임베딩 (통합) (비동기)
 # ============================================================================
+
 
 @router.post(
     "/text/extract",
@@ -139,7 +139,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                             "value": {
                                 "detail": {
                                     "code": "INVALID_REQUEST",
-                                    "message": "resume과 job_posting 는 필수 입력해야합니다"
+                                    "message": "resume과 job_posting 는 필수 입력해야합니다",
                                 }
                             }
                         },
@@ -148,7 +148,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                                 "detail": {
                                     "code": "INVALID_FILE_TYPE",
                                     "message": "file_type은 pdf 또는 image만 가능합니다",
-                                    "field": "resume.file_type"
+                                    "field": "resume.file_type",
                                 }
                             }
                         },
@@ -157,26 +157,23 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                                 "detail": {
                                     "code": "INVALID_DOCUMENT",
                                     "message": "s3_key 또는 text 중 하나는 필수입니다",
-                                    "field": "resume"
+                                    "field": "resume",
                                 }
                             }
-                        }
+                        },
                     }
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": {
-                            "code": "UNAUTHORIZED",
-                            "message": "유효하지 않은 API Key입니다"
-                        }
+                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Not Found",
@@ -185,11 +182,11 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                     "example": {
                         "detail": {
                             "code": "FILE_NOT_FOUND",
-                            "message": "파일을 찾을 수 없습니다: users/12/resume/abc123.pdf"
+                            "message": "파일을 찾을 수 없습니다: users/12/resume/abc123.pdf",
                         }
                     }
                 }
-            }
+            },
         },
         422: {
             "description": "Unprocessable Entity",
@@ -198,11 +195,11 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                     "example": {
                         "detail": {
                             "code": "OCR_FAILED",
-                            "message": "이미지에서 텍스트를 추출할 수 없습니다"
+                            "message": "이미지에서 텍스트를 추출할 수 없습니다",
                         }
                     }
                 }
-            }
+            },
         },
         429: {
             "description": "Too Many Requests",
@@ -211,11 +208,11 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                     "example": {
                         "detail": {
                             "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요"
+                            "message": "요청 한도 초과. 1분 후 재시도하세요",
                         }
                     }
                 }
-            }
+            },
         },
         500: {
             "description": "Internal Server Error",
@@ -224,11 +221,11 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                     "example": {
                         "detail": {
                             "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다"
+                            "message": "내부 서버 오류가 발생했습니다",
                         }
                     }
                 }
-            }
+            },
         },
         503: {
             "description": "Service Unavailable",
@@ -239,7 +236,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                             "value": {
                                 "detail": {
                                     "code": "LLM_UNAVAILABLE",
-                                    "message": "AI 서비스에 연결할 수 없습니다"
+                                    "message": "AI 서비스에 연결할 수 없습니다",
                                 }
                             }
                         },
@@ -247,14 +244,14 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
                             "value": {
                                 "detail": {
                                     "code": "S3_UNAVAILABLE",
-                                    "message": "파일 스토리지에 연결할 수 없습니다"
+                                    "message": "파일 스토리지에 연결할 수 없습니다",
                                 }
                             }
-                        }
+                        },
                     }
                 }
-            }
-        }
+            },
+        },
     },
 )
 async def text_extract(request: TextExtractRequest):
@@ -266,7 +263,7 @@ async def text_extract(request: TextExtractRequest):
         "status": TaskStatus.PROCESSING,
         "created_at": datetime.now(),
         "room_id": request.room_id,
-        "request": request.model_dump()
+        "request": request.model_dump(),
     }
 
     # 백그라운드에서 처리
@@ -275,7 +272,7 @@ async def text_extract(request: TextExtractRequest):
             rag = get_services()
 
             # 모델 선택 (기본값: gemini)
-            model = request.model if hasattr(request, 'model') and request.model else "gemini"
+            model = request.model if hasattr(request, "model") and request.model else "gemini"
             logger.info("")
             logger.info(f"{'='*80}")
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
@@ -285,7 +282,9 @@ async def text_extract(request: TextExtractRequest):
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
-            async def extract_document(doc_input: DocumentInput, doc_type: str) -> DocumentExtractResult:
+            async def extract_document(
+                doc_input: DocumentInput, doc_type: str
+            ) -> DocumentExtractResult:
                 """문서 추출 헬퍼 함수"""
                 logger.info(f"📄 [{doc_type.upper()}] 처리 시작")
 
@@ -303,11 +302,13 @@ async def text_extract(request: TextExtractRequest):
                         ocr_result = await rag.vllm.extract_text_from_file(
                             file_url=str(doc_input.s3_key),
                             file_type=file_type,
-                            user_id=str(request.user_id)
+                            user_id=str(request.user_id),
                         )
                         extracted_text = ocr_result["extracted_text"]
                         pages = [PageText(**page) for page in ocr_result["pages"]]
-                        logger.info(f"   ✅ [vLLM OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})")
+                        logger.info(
+                            f"   ✅ [vLLM OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})"
+                        )
 
                     # Gemini 모드: Gemini Vision API 사용 (고성능)
                     else:
@@ -315,12 +316,13 @@ async def text_extract(request: TextExtractRequest):
                             logger.warning("   ⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
                         logger.info("   🚀 [Gemini 고성능 모드] Gemini Vision API OCR 시작")
                         ocr_result = await rag.llm.extract_text_from_file(
-                            file_url=str(doc_input.s3_key),
-                            file_type=file_type
+                            file_url=str(doc_input.s3_key), file_type=file_type
                         )
                         extracted_text = ocr_result["extracted_text"]
                         pages = [PageText(**page) for page in ocr_result["pages"]]
-                        logger.info(f"   ✅ [Gemini OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})")
+                        logger.info(
+                            f"   ✅ [Gemini OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})"
+                        )
 
                 # 텍스트 직접 입력
                 else:
@@ -338,15 +340,13 @@ async def text_extract(request: TextExtractRequest):
                         metadata={
                             "user_id": request.user_id,
                             "file_id": doc_input.file_id,
-                            "created_at": datetime.now().isoformat()
-                        }
+                            "created_at": datetime.now().isoformat(),
+                        },
                     )
                     logger.info(f"   ✅ VectorDB 저장 완료: {document_id}")
 
                 return DocumentExtractResult(
-                    file_id=doc_input.file_id,
-                    extracted_text=extracted_text,
-                    pages=pages
+                    file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
                 )
 
             # 이력서와 채용공고 각각 처리
@@ -360,23 +360,19 @@ async def text_extract(request: TextExtractRequest):
                 analysis_result = await rag.llm.generate_analysis(
                     resume_text=resume_result.extracted_text,
                     posting_text=job_posting_result.extracted_text,
-                    user_id=str(request.user_id)
+                    user_id=str(request.user_id),
                 )
                 logger.info("✅ 분석 리포트 생성 완료")
             except Exception as e:
                 logger.warning(f"⚠️ 분석 리포트 생성 실패: {e} (OCR 텍스트만 반환)")
                 analysis_result = {
-                    "resume_analysis": {
-                        "strengths": [],
-                        "weaknesses": [],
-                        "suggestions": []
-                    },
+                    "resume_analysis": {"strengths": [], "weaknesses": [], "suggestions": []},
                     "posting_analysis": {
                         "company": "알 수 없음",
                         "position": "알 수 없음",
                         "required_skills": [],
-                        "preferred_skills": []
-                    }
+                        "preferred_skills": [],
+                    },
                 }
 
             # 결과 저장 (명세서에 따른 응답 구조)
@@ -386,7 +382,7 @@ async def text_extract(request: TextExtractRequest):
                 resume_ocr=resume_result.extracted_text,
                 job_posting_ocr=job_posting_result.extracted_text,
                 resume_analysis=analysis_result.get("resume_analysis"),
-                posting_analysis=analysis_result.get("posting_analysis")
+                posting_analysis=analysis_result.get("posting_analysis"),
             ).model_dump()
 
             logger.info("")
@@ -397,10 +393,7 @@ async def text_extract(request: TextExtractRequest):
         except Exception as e:
             logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
             tasks_db[task_id]["status"] = TaskStatus.FAILED
-            tasks_db[task_id]["error"] = {
-                "code": ErrorCode.PROCESSING_ERROR,
-                "message": str(e)
-            }
+            tasks_db[task_id]["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
 
     asyncio.create_task(process_text_extract())
 
@@ -410,6 +403,7 @@ async def text_extract(request: TextExtractRequest):
 # ============================================================================
 # 비동기 작업 상태 조회
 # ============================================================================
+
 
 @router.get(
     "/task/{task_id}",
@@ -422,13 +416,10 @@ async def text_extract(request: TextExtractRequest):
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": {
-                            "code": "UNAUTHORIZED",
-                            "message": "유효하지 않은 API Key입니다"
-                        }
+                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
                     }
                 }
-            }
+            },
         },
         404: {
             "description": "Not Found",
@@ -437,20 +428,23 @@ async def text_extract(request: TextExtractRequest):
                     "example": {
                         "detail": {
                             "code": "TASK_NOT_FOUND",
-                            "message": "작업을 찾을 수 없습니다: 12"
+                            "message": "작업을 찾을 수 없습니다: 12",
                         }
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def get_task_status(task_id: int):
     """비동기 작업 상태 조회"""
     if task_id not in tasks_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": ErrorCode.TASK_NOT_FOUND.value, "message": f"작업을 찾을 수 없습니다: {task_id}"}
+            detail={
+                "code": ErrorCode.TASK_NOT_FOUND.value,
+                "message": f"작업을 찾을 수 없습니다: {task_id}",
+            },
         )
 
     task = tasks_db[task_id]
@@ -466,13 +460,14 @@ async def get_task_status(task_id: int):
         progress=task.get("progress"),
         message=task.get("message"),
         result=result,
-        error=task.get("error")
+        error=task.get("error"),
     )
 
 
 # ============================================================================
 # API 2: 채팅 (통합: 대화/분석/면접) (스트리밍)
 # ============================================================================
+
 
 async def generate_chat_stream(request: ChatRequest):
     """채팅 응답 스트리밍 생성"""
@@ -484,11 +479,11 @@ async def generate_chat_stream(request: ChatRequest):
         mode = request.context.mode if request.context else ChatMode.GENERAL
 
     rag = get_services()
-    newline = '\n'
-    sse_end = '\n\n'
+    newline = "\n"
+    sse_end = "\n\n"
 
     # 모델 선택 (gemini 또는 vllm)
-    model = request.model.value if hasattr(request.model, 'value') else str(request.model)
+    model = request.model.value if hasattr(request.model, "value") else str(request.model)
     logger.info("")
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
@@ -507,20 +502,25 @@ async def generate_chat_stream(request: ChatRequest):
         try:
             # Convert ChatMessage list to dict list for service compatibility
             history_dict = [
-                {"role": msg.role.value if hasattr(msg.role, 'value') else str(msg.role), "content": msg.content}
+                {
+                    "role": msg.role.value if hasattr(msg.role, "value") else str(msg.role),
+                    "content": msg.content,
+                }
                 for msg in request.history
             ]
 
             # Determine if this is an analysis request
             user_message = request.message or ""
-            is_analysis = any(keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"])
+            is_analysis = any(
+                keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"]
+            )
 
             # 면접 세션이 활성화되어 있고, 이전 질문이 있으면 꼬리질문 생성
             is_followup = (
-                request.session_id is not None and
-                len(history_dict) >= 2 and
-                history_dict[-2].get("role") == "assistant" and
-                history_dict[-1].get("role") == "user"
+                request.session_id is not None
+                and len(history_dict) >= 2
+                and history_dict[-2].get("role") == "assistant"
+                and history_dict[-1].get("role") == "user"
             )
 
             if is_analysis:
@@ -541,8 +541,7 @@ async def generate_chat_stream(request: ChatRequest):
                     # 1. VectorDB에서 OCR로 추출된 모든 문서 가져오기
                     logger.info("📂 [1/3] VectorDB에서 업로드된 문서 조회 중...")
                     full_context = await rag.retrieve_all_documents(
-                        user_id=request.user_id,
-                        context_types=["resume", "job_posting"]
+                        user_id=request.user_id, context_types=["resume", "job_posting"]
                     )
 
                     if not full_context:
@@ -572,7 +571,7 @@ async def generate_chat_stream(request: ChatRequest):
                             user_message=analysis_prompt,
                             context=None,
                             history=[],
-                            system_prompt="당신은 채용 전문가입니다. 이력서와 채용공고를 분석하여 명확한 피드백을 제공하세요."
+                            system_prompt="당신은 채용 전문가입니다. 이력서와 채용공고를 분석하여 명확한 피드백을 제공하세요.",
                         ):
                             full_response += chunk
                             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
@@ -598,7 +597,7 @@ async def generate_chat_stream(request: ChatRequest):
                         history=history_dict,
                         use_rag=True,
                         context_types=["resume", "job_posting"],
-                        model="gemini"
+                        model="gemini",
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
@@ -626,7 +625,7 @@ async def generate_chat_stream(request: ChatRequest):
                         "situation": "unknown",
                         "task": "unknown",
                         "action": "unknown",
-                        "result": "unknown"
+                        "result": "unknown",
                     }
 
                     # 꼬리질문 생성
@@ -635,7 +634,7 @@ async def generate_chat_stream(request: ChatRequest):
                         candidate_answer=candidate_answer,
                         star_analysis=star_analysis,
                         model=model,
-                        user_id=request.user_id
+                        user_id=request.user_id,
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
@@ -644,7 +643,11 @@ async def generate_chat_stream(request: ChatRequest):
 
                 else:
                     # 일반 대화 또는 면접 질문 요청
-                    if "면접 질문" in user_message or "면접질문" in user_message or "면접" in user_message:
+                    if (
+                        "면접 질문" in user_message
+                        or "면접질문" in user_message
+                        or "면접" in user_message
+                    ):
                         # 면접 질문 요청 시 portfolio(면접 질문 데이터)만 검색
                         context_types = ["portfolio"]
                         logger.info("🎯 면접 질문 요청 감지 → portfolio 컬렉션만 검색")
@@ -663,12 +666,14 @@ async def generate_chat_stream(request: ChatRequest):
                         history=history_dict,
                         use_rag=True,  # RAG 활성화
                         context_types=context_types,
-                        model=model
+                        model=model,
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
-                    logger.info(f"✅ [{model.upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)")
+                    logger.info(
+                        f"✅ [{model.upper()}] 일반 대화 완료 (응답 길이: {len(full_response)}자)"
+                    )
 
         except Exception as e:
             error_msg = f"오류가 발생했습니다: {str(e)}"
@@ -679,51 +684,43 @@ async def generate_chat_stream(request: ChatRequest):
             "success": True,
             "mode": "general",
             "response": full_response,
-            "tool_used": {"tool": "RAG", "description": "VectorDB 검색 후 LLM 응답 생성"}
+            "tool_used": {"tool": "RAG", "description": "VectorDB 검색 후 LLM 응답 생성"},
         }
         yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
     # 2. 분석 모드 (RAG 사용)
     elif mode == ChatMode.ANALYSIS:
         try:
-            content1 = f'이력서를 분석 중입니다...{newline}'
+            content1 = f"이력서를 분석 중입니다...{newline}"
             yield f"data: {json.dumps({'type': 'chunk', 'content': content1}, ensure_ascii=False)}{sse_end}"
             await asyncio.sleep(0.3)
 
-            content2 = f'채용공고를 분석 중입니다...{newline}'
+            content2 = f"채용공고를 분석 중입니다...{newline}"
             yield f"data: {json.dumps({'type': 'chunk', 'content': content2}, ensure_ascii=False)}{sse_end}"
             await asyncio.sleep(0.3)
 
-            content3 = f'매칭도를 계산 중입니다...{newline}'
+            content3 = f"매칭도를 계산 중입니다...{newline}"
             yield f"data: {json.dumps({'type': 'chunk', 'content': content3}, ensure_ascii=False)}{sse_end}"
 
             # RAG를 사용하여 실제 분석 수행
             analysis_result = await rag.analyze_resume_and_posting(
                 user_id=request.user_id,
                 resume_id=request.context.resume_id,
-                posting_id=request.context.posting_id
+                posting_id=request.context.posting_id,
             )
 
             # Convert to Pydantic models
             analysis = AnalysisResult(
                 resume_analysis=ResumeAnalysis(**analysis_result.get("resume_analysis", {})),
                 posting_analysis=PostingAnalysis(**analysis_result.get("posting_analysis", {})),
-                matching=MatchingResult(**analysis_result.get("matching", {}))
+                matching=MatchingResult(**analysis_result.get("matching", {})),
             )
 
-            result = {
-                "success": True,
-                "mode": "analysis",
-                "analysis": analysis.model_dump()
-            }
+            result = {"success": True, "mode": "analysis", "analysis": analysis.model_dump()}
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
-            error_result = {
-                "success": False,
-                "mode": "analysis",
-                "error": str(e)
-            }
+            error_result = {"success": False, "mode": "analysis", "error": str(e)}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
     # 3. 면접 모드 - 맞춤형 질문 생성 및 대화
@@ -733,7 +730,7 @@ async def generate_chat_stream(request: ChatRequest):
             interview_type = request.context.interview_type or "technical"
             interview_type_kr = "기술" if interview_type == "technical" else "인성"
 
-            content = f'{interview_type_kr} 면접 질문을 생성 중입니다...{newline}'
+            content = f"{interview_type_kr} 면접 질문을 생성 중입니다...{newline}"
             yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}{sse_end}"
 
             # RAG를 사용하여 사용자 맞춤 면접 질문 생성
@@ -742,7 +739,7 @@ async def generate_chat_stream(request: ChatRequest):
                 query=f"{interview_type_kr} 면접 질문을 위한 사용자 정보",
                 user_id=request.user_id,
                 context_types=["resume", "portfolio", "job_posting"],
-                n_results=1  # 속도 개선을 위해 1개만 검색
+                n_results=1,  # 속도 개선을 위해 1개만 검색
             )
 
             # 면접 질문 생성 프롬프트 (prompts 모듈 사용)
@@ -755,7 +752,7 @@ async def generate_chat_stream(request: ChatRequest):
                 question_prompt = create_interview_question_prompt(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
-                    interview_type=interview_type
+                    interview_type=interview_type,
                 )
             else:
                 question_prompt = f"일반적인 {interview_type_kr} 면접 질문 1개를 짧게 생성해주세요:"
@@ -763,7 +760,9 @@ async def generate_chat_stream(request: ChatRequest):
             full_question = ""
 
             # vLLM 또는 Gemini 선택
-            model_choice = request.model.value if hasattr(request.model, 'value') else str(request.model)
+            model_choice = (
+                request.model.value if hasattr(request.model, "value") else str(request.model)
+            )
 
             if model_choice == "vllm" and rag.vllm:
                 logger.info("💬 [vLLM] 면접 질문 생성 시작")
@@ -771,7 +770,7 @@ async def generate_chat_stream(request: ChatRequest):
                     user_message=question_prompt,
                     context=None,
                     history=[],
-                    system_prompt=SYSTEM_INTERVIEW
+                    system_prompt=SYSTEM_INTERVIEW,
                 ):
                     full_question += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
@@ -791,23 +790,22 @@ async def generate_chat_stream(request: ChatRequest):
                 "success": True,
                 "mode": "interview_question",
                 "response": full_question.strip(),
-                "interview_type": interview_type
+                "interview_type": interview_type,
             }
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
             logger.error(f"Interview question generation error: {e}")
-            error_result = {
-                "success": False,
-                "mode": "interview_question",
-                "error": str(e)
-            }
+            error_result = {"success": False, "mode": "interview_question", "error": str(e)}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
     # 4. 면접 리포트 (Pydantic AI 사용)
     elif mode == ChatMode.INTERVIEW_REPORT:
         try:
-            chunks = [f"면접 답변을 분석 중입니다...{newline}", f"종합 리포트를 작성 중입니다...{newline}"]
+            chunks = [
+                f"면접 답변을 분석 중입니다...{newline}",
+                f"종합 리포트를 작성 중입니다...{newline}",
+            ]
 
             for chunk in chunks:
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
@@ -817,17 +815,15 @@ async def generate_chat_stream(request: ChatRequest):
             qa_list = request.context if isinstance(request.context, list) else []
 
             # Q&A 배열을 문자열로 변환하여 프롬프트 생성
-            qa_history = "\n".join([
-                f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}"
-                for item in qa_list
-            ])
+            qa_history = "\n".join(
+                [f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}" for item in qa_list]
+            )
 
             # 면접 리포트 생성 프롬프트
             from app.prompts import create_interview_report_prompt
+
             report_prompt = create_interview_report_prompt(
-                qa_history=qa_history,
-                resume_text="",
-                job_posting_text=""
+                qa_history=qa_history, resume_text="", job_posting_text=""
             )
 
             # LLM으로 리포트 생성
@@ -844,14 +840,11 @@ async def generate_chat_stream(request: ChatRequest):
 
             # JSON 파싱 시도
             from app.parsers import extract_json_from_text
+
             parsed_report = extract_json_from_text(full_report_text)
 
             if parsed_report:
-                result = {
-                    "success": True,
-                    "mode": "interview_report",
-                    "report": parsed_report
-                }
+                result = {"success": True, "mode": "interview_report", "report": parsed_report}
             else:
                 # 파싱 실패 시 기본 구조
                 result = {
@@ -863,25 +856,21 @@ async def generate_chat_stream(request: ChatRequest):
                                 "question": qa.get("question", ""),
                                 "answer": qa.get("answer", ""),
                                 "good_points": [],
-                                "improvements": []
+                                "improvements": [],
                             }
                             for qa in qa_list
                         ],
                         "strength_patterns": [],
                         "weakness_patterns": [],
-                        "learning_guide": []
-                    }
+                        "learning_guide": [],
+                    },
                 }
 
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
             logger.error(f"Interview report generation error: {e}")
-            error_result = {
-                "success": False,
-                "mode": "interview_report",
-                "error": str(e)
-            }
+            error_result = {"success": False, "mode": "interview_report", "error": str(e)}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
 
@@ -920,7 +909,7 @@ async def generate_chat_stream(request: ChatRequest):
                                 "detail": {
                                     "code": "INVALID_REQUEST",
                                     "message": "room_id는 필수입니다",
-                                    "field": "room_id"
+                                    "field": "room_id",
                                 }
                             }
                         },
@@ -929,7 +918,7 @@ async def generate_chat_stream(request: ChatRequest):
                                 "detail": {
                                     "code": "INVALID_MODE",
                                     "message": "mode는 general, interview_question, interview_report 중 하나여야 합니다",
-                                    "field": "context.mode"
+                                    "field": "context.mode",
                                 }
                             }
                         },
@@ -938,26 +927,23 @@ async def generate_chat_stream(request: ChatRequest):
                                 "detail": {
                                     "code": "INVALID_INTERVIEW_TYPE",
                                     "message": "interview_type은 technical 또는 personality만 가능합니다",
-                                    "field": "context.interview_type"
+                                    "field": "context.interview_type",
                                 }
                             }
-                        }
+                        },
                     }
                 }
-            }
+            },
         },
         401: {
             "description": "Unauthorized",
             "content": {
                 "application/json": {
                     "example": {
-                        "detail": {
-                            "code": "UNAUTHORIZED",
-                            "message": "유효하지 않은 API Key입니다"
-                        }
+                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
                     }
                 }
-            }
+            },
         },
         422: {
             "description": "Unprocessable Entity",
@@ -966,11 +952,11 @@ async def generate_chat_stream(request: ChatRequest):
                     "example": {
                         "detail": {
                             "code": "MISSING_CONTEXT",
-                            "message": "면접 리포트 생성 시 context는 Q&A 배열이어야 합니다"
+                            "message": "면접 리포트 생성 시 context는 Q&A 배열이어야 합니다",
                         }
                     }
                 }
-            }
+            },
         },
         429: {
             "description": "Too Many Requests",
@@ -979,11 +965,11 @@ async def generate_chat_stream(request: ChatRequest):
                     "example": {
                         "detail": {
                             "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요"
+                            "message": "요청 한도 초과. 1분 후 재시도하세요",
                         }
                     }
                 }
-            }
+            },
         },
         500: {
             "description": "Internal Server Error",
@@ -992,11 +978,11 @@ async def generate_chat_stream(request: ChatRequest):
                     "example": {
                         "detail": {
                             "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다"
+                            "message": "내부 서버 오류가 발생했습니다",
                         }
                     }
                 }
-            }
+            },
         },
         503: {
             "description": "Service Unavailable",
@@ -1005,25 +991,23 @@ async def generate_chat_stream(request: ChatRequest):
                     "example": {
                         "detail": {
                             "code": "LLM_UNAVAILABLE",
-                            "message": "AI 서비스에 연결할 수 없습니다"
+                            "message": "AI 서비스에 연결할 수 없습니다",
                         }
                     }
                 }
-            }
-        }
-    }
+            },
+        },
+    },
 )
 async def chat(request: ChatRequest):
     """채팅 처리 (통합)"""
-    return StreamingResponse(
-        generate_chat_stream(request),
-        media_type="text/event-stream"
-    )
+    return StreamingResponse(generate_chat_stream(request), media_type="text/event-stream")
 
 
 # ============================================================================
 # API 3: 캘린더 일정 파싱 (동기)
 # ============================================================================
+
 
 @router.post(
     "/calendar/parse",
@@ -1040,7 +1024,7 @@ async def chat(request: ChatRequest):
     - 모달에서 채용공고 파일/텍스트 첨부 → 일정 정보 추출
     - Frontend가 모달 폼에 자동 채워넣음
     - 사용자 확인/수정 → 저장 → Backend가 Google Calendar에 추가
-    """
+    """,
 )
 async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
     """캘린더 일정 파싱"""
@@ -1054,9 +1038,9 @@ async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
         schedules=[
             {"stage": "서류 마감", "date": "2026-01-15", "time": None},
             {"stage": "코딩테스트", "date": "2026-01-20", "time": "14:00"},
-            {"stage": "1차 면접", "date": "2026-01-25", "time": None}
+            {"stage": "1차 면접", "date": "2026-01-25", "time": None},
         ],
-        hashtags=["#카카오", "#백엔드", "#신입"]
+        hashtags=["#카카오", "#백엔드", "#신입"],
     )
 
 
@@ -1065,4 +1049,3 @@ async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
 # ============================================================================
 # 이 API는 app/api/routes/masking.py로 이동되었습니다.
 # masking.py에서 파일 기반 저장소와 실제 Gemini API를 사용합니다.
-

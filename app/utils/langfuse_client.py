@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 # langfuse는 선택 의존성: 설치되어 있지 않아도 서비스가 동작해야 함
 try:
     from langfuse import Langfuse  # type: ignore
+
     LANGFUSE_AVAILABLE = True
 except Exception:  # pragma: no cover
     Langfuse = Any  # type: ignore
@@ -71,11 +72,7 @@ def get_langfuse_client() -> Langfuse | None:
         return None
 
     try:
-        _langfuse_client = Langfuse(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host
-        )
+        _langfuse_client = Langfuse(public_key=public_key, secret_key=secret_key, host=host)
         logger.info(f"Langfuse client initialized (host: {host})")
         return _langfuse_client
     except Exception as e:
@@ -83,11 +80,7 @@ def get_langfuse_client() -> Langfuse | None:
         return None
 
 
-def trace_llm_call(
-    name: str,
-    user_id: str | None = None,
-    metadata: dict | None = None
-):
+def trace_llm_call(name: str, user_id: str | None = None, metadata: dict | None = None):
     """
     LLM 호출 추적을 위한 trace 생성
 
@@ -123,7 +116,7 @@ def create_generation(
     model: str,
     input_text: str,
     output_text: str | None = None,
-    metadata: dict | None = None
+    metadata: dict | None = None,
 ):
     """
     Generation 생성 (LLM 호출 기록)

@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 class VLLMService:
     """vLLM Service for chatbot using GCP GPU server"""
 
-    def __init__(self, base_url: str | None = None, ocr_only: bool = False, model_name: str | None = None):
+    def __init__(
+        self, base_url: str | None = None, ocr_only: bool = False, model_name: str | None = None
+    ):
         """
         Initialize vLLM Service
 
@@ -52,7 +54,9 @@ class VLLMService:
             return
 
         # vLLM 모델명 읽기
-        self.model_name = model_name or os.getenv("VLLM_MODEL_NAME", "MLP-KTLim/llama-3-Korean-Bllossom-8B")
+        self.model_name = model_name or os.getenv(
+            "VLLM_MODEL_NAME", "MLP-KTLim/llama-3-Korean-Bllossom-8B"
+        )
 
         # 로깅
         logger.info("🌐 vLLM Service initialized with GCP GPU server")
@@ -64,7 +68,7 @@ class VLLMService:
         return {
             "server_url": self.base_url,
             "model_name": self.model_name,
-            "ocr_only": self.ocr_only
+            "ocr_only": self.ocr_only,
         }
 
     async def generate_response(
@@ -72,7 +76,7 @@ class VLLMService:
         user_message: str,
         context: str | None = None,
         history: list[dict[str, str]] | None = None,
-        system_prompt: str | None = None
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
         """
         Generate streaming response from vLLM
@@ -92,17 +96,16 @@ class VLLMService:
 
             # Add system prompt if provided
             if system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
+                messages.append({"role": "system", "content": system_prompt})
 
             # Add context if provided
             if context:
-                messages.append({
-                    "role": "system",
-                    "content": f"관련 정보:\n{context}\n\n위 관련 정보를 참고하여 질문에 답변해주세요."
-                })
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": f"관련 정보:\n{context}\n\n위 관련 정보를 참고하여 질문에 답변해주세요.",
+                    }
+                )
 
             # Add history
             if history:
@@ -113,19 +116,13 @@ class VLLMService:
                         content = msg.get("content", "")
                     else:
                         # Pydantic model (ChatMessage)
-                        role = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
+                        role = msg.role.value if hasattr(msg.role, "value") else str(msg.role)
                         content = msg.content
 
-                    messages.append({
-                        "role": role,
-                        "content": content
-                    })
+                    messages.append({"role": role, "content": content})
 
             # Add current user message
-            messages.append({
-                "role": "user",
-                "content": user_message
-            })
+            messages.append({"role": "user", "content": user_message})
 
             # Prepare request
             payload = {
@@ -134,7 +131,7 @@ class VLLMService:
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "max_tokens": 1024,
-                "stream": True
+                "stream": True,
             }
 
             # Make streaming request
@@ -143,7 +140,9 @@ class VLLMService:
 
             # URL이 유효한지 확인
             if not api_url.startswith(("http://", "https://")):
-                raise ValueError(f"Invalid URL format: {api_url}. URL must start with http:// or https://")
+                raise ValueError(
+                    f"Invalid URL format: {api_url}. URL must start with http:// or https://"
+                )
 
             # Colab ngrok URL은 HTTPS일 수 있으므로 verify=False 허용 (개발 환경)
             verify_ssl = os.getenv("VLLM_VERIFY_SSL", "true").lower() == "true"
@@ -153,10 +152,7 @@ class VLLMService:
             async with httpx.AsyncClient(timeout=60.0, verify=verify_ssl) as client:
                 try:
                     async with client.stream(
-                        "POST",
-                        api_url,
-                        json=payload,
-                        headers={"Content-Type": "application/json"}
+                        "POST", api_url, json=payload, headers={"Content-Type": "application/json"}
                     ) as response:
                         # 에러 처리 먼저
                         if response.status_code != 200:
@@ -190,6 +186,7 @@ class VLLMService:
 
                                 try:
                                     import json
+
                                     data = json.loads(data_str)
 
                                     # Extract content from choices
@@ -199,24 +196,32 @@ class VLLMService:
                                         if content:
                                             chunk_count += 1
                                             if chunk_count <= 3:  # 처음 3개만 로깅
-                                                logger.info(f"vLLM 청크 {chunk_count}: {content[:50]}...")
+                                                logger.info(
+                                                    f"vLLM 청크 {chunk_count}: {content[:50]}..."
+                                                )
                                             yield content
                                 except json.JSONDecodeError:
                                     logger.debug(f"JSON 파싱 스킵: {data_str[:50]}")
                                     continue
                                 except Exception as e:
-                                    logger.warning(f"Error parsing vLLM response chunk: {e}, data: {data_str[:100]}")
+                                    logger.warning(
+                                        f"Error parsing vLLM response chunk: {e}, data: {data_str[:100]}"
+                                    )
                                     continue
                             elif line.strip():  # 빈 라인이 아닌 경우 로깅
                                 logger.debug(f"vLLM 응답 라인 (data: 없음): {line[:100]}")
 
                         if chunk_count == 0:
-                            logger.warning("vLLM 응답에서 청크를 받지 못했습니다. 응답 형식을 확인하세요.")
+                            logger.warning(
+                                "vLLM 응답에서 청크를 받지 못했습니다. 응답 형식을 확인하세요."
+                            )
 
                 except httpx.ConnectError as e:
                     logger.error(f"vLLM 서버 연결 실패: {self.base_url}")
                     logger.error(f"연결 오류: {str(e)}")
-                    raise Exception(f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}") from e
+                    raise Exception(
+                        f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}"
+                    ) from e
                 except httpx.TimeoutException as e:
                     logger.error(f"vLLM 서버 응답 시간 초과: {self.base_url}")
                     raise Exception("vLLM 서버 응답 시간이 초과되었습니다.") from e
@@ -250,7 +255,7 @@ class VLLMService:
             from easyocr import Reader
 
             # EasyOCR Reader 초기화 (한국어 + 영어)
-            reader = Reader(['ko', 'en'], gpu=True)
+            reader = Reader(["ko", "en"], gpu=True)
 
             # 파일 단위 trace 생성 (페이지/이미지 generation을 여기에 연결)
             ocr_trace = trace_llm_call(
@@ -285,10 +290,7 @@ class VLLMService:
                     results = reader.readtext(img_array)
                     # EasyOCR 결과에서 텍스트만 추출
                     page_text = "\n".join([text for (bbox, text, conf) in results])
-                    pages.append({
-                        "page": page_num,
-                        "text": page_text
-                    })
+                    pages.append({"page": page_num, "text": page_text})
                     full_text += f"\n\n[Page {page_num}]\n{page_text}"
 
                     # 페이지 단위 generation 기록 (trace가 있을 때만)
@@ -308,10 +310,7 @@ class VLLMService:
                             },
                         )
 
-                result = {
-                    "extracted_text": full_text.strip(),
-                    "pages": pages
-                }
+                result = {"extracted_text": full_text.strip(), "pages": pages}
 
                 # 파일 요약 generation (전체 텍스트는 너무 길 수 있어 4,000자까지만 저장)
                 if ocr_trace is not None:
@@ -321,10 +320,17 @@ class VLLMService:
                         model=self.model_name,
                         input_text=f"file_type=pdf file_url_prefix={file_url[:100]}",
                         output_text=result["extracted_text"][:4000],
-                        metadata={"type": "ocr", "file_type": "pdf", "pages": len(pages), "ocr_engine": "easyocr"},
+                        metadata={
+                            "type": "ocr",
+                            "file_type": "pdf",
+                            "pages": len(pages),
+                            "ocr_engine": "easyocr",
+                        },
                     )
 
-                logger.info(f"[EasyOCR] Extracted {len(full_text)} characters from {len(pages)} pages")
+                logger.info(
+                    f"[EasyOCR] Extracted {len(full_text)} characters from {len(pages)} pages"
+                )
                 return result
             else:
                 # Single image
@@ -334,10 +340,7 @@ class VLLMService:
                 results = reader.readtext(img_array)
                 text = "\n".join([text for (bbox, text, conf) in results])
 
-                result = {
-                    "extracted_text": text,
-                    "pages": [{"page": 1, "text": text}]
-                }
+                result = {"extracted_text": text, "pages": [{"page": 1, "text": text}]}
 
                 if ocr_trace is not None:
                     create_generation(
@@ -346,7 +349,12 @@ class VLLMService:
                         model=self.model_name,
                         input_text=f"file_type=image file_url_prefix={file_url[:100]}",
                         output_text=text[:4000],
-                        metadata={"type": "ocr", "file_type": "image", "pages": 1, "ocr_engine": "easyocr"},
+                        metadata={
+                            "type": "ocr",
+                            "file_type": "image",
+                            "pages": 1,
+                            "ocr_engine": "easyocr",
+                        },
                     )
 
                 logger.info(f"[EasyOCR] Extracted {len(text)} characters from image")
@@ -359,10 +367,11 @@ class VLLMService:
     async def _download_file(self, file_url: str) -> bytes:
         """Download file from URL"""
         # Handle data: URL
-        if file_url.startswith('data:'):
+        if file_url.startswith("data:"):
             try:
                 import base64
-                header, encoded = file_url.split(',', 1)
+
+                header, encoded = file_url.split(",", 1)
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
@@ -377,6 +386,7 @@ class VLLMService:
     def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """Convert PDF to images"""
         from PIL import Image as PILImage
+
         PILImage.MAX_IMAGE_PIXELS = None
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:

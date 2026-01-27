@@ -130,10 +130,7 @@ class LLMService:
 
             # Create contents using types.Content
             contents = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=final_message)]
-                )
+                types.Content(role="user", parts=[types.Part.from_text(text=final_message)])
             ]
 
             # Create config
@@ -142,14 +139,12 @@ class LLMService:
                 top_p=0.9,
                 top_k=40,
                 max_output_tokens=2048,
-                system_instruction=system_prompt if system_prompt else None
+                system_instruction=system_prompt if system_prompt else None,
             )
 
             # Generate streaming response
             response = self.client.models.generate_content_stream(
-                model=self.model_name,
-                contents=contents,
-                config=config
+                model=self.model_name, contents=contents, config=config
             )
 
             # Stream chunks
@@ -227,12 +222,7 @@ class LLMService:
   }}
 }}"""
 
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=prompt)]
-                )
-            ]
+            contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
             config = types.GenerateContentConfig(
                 temperature=0.3,
@@ -240,18 +230,17 @@ class LLMService:
             )
 
             response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=config
+                model=self.model_name, contents=contents, config=config
             )
 
             # Extract JSON from response
             import json
+
             result_text = response.text
 
             # Try to find JSON in the response
-            start_idx = result_text.find('{')
-            end_idx = result_text.rfind('}') + 1
+            start_idx = result_text.find("{")
+            end_idx = result_text.rfind("}") + 1
 
             if start_idx != -1 and end_idx > start_idx:
                 json_str = result_text[start_idx:end_idx]
@@ -271,20 +260,20 @@ class LLMService:
                     "resume_analysis": {
                         "strengths": ["분석 결과를 파싱할 수 없습니다"],
                         "weaknesses": [],
-                        "suggestions": []
+                        "suggestions": [],
                     },
                     "posting_analysis": {
                         "company": "알 수 없음",
                         "position": "알 수 없음",
                         "required_skills": [],
-                        "preferred_skills": []
+                        "preferred_skills": [],
                     },
                     "matching": {
                         "score": 0,
                         "grade": "F",
                         "matched_skills": [],
-                        "missing_skills": []
-                    }
+                        "missing_skills": [],
+                    },
                 }
                 self._langfuse_trace_and_generation(
                     trace_name="gemini_generate_analysis",
@@ -349,12 +338,7 @@ JSON 형식으로 질문을 제공해주세요:
   "follow_up": false
 }}"""
 
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=prompt)]
-                )
-            ]
+            contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
             config = types.GenerateContentConfig(
                 temperature=0.8,
@@ -362,17 +346,16 @@ JSON 형식으로 질문을 제공해주세요:
             )
 
             response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=config
+                model=self.model_name, contents=contents, config=config
             )
 
             # Extract JSON from response
             import json
+
             result_text = response.text
 
-            start_idx = result_text.find('{')
-            end_idx = result_text.rfind('}') + 1
+            start_idx = result_text.find("{")
+            end_idx = result_text.rfind("}") + 1
 
             if start_idx != -1 and end_idx > start_idx:
                 json_str = result_text[start_idx:end_idx]
@@ -383,7 +366,11 @@ JSON 형식으로 질문을 제공해주세요:
                     input_text=prompt,
                     output_text=result_text,
                     user_id=user_id,
-                    metadata={"temperature": 0.8, "type": "interview_question", "interview_type": interview_type},
+                    metadata={
+                        "temperature": 0.8,
+                        "type": "interview_question",
+                        "interview_type": interview_type,
+                    },
                 )
                 return parsed
             else:
@@ -391,7 +378,7 @@ JSON 형식으로 질문을 제공해주세요:
                     "question": result_text,
                     "difficulty": "medium",
                     "category": interview_type,
-                    "follow_up": False
+                    "follow_up": False,
                 }
                 self._langfuse_trace_and_generation(
                     trace_name="gemini_generate_interview_question",
@@ -456,11 +443,10 @@ JSON 형식으로 질문을 제공해주세요:
 
                 for page_num, image in enumerate(images, start=1):
                     logger.info(f"Extracting text from page {page_num}/{len(images)}...")
-                    page_text = await self._extract_text_from_image(image, user_id=user_id, page_num=page_num)
-                    pages.append({
-                        "page": page_num,
-                        "text": page_text
-                    })
+                    page_text = await self._extract_text_from_image(
+                        image, user_id=user_id, page_num=page_num
+                    )
+                    pages.append({"page": page_num, "text": page_text})
                     full_text += f"\n\n[Page {page_num}]\n{page_text}"
 
                     # 페이지 단위 generation 기록 (trace가 있을 때만)
@@ -479,10 +465,7 @@ JSON 형식으로 질문을 제공해주세요:
                             },
                         )
 
-                result = {
-                    "extracted_text": full_text.strip(),
-                    "pages": pages
-                }
+                result = {"extracted_text": full_text.strip(), "pages": pages}
                 # 파일 요약 generation(전체 텍스트는 너무 길 수 있어 4,000자까지만 저장)
                 if ocr_trace is not None:
                     create_generation(
@@ -500,10 +483,7 @@ JSON 형식으로 질문을 제공해주세요:
                 image = Image.open(io.BytesIO(file_bytes))
                 text = await self._extract_text_from_image(image, user_id=user_id, page_num=1)
 
-                result = {
-                    "extracted_text": text,
-                    "pages": [{"page": 1, "text": text}]
-                }
+                result = {"extracted_text": text, "pages": [{"page": 1, "text": text}]}
                 if ocr_trace is not None:
                     create_generation(
                         trace=ocr_trace,
@@ -522,10 +502,11 @@ JSON 형식으로 질문을 제공해주세요:
     async def _download_file(self, file_url: str) -> bytes:
         """Download file from URL"""
         # Handle data: URL
-        if file_url.startswith('data:'):
+        if file_url.startswith("data:"):
             try:
                 import base64
-                header, encoded = file_url.split(',', 1)
+
+                header, encoded = file_url.split(",", 1)
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
@@ -540,6 +521,7 @@ JSON 형식으로 질문을 제공해주세요:
     def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """Convert PDF to images"""
         from PIL import Image as PILImage
+
         PILImage.MAX_IMAGE_PIXELS = None
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
@@ -563,8 +545,8 @@ JSON 형식으로 질문을 제공해주세요:
         try:
             # Convert image to bytes
             buffered = io.BytesIO()
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
+            if image.mode != "RGB":
+                image = image.convert("RGB")
             image.save(buffered, format="JPEG", quality=95)
             img_bytes = buffered.getvalue()
 
@@ -581,10 +563,7 @@ Return ONLY the extracted text, without any additional commentary or formatting.
             contents = [
                 types.Content(
                     role="user",
-                    parts=[
-                        types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-                        prompt
-                    ]
+                    parts=[types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"), prompt],
                 )
             ]
 
@@ -594,9 +573,7 @@ Return ONLY the extracted text, without any additional commentary or formatting.
             )
 
             response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=config
+                model=self.model_name, contents=contents, config=config
             )
 
             extracted_text = response.text.strip()
