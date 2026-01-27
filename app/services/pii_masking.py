@@ -15,8 +15,6 @@ import httpx
 import imutils
 import numpy as np
 import pdf2image
-import requests
-from easyocr import Reader
 from gradio_client import Client, handle_file
 from imutils.perspective import four_point_transform
 from matplotlib import pyplot as plt
@@ -28,13 +26,13 @@ logger = logging.getLogger(__name__)
 def plt_imshow(title='image', img=None, figsize=(8 ,5)):
     plt.figure(figsize=figsize)
 
-    if type(img) == list:
-        if type(title) == list:
+    if isinstance(img, list):
+        if isinstance(title, list):
             titles = title
         else:
             titles = []
 
-            for i in range(len(img)):
+            for _ in range(len(img)):
                 titles.append(title)
 
         for i in range(len(img)):
@@ -127,45 +125,38 @@ def putText(cv_img, text, x, y, color=(0, 0, 0), font_size=22):
   return cv_img
 
 
-
-image_nparray = np.asarray(bytearray(requests.get(url).content), dtype=np.uint8)
-org_image = cv2.imdecode(image_nparray, cv2.IMREAD_COLOR)
-plt_imshow("orignal image", org_image)
-
-business_card_image = make_scan_image(org_image, width=200, ksize=(5, 5), min_threshold=20, max_threshold=100)
-
-
-langs = ['ko', 'en']
-
-print("[INFO] OCR'ing input image...")
-reader = Reader(lang_list=langs, gpu=True)
-results = reader.readtext(business_card_image)
-
-
-results
-
-
-# loop over the results
-for (bbox, text, prob) in results:
-  print(f"[INFO] {prob:.4f}: {text}")
-
-  (tl, tr, br, bl) = bbox
-  tl = (int(tl[0]), int(tl[1]))
-  tr = (int(tr[0]), int(tr[1]))
-  br = (int(br[0]), int(br[1]))
-  bl = (int(bl[0]), int(bl[1]))
-
-	# 추출한 영역에 사각형을 그리고 인식한 글자를 표기합니다.
-  cv2.rectangle(business_card_image, tl, br, (0, 255, 0), 2)
-  business_card_image = putText(business_card_image, text, tl[0], tl[1] - 60, (0, 255, 0), 50)
-
-
-  plt_imshow("Image", business_card_image, figsize=(16,10))
-
-	# cv2.putText(business_card_image, text, (tl[0], tl[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-simple_results = reader.readtext(business_card_image, detail = 0)
-simple_results
+# NOTE: 아래 코드는 테스트/예제 코드입니다. 실제 서비스에서는 사용하지 않습니다.
+# image_nparray = np.asarray(bytearray(requests.get(url).content), dtype=np.uint8)
+# org_image = cv2.imdecode(image_nparray, cv2.IMREAD_COLOR)
+# plt_imshow("orignal image", org_image)
+#
+# business_card_image = make_scan_image(org_image, width=200, ksize=(5, 5), min_threshold=20, max_threshold=100)
+#
+# langs = ['ko', 'en']
+#
+# print("[INFO] OCR'ing input image...")
+# reader = Reader(lang_list=langs, gpu=True)
+# results = reader.readtext(business_card_image)
+#
+# # loop over the results
+# for (bbox, text, prob) in results:
+#     print(f"[INFO] {prob:.4f}: {text}")
+#
+#     (tl, tr, br, bl) = bbox
+#     tl = (int(tl[0]), int(tl[1]))
+#     tr = (int(tr[0]), int(tr[1]))
+#     br = (int(br[0]), int(br[1]))
+#     bl = (int(bl[0]), int(bl[1]))
+#
+#     # 추출한 영역에 사각형을 그리고 인식한 글자를 표기합니다.
+#     cv2.rectangle(business_card_image, tl, br, (0, 255, 0), 2)
+#     business_card_image = putText(business_card_image, text, tl[0], tl[1] - 60, (0, 255, 0), 50)
+#
+#     plt_imshow("Image", business_card_image, figsize=(16, 10))
+#
+# # cv2.putText(business_card_image, text, (tl[0], tl[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+#
+# simple_results = reader.readtext(business_card_image, detail=0)
 
 
 class PIIMaskingService:
