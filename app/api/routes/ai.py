@@ -278,7 +278,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
-            logger.info(f"📌 사용자 ID: {request.user_id}")
+            logger.info(f"📌 사용자 ID: {repr(request.user_id)}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -490,8 +490,8 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info(f"📌 요청 모델: {model.upper()}")
     logger.info(f"📌 채팅 모드: {mode}")
-    logger.info(f"📌 사용자 ID: {request.user_id}")
-    logger.info(f"📌 채팅방 ID: {request.room_id}")
+    logger.info(f"📌 사용자 ID: {repr(request.user_id)}")
+    logger.info(f"📌 채팅방 ID: {repr(request.room_id)}")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -527,7 +527,7 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
-                logger.info(f"🔍 분석 요청 감지: '{user_message[:50]}...'")
+                logger.info(f"🔍 분석 요청 감지: {repr(user_message[:50])}...")
                 logger.info("")
 
                 # ---------------------------------------------------------------
@@ -546,7 +546,9 @@ async def generate_chat_stream(request: ChatRequest):
 
                     if not full_context:
                         error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
-                        logger.error(f"⚠️ VectorDB에 문서가 없습니다 (user_id: {request.user_id})")
+                        logger.error(
+                            f"⚠️ VectorDB에 문서가 없습니다 (user_id: {repr(request.user_id)})"
+                        )
                         yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
                         full_response = error_msg
                     else:

@@ -197,7 +197,7 @@ class RAGService:
 
             # Retrieve context if RAG is enabled
             if use_rag:
-                logger.info(f"Retrieving RAG context for user {user_id}")
+                logger.info(f"Retrieving RAG context for user {repr(user_id)}")
                 context = await self.retrieve_context(
                     query=user_message,
                     user_id=user_id,
