@@ -1,0 +1,168 @@
+name: Devths-AI 운영 배포
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_key:
+        description: 'S3 아티팩트 키'
+        required: true
+        type: string
+      deployment_comment:
+        description: '배포 메모'
+        required: false
+        type: string
+        default: 'Manual deployment from GitHub Actions'
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  S3_BUCKET: ${{ secrets.AWS_S3_BUCKET_PROD }}
+  CODEDEPLOY_APP_NAME: ${{ secrets.CODEDEPLOY_APP_NAME }}
+  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ secrets.CODEDEPLOY_GROUP_NAME_PROD }}
+
+jobs:
+  # 승인 요청 알림 (즉시 실행)
+  notify-approval-request:
+    name: Notify Approval Request
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Discord 승인 요청 알림
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
+          status: ${{ github.event_name }}
+          title: "🔔 운영 배포 승인 요청"
+          description: |
+            **배포 요청자**: ${{ github.actor }}
+            **요청 시각**: ${{ github.event.created_at }}
+
+            **📦 아티팩트**: `${{ inputs.artifact_key }}`
+            **💬 배포 메모**: ${{ inputs.deployment_comment }}
+            **🔵🟢 배포 타입**: Blue/Green
+            **🌍 환경**: 🚀 운영(PROD)
+
+            ⏳ **팀원 승인 대기 중...**
+
+            **승인 방법**:
+            1. [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})로 이동
+            2. **Review deployments** 버튼 클릭
+            3. 승인 코멘트 작성 후 **Approve and deploy** 클릭
+
+            **⚠️ 주의**: 승인 후 블루/그린 배포가 즉시 시작됩니다.
+          color: 16776960
+          username: GitHub AI Approval Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+
+  # 운영 배포 (승인 필요)
+  deploy-production:
+    name: Production Deployment (Blue/Green)
+    runs-on: ubuntu-22.04
+    environment:
+      name: production
+      url: https://ai.devths.com  # 운영 서버 URL로 변경
+    outputs:
+      deployment_id: ${{ steps.deploy.outputs.deployment_id }}
+      deployment_status: ${{ steps.deploy.outputs.deployment_status }}
+      deployment_error: ${{ steps.deploy.outputs.deployment_error }}
+
+    steps:
+      - name: 배포 정보 확인
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚀 Production Deployment Information"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 Artifact: ${{ inputs.artifact_key }}"
+          echo "🪣 S3 Bucket: ${{ env.S3_BUCKET }}"
+          echo "🎯 Deployment Group: ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }}"
+          echo "💬 Comment: ${{ inputs.deployment_comment }}"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🔵🟢 Deployment Type: Blue/Green"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: S3 아티팩트 확인
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 아티팩트 존재 확인
+        run: |
+          echo "🔍 Checking if artifact exists in S3..."
+          if aws s3 ls "s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}" > /dev/null 2>&1; then
+            echo "✅ Artifact found: s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}"
+
+            # 파일 크기 확인
+            SIZE=$(aws s3 ls "s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}" | awk '{print $3}')
+            SIZE_MB=$(echo "scale=2; $SIZE/1024/1024" | bc)
+            echo "📊 Artifact size: ${SIZE_MB}MB"
+          else
+            echo "❌ Artifact not found: s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}"
+            echo "💡 Please check the artifact key and try again."
+            exit 1
+          fi
+
+      - name: CodeDeploy 블루/그린 배포 시작
+        id: deploy
+        run: |
+          echo "🔵🟢 Starting Blue/Green deployment to Production..."
+
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ env.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }} \
+            --s3-location bucket=${{ env.S3_BUCKET }},key=${{ inputs.artifact_key }},bundleType=zip \
+            --description "${{ inputs.deployment_comment }} (by ${{ github.actor }})" \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Deployment started: $DEPLOYMENT_ID"
+          echo "🔗 AWS Console: https://${{ env.AWS_REGION }}.console.aws.amazon.com/codesuite/codedeploy/deployments/$DEPLOYMENT_ID"
+
+          # 배포 상태 모니터링
+          echo ""
+          echo "⏳ Monitoring Blue/Green deployment progress..."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
+            echo "deployment_status=Success" >> $GITHUB_OUTPUT
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "✅ Blue/Green Deployment completed successfully!"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          else
+            ERROR_MSG=$(aws deploy get-deployment --deployment-id $DEPLOYMENT_ID --query 'deploymentInfo.errorInformation.message' --output text 2>&1 || echo "Unknown error")
+            echo "deployment_status=Failed" >> $GITHUB_OUTPUT
+            echo "deployment_error=$ERROR_MSG" >> $GITHUB_OUTPUT
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Blue/Green Deployment failed: $ERROR_MSG"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          fi
+
+  # Discord 알림
+  notify-discord:
+    runs-on: ubuntu-22.04
+    needs: [deploy-production]
+    if: always()
+    steps:
+      - name: Discord 알림 전송
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
+          status: ${{ needs.deploy-production.result == 'success' && 'success' || 'failure' }}
+          title: "🚀 운영 배포 결과 [${{ needs.deploy-production.result == 'success' && '✅성공' || '❌실패' }}]"
+          description: |
+            **배포 타입**: 🔵🟢 Blue/Green (Manual)
+            **환경**: 🚀 운영(PROD)
+            **트리거**: ${{ github.actor }}
+
+            **📦 아티팩트**: `${{ inputs.artifact_key }}`
+            **🪣 S3 Bucket**: `${{ secrets.AWS_S3_BUCKET_PROD }}`
+            **🚀 배포 결과**: ${{ needs.deploy-production.outputs.deployment_status }}
+            **🆔 Deployment ID**: `${{ needs.deploy-production.outputs.deployment_id }}`
+            **💬 배포 메모**: ${{ inputs.deployment_comment }}
+            **🧾 에러**: ${{ needs.deploy-production.outputs.deployment_error || '없음' }}
+
+            **🔗 링크**: [워크플로우 확인하기](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          color: "${{ needs.deploy-production.result == 'success' && 65280 || 16711680 }}"
+          username: GitHub AI Production Deploy Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
