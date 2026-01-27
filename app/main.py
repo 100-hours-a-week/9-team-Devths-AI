@@ -1,8 +1,10 @@
+import logging
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.routes import ai, masking
-import logging
-from dotenv import load_dotenv
 
 # .env 파일 로드
 load_dotenv()
