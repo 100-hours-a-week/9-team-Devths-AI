@@ -61,15 +61,11 @@ def plt_imshow(title="image", img=None, figsize=(8, 5)):
 def make_scan_image(
     image, width, ksize=(5, 5), min_threshold=75, max_threshold=200, org_image=None
 ):
-    """
-    NOTE: 이 함수는 테스트/예제 코드에서 사용됩니다.
-    실제 서비스(PIIMaskingService)에서는 사용하지 않습니다.
-    """
-    if org_image is None:
-        org_image = image
-
     image_list_title = []
     image_list = []
+
+    if org_image is None:
+        org_image = image
 
     image = imutils.resize(image, width=width)
     ratio = org_image.shape[1] / float(image.shape[1])
@@ -138,20 +134,16 @@ def putText(cv_img, text, x, y, color=(0, 0, 0), font_size=22):
 # org_image = cv2.imdecode(image_nparray, cv2.IMREAD_COLOR)
 # plt_imshow("orignal image", org_image)
 #
-# business_card_image = make_scan_image(
-#     org_image, width=200, ksize=(5, 5), min_threshold=20, max_threshold=100
-# )
+# business_card_image = make_scan_image(org_image, width=200, ksize=(5, 5), min_threshold=20, max_threshold=100)
 #
-#
-# langs = ["ko", "en"]
+# langs = ['ko', 'en']
 #
 # print("[INFO] OCR'ing input image...")
 # reader = Reader(lang_list=langs, gpu=True)
 # results = reader.readtext(business_card_image)
 #
-#
 # # loop over the results
-# for bbox, text, prob in results:
+# for (bbox, text, prob) in results:
 #     print(f"[INFO] {prob:.4f}: {text}")
 #
 #     (tl, tr, br, bl) = bbox
@@ -290,65 +282,62 @@ class PIIMaskingService:
         Returns:
             (마스킹된 이미지, 감지된 PII 정보 리스트)
         """
-        logger.warning("Using fallback local masking")
+        logger.warning("Using fallback local masking (EasyOCR)")
 
-        # 여기서는 간단한 예시만 제공
-        # 실제로는 pytesseract + 정규식 또는 NER 모델 사용
         try:
-            import pytesseract
+            from easyocr import Reader
             from PIL import ImageDraw
 
-            # OCR로 텍스트 및 위치 추출
-            ocr_data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+            # EasyOCR Reader 초기화 (한국어 + 영어)
+            reader = Reader(["ko", "en"], gpu=True)
+
+            # EasyOCR로 텍스트 및 위치 추출
+            img_array = np.array(image)
+            results = reader.readtext(img_array)
 
             # 마스킹할 영역 찾기 (간단한 패턴)
             detections = []
             masked_image = image.copy()
             draw = ImageDraw.Draw(masked_image)
 
-            for i, text in enumerate(ocr_data["text"]):
+            for bbox, text, conf in results:
                 if text.strip():
+                    # bbox: [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                    (tl, tr, br, bl) = bbox
+                    x = int(tl[0])
+                    y = int(tl[1])
+                    w = int(tr[0] - tl[0])
+                    h = int(bl[1] - tl[1])
+
                     # 전화번호 패턴 감지 (예: 010-1234-5678)
                     if self._is_phone_number(text):
-                        x, y, w, h = (
-                            ocr_data["left"][i],
-                            ocr_data["top"][i],
-                            ocr_data["width"][i],
-                            ocr_data["height"][i],
-                        )
                         # 검은색 박스로 마스킹
                         draw.rectangle([x, y, x + w, y + h], fill="black")
                         detections.append(
                             {
                                 "type": "phone",
                                 "coordinates": [x, y, x + w, y + h],
-                                "confidence": 0.85,
+                                "confidence": conf,
                                 "text": text,
                             }
                         )
 
                     # 이메일 패턴 감지
                     elif "@" in text and "." in text:
-                        x, y, w, h = (
-                            ocr_data["left"][i],
-                            ocr_data["top"][i],
-                            ocr_data["width"][i],
-                            ocr_data["height"][i],
-                        )
                         draw.rectangle([x, y, x + w, y + h], fill="black")
                         detections.append(
                             {
                                 "type": "email",
                                 "coordinates": [x, y, x + w, y + h],
-                                "confidence": 0.90,
+                                "confidence": conf,
                                 "text": text,
                             }
                         )
 
             return masked_image, detections
 
-        except ImportError:
-            logger.error("pytesseract not available for fallback masking")
+        except Exception as e:
+            logger.error(f"EasyOCR not available for fallback masking: {e}")
             return image, []
 
     def _is_phone_number(self, text: str) -> bool:

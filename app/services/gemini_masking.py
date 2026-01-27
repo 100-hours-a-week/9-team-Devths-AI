@@ -304,7 +304,7 @@ If no faces: {"faces": []}"""
         self, pdf_bytes: bytes, page_num: int = 0
     ) -> list[dict[str, Any]]:
         """
-        OCR + Regex로 PDF 이미지에서 텍스트 PII 감지
+        EasyOCR + Regex로 PDF 이미지에서 텍스트 PII 감지
         (전화번호, 이메일, URL, 한글 이름, 주소, 대학교명)
 
         Args:
@@ -317,7 +317,8 @@ If no faces: {"faces": []}"""
         try:
             import re
 
-            import pytesseract
+            import numpy as np
+            from easyocr import Reader
 
             detections = []
 
@@ -342,32 +343,33 @@ If no faces: {"faces": []}"""
             # 학과명 패턴 추가
             major_pattern = re.compile(r"[가-힣]+학과")  # XX학과
 
-            # OCR로 텍스트 및 좌표 추출 (한글 + 영어)
-            ocr_data = pytesseract.image_to_data(
-                image, output_type=pytesseract.Output.DICT, lang="kor+eng"
-            )
+            # EasyOCR Reader 초기화 (한국어 + 영어)
+            reader = Reader(["ko", "en"], gpu=True)
 
-            logger.info(
-                f"OCR extracted {len(ocr_data['text'])} text boxes from PDF page {page_num}"
-            )
+            # EasyOCR로 텍스트 및 좌표 추출
+            img_array = np.array(image)
+            ocr_results = reader.readtext(img_array)
+
+            logger.info(f"EasyOCR extracted {len(ocr_results)} text boxes from PDF page {page_num}")
 
             # 첫 번째 한글 이름 찾기
             found_name = False
 
             # 각 OCR 박스에서 PII 패턴 검색
-            for i in range(len(ocr_data["text"])):
-                text = ocr_data["text"][i]
+            for bbox, text, conf in ocr_results:
                 if not text.strip():
                     continue
 
-                conf = int(ocr_data["conf"][i])
-                if conf < 30:  # 신뢰도 낮은 텍스트 제외
+                # EasyOCR confidence는 0~1 범위
+                if conf < 0.3:  # 신뢰도 낮은 텍스트 제외
                     continue
 
-                x = ocr_data["left"][i]
-                y = ocr_data["top"][i]
-                w = ocr_data["width"][i]
-                h = ocr_data["height"][i]
+                # bbox 좌표 추출: [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                (tl, tr, br, bl) = bbox
+                x = int(tl[0])
+                y = int(tl[1])
+                w = int(tr[0] - tl[0])
+                h = int(bl[1] - tl[1])
 
                 pii_type = None
 
@@ -398,19 +400,19 @@ If no faces: {"faces": []}"""
                     detection = {
                         "type": pii_type,
                         "coordinates": [x, y, x + w, y + h],
-                        "confidence": conf / 100.0,
+                        "confidence": conf,
                         "text": text,
                     }
                     detections.append(detection)
                     logger.info(
-                        f"Found {pii_type.upper()}: '{text}' at [{x}, {y}, {x+w}, {y+h}] (conf: {conf})"
+                        f"Found {pii_type.upper()}: '{text}' at [{x}, {y}, {x+w}, {y+h}] (conf: {conf:.2f})"
                     )
 
-            logger.info(f"OCR + Regex found {len(detections)} PII items")
+            logger.info(f"EasyOCR + Regex found {len(detections)} PII items")
             return detections
 
         except Exception as e:
-            logger.error(f"Error extracting PII from PDF with OCR: {e}", exc_info=True)
+            logger.error(f"Error extracting PII from PDF with EasyOCR: {e}", exc_info=True)
             return []
 
     async def detect_text_pii_with_pdfplumber(
@@ -433,7 +435,7 @@ If no faces: {"faces": []}"""
 
     async def detect_text_pii_with_presidio(self, image: Image.Image) -> list[dict[str, Any]]:
         """
-        Presidio를 사용하여 이미지에서 텍스트 PII 감지
+        Presidio를 사용하여 이미지에서 텍스트 PII 감지 (EasyOCR 사용)
 
         Args:
             image: PIL Image 객체
@@ -451,23 +453,20 @@ If no faces: {"faces": []}"""
             loop = asyncio.get_event_loop()
 
             def _detect():
-                # Presidio로 PII 감지
-                # ImageRedactorEngine은 bounding box를 제공하지 않으므로
-                # 대신 AnalyzerEngine으로 OCR + 텍스트 분석
-                import pytesseract
+                import numpy as np
+                from easyocr import Reader
 
-                # OCR로 텍스트 추출 (한글 + 영어)
-                ocr_data = pytesseract.image_to_data(
-                    image, output_type=pytesseract.Output.DICT, lang="kor+eng"
-                )
+                # EasyOCR Reader 초기화 (한국어 + 영어)
+                reader = Reader(["ko", "en"], gpu=True)
+
+                # EasyOCR로 텍스트 추출
+                img_array = np.array(image)
+                ocr_results = reader.readtext(img_array)
 
                 detections = []
-                n_boxes = len(ocr_data["text"])
 
                 # 전체 텍스트 추출 (문맥 분석용)
-                full_text = " ".join(
-                    [ocr_data["text"][i] for i in range(n_boxes) if ocr_data["text"][i].strip()]
-                )
+                full_text = " ".join([text for (bbox, text, conf) in ocr_results if text.strip()])
 
                 # 전체 텍스트에서 PII 분석 (문맥 기반)
                 all_results = self.presidio_analyzer.analyze(
@@ -494,8 +493,7 @@ If no faces: {"faces": []}"""
                     logger.info(f"Presidio found in context: {result.entity_type} = '{pii_text}'")
 
                 # OCR 박스와 매칭
-                for i in range(n_boxes):
-                    text = ocr_data["text"][i]
+                for bbox, text, _conf in ocr_results:
                     if not text.strip():
                         continue
 
@@ -533,10 +531,12 @@ If no faces: {"faces": []}"""
                                 break
 
                     if is_pii:
-                        x = ocr_data["left"][i]
-                        y = ocr_data["top"][i]
-                        w = ocr_data["width"][i]
-                        h = ocr_data["height"][i]
+                        # bbox 좌표 추출: [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                        (tl, tr, br, bl) = bbox
+                        x = int(tl[0])
+                        y = int(tl[1])
+                        w = int(tr[0] - tl[0])
+                        h = int(bl[1] - tl[1])
 
                         detection = {
                             "type": entity_type.lower(),
@@ -556,7 +556,7 @@ If no faces: {"faces": []}"""
             return result
 
         except Exception as e:
-            logger.error(f"Error in Presidio PII detection: {e}", exc_info=True)
+            logger.error(f"Error in Presidio PII detection with EasyOCR: {e}", exc_info=True)
             return []
 
     def mask_image_with_detections(
