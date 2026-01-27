@@ -494,9 +494,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info(f"📌 요청 모델: {model.upper()}")
     logger.info(f"📌 채팅 모드: {mode}")
-    logger.info(f"📌 사용자 ID: {sanitize_log_input(request.user_id)}")
-            safe_room_id = sanitize_log_input(request.room_id)
-            logger.info("📌 채팅방 ID: %s", safe_room_id)
+    safe_user_id = sanitize_log_input(request.user_id)
+    logger.info("📌 사용자 ID: %s", safe_user_id)
+    safe_room_id = sanitize_log_input(request.room_id)
+    logger.info("📌 채팅방 ID: %s", safe_room_id)
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
