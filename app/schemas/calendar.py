@@ -1,15 +1,38 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, validator
 
 
 class CalendarParseRequest(BaseModel):
     """캘린더 일정 파싱 요청 (API 8)"""
 
-    file_url: HttpUrl | None = Field(None, description="파일 URL (선택)")
+    s3_key: str | None = Field(None, description="S3 파일 URL 또는 키 (선택)")
     text: str | None = Field(None, description="채용공고 텍스트 (선택)")
+
+    @validator("text", always=True)
+    def validate_input_source(cls, v, values):
+        """s3_key 또는 text 중 하나는 필수"""
+        s3_key = values.get("s3_key")
+
+        # 둘 다 없으면 에러
+        if not v and not s3_key:
+            raise ValueError("s3_key 또는 text 중 하나는 필수입니다")
+
+        return v
 
     class Config:
         json_schema_extra = {
-            "example": {"file_url": "https://s3.amazonaws.com/bucket/job_posting.png", "text": None}
+            "examples": [
+                {
+                    "name": "파일 업로드",
+                    "value": {"s3_key": "https://s3.../job_posting.png", "text": None},
+                },
+                {
+                    "name": "텍스트 입력",
+                    "value": {
+                        "s3_key": None,
+                        "text": "카카오 백엔드 개발자 채용\n서류마감: 2026-01-15\n코딩테스트: 2026-01-20...",
+                    },
+                },
+            ]
         }
 
 

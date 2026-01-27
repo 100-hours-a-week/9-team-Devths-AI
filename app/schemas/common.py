@@ -8,16 +8,35 @@ class ErrorCode(str, Enum):
     """에러 코드 열거형"""
 
     INVALID_REQUEST = "INVALID_REQUEST"
+    INVALID_TASK_ID = "INVALID_TASK_ID"
     UNAUTHORIZED = "UNAUTHORIZED"
     FILE_NOT_FOUND = "FILE_NOT_FOUND"
     TASK_NOT_FOUND = "TASK_NOT_FOUND"
+    TASK_EXPIRED = "TASK_EXPIRED"
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     OCR_ERROR = "OCR_ERROR"
+    OCR_FAILED = "OCR_FAILED"
     LLM_ERROR = "LLM_ERROR"
+    LLM_UNAVAILABLE = "LLM_UNAVAILABLE"
     VECTORDB_ERROR = "VECTORDB_ERROR"
+    VECTORDB_UNAVAILABLE = "VECTORDB_UNAVAILABLE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     MASKING_ERROR = "MASKING_ERROR"
-    PARSE_ERROR = "PARSE_ERROR"
+    MASKING_FAILED = "MASKING_FAILED"
+    INVALID_FILE_TYPE = "INVALID_FILE_TYPE"
+    INVALID_DOCUMENT = "INVALID_DOCUMENT"
+    INVALID_URL = "INVALID_URL"
+    INVALID_MODE = "INVALID_MODE"
+    INVALID_INTERVIEW_TYPE = "INVALID_INTERVIEW_TYPE"
+    MISSING_CONTEXT = "MISSING_CONTEXT"
+    EMPTY_MESSAGE = "EMPTY_MESSAGE"
+    HISTORY_TOO_LONG = "HISTORY_TOO_LONG"
+    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+    STREAM_ERROR = "STREAM_ERROR"
+    PARSE_FAILED = "PARSE_FAILED"
+    NO_SCHEDULE_FOUND = "NO_SCHEDULE_FOUND"
+    S3_UNAVAILABLE = "S3_UNAVAILABLE"
+    PROCESSING_ERROR = "PROCESSING_ERROR"
 
 
 class ErrorDetail(BaseModel):
@@ -46,7 +65,7 @@ class TaskStatus(str, Enum):
 class AsyncTaskResponse(BaseModel):
     """비동기 작업 초기 응답"""
 
-    task_id: str = Field(..., description="작업 ID")
+    task_id: int = Field(..., description="작업 ID")
     status: TaskStatus = Field(TaskStatus.PROCESSING, description="작업 상태")
     message: str | None = Field(None, description="상태 메시지")
 
@@ -54,12 +73,12 @@ class AsyncTaskResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     """비동기 작업 상태 조회 응답 (처리 중)"""
 
-    task_id: str = Field(..., description="작업 ID")
+    task_id: int = Field(..., description="작업 ID")
     status: TaskStatus = Field(..., description="작업 상태")
     progress: int | None = Field(None, ge=0, le=100, description="진행률 (0-100)")
     message: str | None = Field(None, description="상태 메시지")
     result: dict[str, Any] | None = Field(None, description="완료 시 결과")
-    error: ErrorDetail | None = Field(None, description="실패 시 에러 정보")
+    error: dict[str, Any] | None = Field(None, description="실패 시 에러 정보")
 
 
 class StreamChunk(BaseModel):
