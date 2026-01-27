@@ -51,7 +51,7 @@ class RAGService:
     async def retrieve_all_documents(
         self,
         user_id: str,
-        context_types: list[str] | None = None
+        context_types: list[str] = None
     ) -> str:
         """
         Retrieve ALL documents for a user (for analysis mode)
@@ -120,7 +120,7 @@ class RAGService:
         self,
         query: str,
         user_id: str,
-        context_types: list[str] | None = None,
+        context_types: list[str] = None,
         n_results: int = 3
     ) -> str:
         """
@@ -181,7 +181,7 @@ class RAGService:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_rag: bool = True,
-        context_types: list[str] | None = None,
+        context_types: list[str] = None,
         model: str = "gemini",
         n_results: int = 1  # 기본값을 1로 설정하여 속도 개선
     ) -> AsyncIterator[str]:

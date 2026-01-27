@@ -77,7 +77,7 @@ class GeminiPIIMaskingService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format") from e
+                raise ValueError("Invalid data URL format")
 
         # HTTP(S) URL 처리
         async with httpx.AsyncClient() as client:
@@ -480,7 +480,7 @@ If no faces: {"faces": []}"""
                     logger.info(f"Presidio found in context: {result.entity_type} = '{pii_text}'")
 
                 # OCR 박스와 매칭
-                for (bbox, text, _) in ocr_results:
+                for (bbox, text, _conf) in ocr_results:
                     if not text.strip():
                         continue
 

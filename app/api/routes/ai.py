@@ -8,6 +8,8 @@ from datetime import datetime
 from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+logger = logging.getLogger(__name__)
+
 from app.prompts import (
     SYSTEM_INTERVIEW,
     create_interview_question_prompt,
@@ -33,8 +35,6 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/ai",
@@ -814,7 +814,12 @@ async def generate_chat_stream(request: ChatRequest):
                 await asyncio.sleep(0.5)
 
             # context가 배열인 경우 (면접 리포트 모드)
-            qa_list = request.context if isinstance(request.context, list) else []
+            qa_list = []
+            if isinstance(request.context, list):
+                qa_list = request.context
+            else:
+                # context가 ChatContext인 경우 빈 배열
+                qa_list = []
 
             # Q&A 배열을 문자열로 변환하여 프롬프트 생성
             qa_history = "\n".join([
@@ -1042,7 +1047,7 @@ async def chat(request: ChatRequest):
     - 사용자 확인/수정 → 저장 → Backend가 Google Calendar에 추가
     """
 )
-async def calendar_parse(_request: CalendarParseRequest):
+async def calendar_parse(request: CalendarParseRequest):
     """캘린더 일정 파싱"""
     # validator에서 이미 검증됨
 

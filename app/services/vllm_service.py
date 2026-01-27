@@ -216,13 +216,13 @@ class VLLMService:
                 except httpx.ConnectError as e:
                     logger.error(f"vLLM 서버 연결 실패: {self.base_url}")
                     logger.error(f"연결 오류: {str(e)}")
-                    raise Exception(f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}") from e
-                except httpx.TimeoutException as e:
+                    raise Exception(f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}")
+                except httpx.TimeoutException:
                     logger.error(f"vLLM 서버 응답 시간 초과: {self.base_url}")
-                    raise Exception("vLLM 서버 응답 시간이 초과되었습니다.") from e
+                    raise Exception("vLLM 서버 응답 시간이 초과되었습니다.")
                 except httpx.HTTPStatusError as e:
                     logger.error(f"vLLM HTTP 오류: {e.response.status_code} - {e.response.text}")
-                    raise Exception(f"vLLM 서버 오류: {e.response.status_code}") from e
+                    raise Exception(f"vLLM 서버 오류: {e.response.status_code}")
 
         except Exception as e:
             logger.error(f"Error generating vLLM response: {e}")
@@ -366,7 +366,7 @@ class VLLMService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format") from e
+                raise ValueError("Invalid data URL format")
 
         # HTTP(S) URL
         async with httpx.AsyncClient() as client:

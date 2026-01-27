@@ -322,7 +322,7 @@ async def masking_health_check():
 
     # Gemini 체크
     try:
-        get_gemini_masking_service()  # noqa: F841
+        get_gemini_masking_service()
         health_status["models"]["gemini"] = {
             "status": "available",
             "provider": "Google Gemini 3 Flash Preview"
@@ -336,7 +336,7 @@ async def masking_health_check():
 
     # Chandra 체크
     try:
-        get_chandra_masking_service()  # noqa: F841
+        get_chandra_masking_service()
         health_status["models"]["chandra"] = {
             "status": "available",
             "provider": "datalab-to/chandra"
