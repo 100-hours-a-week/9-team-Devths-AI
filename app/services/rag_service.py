@@ -9,17 +9,19 @@ Implements the RAG pipeline following the architecture diagram:
 """
 
 import logging
-from typing import List, Dict, Any, Optional, AsyncIterator, Union
-from .llm_service import LLMService
-from .vllm_service import VLLMService
-from .vectordb_service import VectorDBService
+from collections.abc import AsyncIterator
+from typing import Any
+
 from app.prompts import (
+    SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
     SYSTEM_RAG_CHAT,
-    SYSTEM_FOLLOWUP,
-    create_rag_prompt,
     create_followup_prompt,
 )
+
+from .llm_service import LLMService
+from .vectordb_service import VectorDBService
+from .vllm_service import VLLMService
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +30,10 @@ class RAGService:
     """RAG Service for chatbot with VectorDB context retrieval"""
 
     def __init__(
-        self, 
-        llm_service: LLMService, 
+        self,
+        llm_service: LLMService,
         vectordb_service: VectorDBService,
-        vllm_service: Optional[VLLMService] = None
+        vllm_service: VLLMService | None = None
     ):
         """
         Initialize RAG Service
@@ -49,7 +51,7 @@ class RAGService:
     async def retrieve_all_documents(
         self,
         user_id: str,
-        context_types: List[str] = ["resume", "job_posting"]
+        context_types: list[str] | None = None
     ) -> str:
         """
         Retrieve ALL documents for a user (for analysis mode)
@@ -61,6 +63,8 @@ class RAGService:
         Returns:
             Formatted context string with all documents (truncated if needed)
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -83,7 +87,7 @@ class RAGService:
             context_parts = []
             total_length = 0
             max_context_length = 4000  # ~1000 tokens (4 chars ≈ 1 token)
-            
+
             for collection_type, doc in all_results:
                 source = {
                     "resume": "이력서",
@@ -92,7 +96,7 @@ class RAGService:
                 }.get(collection_type, collection_type)
 
                 doc_text = doc['text']
-                
+
                 # 컨텍스트 길이 제한 (vLLM 8192 토큰 제한 고려)
                 if total_length + len(doc_text) > max_context_length:
                     remaining = max_context_length - total_length
@@ -100,7 +104,7 @@ class RAGService:
                         doc_text = doc_text[:remaining] + "... (생략)"
                         context_parts.append(f"[출처: {source}]\n{doc_text}")
                     break
-                
+
                 context_parts.append(f"[출처: {source}]\n{doc_text}")
                 total_length += len(doc_text)
 
@@ -116,7 +120,7 @@ class RAGService:
         self,
         query: str,
         user_id: str,
-        context_types: List[str] = ["resume", "job_posting"],
+        context_types: list[str] | None = None,
         n_results: int = 3
     ) -> str:
         """
@@ -131,6 +135,8 @@ class RAGService:
         Returns:
             Formatted context string
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             all_results = []
 
@@ -140,7 +146,7 @@ class RAGService:
                 where_filter = None
                 if collection_type != "portfolio" and user_id:
                     where_filter = {"user_id": user_id}
-                
+
                 results = await self.vectordb.query(
                     query_text=query,
                     collection_type=collection_type,
@@ -173,9 +179,9 @@ class RAGService:
         self,
         user_message: str,
         user_id: str,
-        history: Optional[List[Dict[str, str]]] = None,
+        history: list[dict[str, str]] | None = None,
         use_rag: bool = True,
-        context_types: List[str] = ["resume", "job_posting"],
+        context_types: list[str] | None = None,
         model: str = "gemini",
         n_results: int = 1  # 기본값을 1로 설정하여 속도 개선
     ) -> AsyncIterator[str]:
@@ -193,6 +199,8 @@ class RAGService:
         Yields:
             Response chunks
         """
+        if context_types is None:
+            context_types = ["resume", "job_posting"]
         try:
             context = None
 
@@ -242,9 +250,9 @@ class RAGService:
     async def analyze_resume_and_posting(
         self,
         user_id: str,
-        resume_id: Optional[str] = None,
-        posting_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+        resume_id: str | None = None,
+        posting_id: str | None = None
+    ) -> dict[str, Any]:
         """
         Analyze resume and job posting match
 
@@ -300,7 +308,7 @@ class RAGService:
         self,
         user_id: str,
         interview_type: str = "technical"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate interview question based on user's resume and job posting
 
@@ -350,7 +358,7 @@ class RAGService:
         self,
         question: str,
         answer: str,
-        history: Optional[List[Dict[str, str]]] = None
+        history: list[dict[str, str]] | None = None
     ) -> AsyncIterator[str]:
         """
         Evaluate interview answer and provide feedback
@@ -395,20 +403,20 @@ class RAGService:
         self,
         original_question: str,
         candidate_answer: str,
-        star_analysis: Optional[Dict[str, str]] = None,
+        star_analysis: dict[str, str] | None = None,
         model: str = "gemini",
-        user_id: Optional[str] = None
+        user_id: str | None = None
     ) -> AsyncIterator[str]:
         """
         꼬리질문 생성 (STAR 분석 기반)
-        
+
         Args:
             original_question: 원본 면접 질문
             candidate_answer: 지원자 답변
             star_analysis: STAR 분석 결과 (Optional)
             model: 사용할 모델 ("gemini" 또는 "vllm")
             user_id: 사용자 ID (Gemini 사용 시)
-        
+
         Yields:
             꼬리질문 생성 스트리밍 청크
         """
@@ -421,22 +429,22 @@ class RAGService:
                     "action": "unknown",
                     "result": "unknown"
                 }
-            
+
             # 꼬리질문 생성 프롬프트 (prompts 모듈 사용)
             followup_prompt = create_followup_prompt(
                 original_question=original_question,
                 candidate_answer=candidate_answer,
                 star_analysis=star_analysis
             )
-            
-            logger.info(f"🔍 [꼬리질문 생성] 시작")
+
+            logger.info("🔍 [꼬리질문 생성] 시작")
             logger.info(f"   원본 질문: {original_question[:50]}...")
             logger.info(f"   답변 길이: {len(candidate_answer)}자")
             logger.info(f"   모델: {model}")
-            
+
             # vLLM 또는 Gemini 선택
             if model == "vllm" and self.vllm:
-                logger.info(f"💬 [vLLM] 꼬리질문 생성 시작")
+                logger.info("💬 [vLLM] 꼬리질문 생성 시작")
                 async for chunk in self.vllm.generate_response(
                     user_message=followup_prompt,
                     context=None,
@@ -445,7 +453,7 @@ class RAGService:
                 ):
                     yield chunk
             else:
-                logger.info(f"💬 [Gemini] 꼬리질문 생성 시작")
+                logger.info("💬 [Gemini] 꼬리질문 생성 시작")
                 async for chunk in self.llm.generate_response(
                     user_message=followup_prompt,
                     context=None,
@@ -454,7 +462,7 @@ class RAGService:
                     user_id=user_id,
                 ):
                     yield chunk
-                    
+
         except Exception as e:
             logger.error(f"Error generating followup question: {e}")
             yield f"죄송합니다. 꼬리질문 생성 중 오류가 발생했습니다: {str(e)}"

@@ -1,38 +1,40 @@
-from fastapi import APIRouter, HTTPException, status, Depends, Header
-from fastapi.responses import StreamingResponse
-from typing import Optional
 import asyncio
 import json
+import logging
+import os
 import uuid
 from datetime import datetime
-import os
-import logging
 
-logger = logging.getLogger(__name__)
+from fastapi import APIRouter, Header, HTTPException, status
+from fastapi.responses import StreamingResponse
 
-from app.schemas.common import AsyncTaskResponse, TaskStatusResponse, TaskStatus, ErrorCode, ErrorResponse
-from app.schemas.text_extract import (
-    TextExtractRequest, TextExtractResult, DocumentExtractResult, 
-    DocumentInput, PageText
-)
-from app.schemas.chat import (
-    ChatRequest, ChatResponse, ChatMode, ChatToolResultRequest,
-    AnalysisResult, ResumeAnalysis, PostingAnalysis, MatchingResult, MatchGrade,
-    InterviewQuestion, InterviewReport, QAEvaluation
-)
-from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
-from app.schemas.masking import MaskingDraftRequest, MaskingDraftResult
-from app.services.llm_service import LLMService
-from app.services.vllm_service import VLLMService
-from app.services.vectordb_service import VectorDBService
-from app.services.rag_service import RAGService
 from app.prompts import (
     SYSTEM_INTERVIEW,
-    SYSTEM_FOLLOWUP,
     create_interview_question_prompt,
-    create_followup_prompt,
 )
+from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
+from app.schemas.chat import (
+    AnalysisResult,
+    ChatMode,
+    ChatRequest,
+    MatchingResult,
+    PostingAnalysis,
+    ResumeAnalysis,
+)
+from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
+from app.schemas.text_extract import (
+    DocumentExtractResult,
+    DocumentInput,
+    PageText,
+    TextExtractRequest,
+    TextExtractResult,
+)
+from app.services.llm_service import LLMService
+from app.services.rag_service import RAGService
+from app.services.vectordb_service import VectorDBService
+from app.services.vllm_service import VLLMService
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/ai",
@@ -65,10 +67,10 @@ def get_services():
         api_key = os.getenv("GOOGLE_API_KEY")
         llm_service = LLMService(api_key=api_key)
         vectordb_service = VectorDBService(api_key=api_key)
-        
+
         # Initialize vLLM service (GCP GPU server)
         gcp_vllm_url = os.getenv("GCP_VLLM_BASE_URL")
-        
+
         try:
             if gcp_vllm_url:
                 logger.info(f"🌐 GCP vLLM 서버 연결: {gcp_vllm_url}")
@@ -82,13 +84,13 @@ def get_services():
         except Exception as e:
             logger.warning(f"vLLM service initialization failed: {e}")
             vllm_service = None
-        
+
         rag_service = RAGService(llm_service, vectordb_service, vllm_service)
 
     return rag_service
 
 
-async def verify_api_key(x_api_key: Optional[str] = Header(None)):
+async def verify_api_key(x_api_key: str | None = Header(None)):
     """API 키 검증"""
     # 실제로는 환경변수나 DB에서 확인
     if x_api_key != "your-api-key-here":
@@ -274,19 +276,19 @@ async def text_extract(request: TextExtractRequest):
 
             # 모델 선택 (기본값: gemini)
             model = request.model if hasattr(request, 'model') and request.model else "gemini"
-            logger.info(f"")
+            logger.info("")
             logger.info(f"{'='*80}")
-            logger.info(f"=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
+            logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
             logger.info(f"📌 사용자 ID: {request.user_id}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
-            logger.info(f"")
+            logger.info("")
 
             async def extract_document(doc_input: DocumentInput, doc_type: str) -> DocumentExtractResult:
                 """문서 추출 헬퍼 함수"""
                 logger.info(f"📄 [{doc_type.upper()}] 처리 시작")
-                
+
                 # 파일 업로드 방식
                 if doc_input.s3_key:
                     # MIME 타입을 단순 타입으로 변환 (pdf/image)
@@ -297,7 +299,7 @@ async def text_extract(request: TextExtractRequest):
 
                     # vLLM 모드: EasyOCR 사용 (가성비)
                     if model == "vllm" and rag.vllm:
-                        logger.info(f"   💰 [vLLM 가성비 모드] EasyOCR 시작")
+                        logger.info("   💰 [vLLM 가성비 모드] EasyOCR 시작")
                         ocr_result = await rag.vllm.extract_text_from_file(
                             file_url=str(doc_input.s3_key),
                             file_type=file_type,
@@ -310,8 +312,8 @@ async def text_extract(request: TextExtractRequest):
                     # Gemini 모드: Gemini Vision API 사용 (고성능)
                     else:
                         if model == "vllm" and not rag.vllm:
-                            logger.warning(f"   ⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
-                        logger.info(f"   🚀 [Gemini 고성능 모드] Gemini Vision API OCR 시작")
+                            logger.warning("   ⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
+                        logger.info("   🚀 [Gemini 고성능 모드] Gemini Vision API OCR 시작")
                         ocr_result = await rag.llm.extract_text_from_file(
                             file_url=str(doc_input.s3_key),
                             file_type=file_type
@@ -319,7 +321,7 @@ async def text_extract(request: TextExtractRequest):
                         extracted_text = ocr_result["extracted_text"]
                         pages = [PageText(**page) for page in ocr_result["pages"]]
                         logger.info(f"   ✅ [Gemini OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})")
-                
+
                 # 텍스트 직접 입력
                 else:
                     extracted_text = doc_input.text or ""
@@ -352,15 +354,15 @@ async def text_extract(request: TextExtractRequest):
             job_posting_result = await extract_document(request.job_posting, "job_posting")
 
             # 분석 리포트 생성 (명세서 요구사항)
-            logger.info(f"")
-            logger.info(f"📊 분석 리포트 생성 시작...")
+            logger.info("")
+            logger.info("📊 분석 리포트 생성 시작...")
             try:
                 analysis_result = await rag.llm.generate_analysis(
                     resume_text=resume_result.extracted_text,
                     posting_text=job_posting_result.extracted_text,
                     user_id=str(request.user_id)
                 )
-                logger.info(f"✅ 분석 리포트 생성 완료")
+                logger.info("✅ 분석 리포트 생성 완료")
             except Exception as e:
                 logger.warning(f"⚠️ 분석 리포트 생성 실패: {e} (OCR 텍스트만 반환)")
                 analysis_result = {
@@ -387,8 +389,8 @@ async def text_extract(request: TextExtractRequest):
                 posting_analysis=analysis_result.get("posting_analysis")
             ).model_dump()
 
-            logger.info(f"")
-            logger.info(f"✅ 텍스트 추출 + 분석 완료!")
+            logger.info("")
+            logger.info("✅ 텍스트 추출 + 분석 완료!")
             logger.info(f"   → 이력서 OCR: {len(resume_result.extracted_text)}자")
             logger.info(f"   → 채용공고 OCR: {len(job_posting_result.extracted_text)}자")
 
@@ -452,7 +454,7 @@ async def get_task_status(task_id: int):
         )
 
     task = tasks_db[task_id]
-    
+
     # room_id를 result에 포함
     result = task.get("result")
     if result and "room_id" not in result:
@@ -480,23 +482,23 @@ async def generate_chat_stream(request: ChatRequest):
         mode = ChatMode.INTERVIEW_REPORT
     else:
         mode = request.context.mode if request.context else ChatMode.GENERAL
-    
+
     rag = get_services()
     newline = '\n'
     sse_end = '\n\n'
 
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, 'value') else str(request.model)
-    logger.info(f"")
+    logger.info("")
     logger.info(f"{'='*80}")
-    logger.info(f"=== 💬 채팅 요청 시작 ===")
+    logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
     logger.info(f"📌 요청 모델: {model.upper()}")
     logger.info(f"📌 채팅 모드: {mode}")
     logger.info(f"📌 사용자 ID: {request.user_id}")
     logger.info(f"📌 채팅방 ID: {request.room_id}")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
-    logger.info(f"")
+    logger.info("")
 
     # 1. 일반 대화 (RAG 활용)
     if mode == ChatMode.GENERAL:
@@ -508,14 +510,14 @@ async def generate_chat_stream(request: ChatRequest):
                 {"role": msg.role.value if hasattr(msg.role, 'value') else str(msg.role), "content": msg.content}
                 for msg in request.history
             ]
-            
+
             # Determine if this is an analysis request
             user_message = request.message or ""
             is_analysis = any(keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"])
-            
+
             # 면접 세션이 활성화되어 있고, 이전 질문이 있으면 꼬리질문 생성
             is_followup = (
-                request.session_id is not None and 
+                request.session_id is not None and
                 len(history_dict) >= 2 and
                 history_dict[-2].get("role") == "assistant" and
                 history_dict[-1].get("role") == "user"
@@ -526,18 +528,18 @@ async def generate_chat_stream(request: ChatRequest):
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
                 logger.info(f"🔍 분석 요청 감지: '{user_message[:50]}...'")
-                logger.info(f"")
+                logger.info("")
 
                 # ---------------------------------------------------------------
                 # vLLM 모드 (가성비): EasyOCR → VectorDB → Llama 분석
                 # ---------------------------------------------------------------
                 if model == "vllm" and rag.vllm:
-                    logger.info(f"💰 [vLLM 가성비 모드] 분석 시작")
-                    logger.info(f"   프로세스: EasyOCR → VectorDB 저장 → VectorDB 조회 → Llama 분석")
-                    logger.info(f"")
+                    logger.info("💰 [vLLM 가성비 모드] 분석 시작")
+                    logger.info("   프로세스: EasyOCR → VectorDB 저장 → VectorDB 조회 → Llama 분석")
+                    logger.info("")
 
                     # 1. VectorDB에서 OCR로 추출된 모든 문서 가져오기
-                    logger.info(f"📂 [1/3] VectorDB에서 업로드된 문서 조회 중...")
+                    logger.info("📂 [1/3] VectorDB에서 업로드된 문서 조회 중...")
                     full_context = await rag.retrieve_all_documents(
                         user_id=request.user_id,
                         context_types=["resume", "job_posting"]
@@ -550,10 +552,10 @@ async def generate_chat_stream(request: ChatRequest):
                         full_response = error_msg
                     else:
                         logger.info(f"✅ [1/3] VectorDB 조회 완료: {len(full_context)}자")
-                        logger.info(f"")
+                        logger.info("")
 
                         # 2. Llama 모델로 분석
-                        logger.info(f"🤖 [2/3] Llama 모델 분석 시작...")
+                        logger.info("🤖 [2/3] Llama 모델 분석 시작...")
                         analysis_prompt = f"""다음 이력서와 채용공고를 상세히 분석해주세요:
 
 {full_context}
@@ -582,14 +584,14 @@ async def generate_chat_stream(request: ChatRequest):
                 # ---------------------------------------------------------------
                 else:
                     if model == "vllm" and not rag.vllm:
-                        logger.warning(f"⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
+                        logger.warning("⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
 
-                    logger.info(f"🚀 [Gemini 고성능 모드] 분석 시작")
-                    logger.info(f"   프로세스: RAG 검색 → Gemini 분석 (원래 방식)")
-                    logger.info(f"")
+                    logger.info("🚀 [Gemini 고성능 모드] 분석 시작")
+                    logger.info("   프로세스: RAG 검색 → Gemini 분석 (원래 방식)")
+                    logger.info("")
 
                     # RAG로 컨텍스트 검색하여 Gemini로 분석
-                    logger.info(f"📂 [1/2] RAG 검색 중...")
+                    logger.info("📂 [1/2] RAG 검색 중...")
                     async for chunk in rag.chat_with_rag(
                         user_message=user_message,
                         user_id=request.user_id,
@@ -606,19 +608,19 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 일반 대화: RAG 검색 사용
                 # ===================================================================
-                logger.info(f"💬 일반 대화 모드")
-                logger.info(f"")
+                logger.info("💬 일반 대화 모드")
+                logger.info("")
 
                 # 면접 세션에서 꼬리질문 생성 (session_id가 있고, 이전 질문-답변 쌍이 있는 경우)
                 if is_followup:
                     original_question = history_dict[-2].get("content", "")
                     candidate_answer = history_dict[-1].get("content", "")
-                    
-                    logger.info(f"🔍 [꼬리질문 생성] 감지")
+
+                    logger.info("🔍 [꼬리질문 생성] 감지")
                     logger.info(f"   원본 질문: {original_question[:50]}...")
                     logger.info(f"   답변: {candidate_answer[:50]}...")
-                    logger.info(f"")
-                    
+                    logger.info("")
+
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
                     star_analysis = {
                         "situation": "unknown",
@@ -626,7 +628,7 @@ async def generate_chat_stream(request: ChatRequest):
                         "action": "unknown",
                         "result": "unknown"
                     }
-                    
+
                     # 꼬리질문 생성
                     async for chunk in rag.generate_followup_question(
                         original_question=original_question,
@@ -637,21 +639,21 @@ async def generate_chat_stream(request: ChatRequest):
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
-                    
+
                     logger.info(f"✅ [꼬리질문 생성] 완료 (응답 길이: {len(full_response)}자)")
-                
+
                 else:
                     # 일반 대화 또는 면접 질문 요청
                     if "면접 질문" in user_message or "면접질문" in user_message or "면접" in user_message:
                         # 면접 질문 요청 시 portfolio(면접 질문 데이터)만 검색
                         context_types = ["portfolio"]
-                        logger.info(f"🎯 면접 질문 요청 감지 → portfolio 컬렉션만 검색")
+                        logger.info("🎯 면접 질문 요청 감지 → portfolio 컬렉션만 검색")
                     else:
                         # 일반 요청 시 모든 컬렉션 검색
                         context_types = ["resume", "job_posting", "portfolio"]
-                        logger.info(f"📚 일반 대화 → 모든 컬렉션 검색")
+                        logger.info("📚 일반 대화 → 모든 컬렉션 검색")
 
-                    logger.info(f"")
+                    logger.info("")
 
                     # RAG를 사용하여 컨텍스트 검색 및 응답 생성
                     logger.info(f"🔍 [{model.upper()}] RAG 검색 및 응답 생성 시작...")
@@ -680,7 +682,7 @@ async def generate_chat_stream(request: ChatRequest):
             "tool_used": {"tool": "RAG", "description": "VectorDB 검색 후 LLM 응답 생성"}
         }
         yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
-    
+
     # 2. 분석 모드 (RAG 사용)
     elif mode == ChatMode.ANALYSIS:
         try:
@@ -723,7 +725,7 @@ async def generate_chat_stream(request: ChatRequest):
                 "error": str(e)
             }
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
-    
+
     # 3. 면접 모드 - 맞춤형 질문 생성 및 대화
     elif mode == ChatMode.INTERVIEW_QUESTION:
         try:
@@ -747,7 +749,7 @@ async def generate_chat_stream(request: ChatRequest):
             # context에서 resume_ocr, job_posting_ocr 사용
             resume_ocr = request.context.resume_ocr if request.context else None
             job_posting_ocr = request.context.job_posting_ocr if request.context else None
-            
+
             if resume_ocr or job_posting_ocr or context:
                 # 컨텍스트가 있으면 맞춤형 질문 생성
                 question_prompt = create_interview_question_prompt(
@@ -759,12 +761,12 @@ async def generate_chat_stream(request: ChatRequest):
                 question_prompt = f"일반적인 {interview_type_kr} 면접 질문 1개를 짧게 생성해주세요:"
 
             full_question = ""
-            
+
             # vLLM 또는 Gemini 선택
             model_choice = request.model.value if hasattr(request.model, 'value') else str(request.model)
-            
+
             if model_choice == "vllm" and rag.vllm:
-                logger.info(f"💬 [vLLM] 면접 질문 생성 시작")
+                logger.info("💬 [vLLM] 면접 질문 생성 시작")
                 async for chunk in rag.vllm.generate_response(
                     user_message=question_prompt,
                     context=None,
@@ -774,7 +776,7 @@ async def generate_chat_stream(request: ChatRequest):
                     full_question += chunk
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
             else:
-                logger.info(f"💬 [Gemini] 면접 질문 생성 시작")
+                logger.info("💬 [Gemini] 면접 질문 생성 시작")
                 async for chunk in rag.llm.generate_response(
                     user_message=question_prompt,
                     context=None,
@@ -801,30 +803,25 @@ async def generate_chat_stream(request: ChatRequest):
                 "error": str(e)
             }
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
-    
+
     # 4. 면접 리포트 (Pydantic AI 사용)
     elif mode == ChatMode.INTERVIEW_REPORT:
         try:
             chunks = [f"면접 답변을 분석 중입니다...{newline}", f"종합 리포트를 작성 중입니다...{newline}"]
-            
+
             for chunk in chunks:
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
                 await asyncio.sleep(0.5)
-            
+
             # context가 배열인 경우 (면접 리포트 모드)
-            qa_list = []
-            if isinstance(request.context, list):
-                qa_list = request.context
-            else:
-                # context가 ChatContext인 경우 빈 배열
-                qa_list = []
-            
+            qa_list = request.context if isinstance(request.context, list) else []
+
             # Q&A 배열을 문자열로 변환하여 프롬프트 생성
             qa_history = "\n".join([
                 f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}"
                 for item in qa_list
             ])
-            
+
             # 면접 리포트 생성 프롬프트
             from app.prompts import create_interview_report_prompt
             report_prompt = create_interview_report_prompt(
@@ -832,7 +829,7 @@ async def generate_chat_stream(request: ChatRequest):
                 resume_text="",
                 job_posting_text=""
             )
-            
+
             # LLM으로 리포트 생성
             full_report_text = ""
             async for chunk in rag.llm.generate_response(
@@ -844,11 +841,11 @@ async def generate_chat_stream(request: ChatRequest):
             ):
                 full_report_text += chunk
                 yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
-            
+
             # JSON 파싱 시도
             from app.parsers import extract_json_from_text
             parsed_report = extract_json_from_text(full_report_text)
-            
+
             if parsed_report:
                 result = {
                     "success": True,
@@ -875,9 +872,9 @@ async def generate_chat_stream(request: ChatRequest):
                         "learning_guide": []
                     }
                 }
-            
+
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
-            
+
         except Exception as e:
             logger.error(f"Interview report generation error: {e}")
             error_result = {
@@ -1045,7 +1042,7 @@ async def chat(request: ChatRequest):
     - 사용자 확인/수정 → 저장 → Backend가 Google Calendar에 추가
     """
 )
-async def calendar_parse(request: CalendarParseRequest):
+async def calendar_parse(_request: CalendarParseRequest):
     """캘린더 일정 파싱"""
     # validator에서 이미 검증됨
 

@@ -4,19 +4,18 @@ Chandra 모델을 사용한 OCR + PII 마스킹 서비스
 datalab-to/chandra 모델을 사용하여 이미지에서 텍스트를 OCR하고 개인정보를 감지하여 마스킹합니다.
 """
 
-import io
-import os
-import tempfile
-import base64
 import asyncio
-import json
-import re
-from typing import List, Dict, Any, Tuple, Optional
-from pathlib import Path
-import httpx
-from PIL import Image, ImageDraw
-import pdf2image
+import base64
+import io
 import logging
+import os
+import re
+import tempfile
+from typing import Any
+
+import httpx
+import pdf2image
+from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +93,7 @@ class ChandraPIIMaskingService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
+                raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL 처리
         async with httpx.AsyncClient() as client:
@@ -102,7 +101,7 @@ class ChandraPIIMaskingService:
             response.raise_for_status()
             return response.content
 
-    def pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
+    def pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """
         PDF를 이미지 리스트로 변환
 
@@ -127,7 +126,7 @@ class ChandraPIIMaskingService:
         finally:
             os.unlink(tmp_path)
 
-    async def detect_pii_with_chandra(self, image: Image.Image) -> List[Dict[str, Any]]:
+    async def detect_pii_with_chandra(self, image: Image.Image) -> list[dict[str, Any]]:
         """
         Chandra 모델을 사용하여 이미지에서 OCR + PII 감지
 
@@ -168,7 +167,7 @@ class ChandraPIIMaskingService:
             logger.error(f"Error in Chandra PII detection: {e}", exc_info=True)
             return []
 
-    def _extract_pii_from_markdown(self, markdown: str, image: Image.Image) -> List[Dict[str, Any]]:
+    def _extract_pii_from_markdown(self, markdown: str, image: Image.Image) -> list[dict[str, Any]]:
         """
         Chandra의 Markdown 결과에서 텍스트 PII 감지 (얼굴 제외)
 
@@ -238,7 +237,7 @@ class ChandraPIIMaskingService:
     def mask_image_with_detections(
         self,
         image: Image.Image,
-        detections: List[Dict[str, Any]]
+        detections: list[dict[str, Any]]
     ) -> Image.Image:
         """
         감지된 PII 영역을 마스킹 처리
@@ -250,7 +249,7 @@ class ChandraPIIMaskingService:
         Returns:
             마스킹된 이미지
         """
-        logger.info(f"=== MASKING START ===")
+        logger.info("=== MASKING START ===")
         logger.info(f"Image size: {image.width}x{image.height}")
         logger.info(f"Detections to mask: {len(detections)}")
 
@@ -281,12 +280,12 @@ class ChandraPIIMaskingService:
 
             # 검은 사각형으로 마스킹
             draw.rectangle([x1, y1, x2, y2], fill='black', outline='black')
-            logger.info(f"  ✓ Masked successfully")
+            logger.info("  ✓ Masked successfully")
 
         logger.info(f"=== MASKING COMPLETE: {len(detections)} PII masked ===")
         return masked
 
-    def images_to_pdf(self, images: List[Image.Image]) -> bytes:
+    def images_to_pdf(self, images: list[Image.Image]) -> bytes:
         """
         이미지 리스트를 PDF로 변환
 
@@ -321,7 +320,7 @@ class ChandraPIIMaskingService:
     async def mask_image_file(
         self,
         file_url: str
-    ) -> Tuple[bytes, bytes, List[Dict[str, Any]]]:
+    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         이미지 파일 마스킹 처리
 
@@ -367,7 +366,7 @@ class ChandraPIIMaskingService:
     async def mask_pdf(
         self,
         file_url: str
-    ) -> Tuple[bytes, bytes, List[Dict[str, Any]]]:
+    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         PDF 파일 마스킹 처리
 
@@ -434,7 +433,7 @@ class ChandraPIIMaskingService:
 
 
 # 전역 서비스 인스턴스
-_chandra_service: Optional[ChandraPIIMaskingService] = None
+_chandra_service: ChandraPIIMaskingService | None = None
 
 
 def get_chandra_masking_service(

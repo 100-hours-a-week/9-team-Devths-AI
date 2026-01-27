@@ -4,16 +4,19 @@ LLM Service using Gemini Flash API
 Provides chat functionality and OCR using Google's Gemini 1.5 Flash model.
 """
 
-import os
+import contextlib
 import io
 import logging
+import os
+import tempfile
+from collections.abc import AsyncIterator
+from typing import Any
+
 import httpx
-from typing import List, Dict, Any, AsyncIterator, Optional
+import pdf2image
 from google import genai
 from google.genai import types
 from PIL import Image
-import pdf2image
-import tempfile
 
 from app.utils.langfuse_client import create_generation, trace_llm_call
 
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 class LLMService:
     """LLM Service for chatbot using Gemini Flash"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         """
         Initialize LLM Service
 
@@ -48,8 +51,8 @@ class LLMService:
         generation_name: str,
         input_text: str,
         output_text: str,
-        user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        user_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Langfuse trace + generation 기록 헬퍼.
@@ -83,10 +86,10 @@ class LLMService:
     async def generate_response(
         self,
         user_message: str,
-        context: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
-        system_prompt: Optional[str] = None,
-        user_id: Optional[str] = None,
+        context: str | None = None,
+        history: list[dict[str, str]] | None = None,
+        system_prompt: str | None = None,
+        user_id: str | None = None,
     ) -> AsyncIterator[str]:
         """
         Generate streaming response from LLM
@@ -169,23 +172,21 @@ class LLMService:
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             if trace is not None:
-                try:
+                with contextlib.suppress(Exception):
                     trace["client"].create_event(
                         trace_context={"trace_id": trace["trace_id"]},
                         name="error",
                         level="ERROR",
                         metadata={"error": str(e)},
                     )
-                except Exception:
-                    pass
             yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
     async def generate_analysis(
         self,
         resume_text: str,
         posting_text: str,
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Generate resume and job posting analysis
 
@@ -304,8 +305,8 @@ class LLMService:
         resume_text: str,
         posting_text: str,
         interview_type: str = "technical",
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Generate interview question
 
@@ -415,15 +416,15 @@ JSON 형식으로 질문을 제공해주세요:
         self,
         file_url: str,
         file_type: str = "pdf",
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Extract text from image or PDF file using Gemini Vision API
-        
+
         Args:
             file_url: URL of the file (http(s):// or data:)
             file_type: "pdf" or "image"
-            
+
         Returns:
             Dict with extracted_text and pages list
         """
@@ -443,16 +444,16 @@ JSON 형식으로 질문을 제공해주세요:
             # Download file
             logger.info(f"Downloading file from {file_url[:100]}...")
             file_bytes = await self._download_file(file_url)
-            
+
             if file_type == "pdf":
                 # Convert PDF to images
                 logger.info("Converting PDF to images...")
                 images = self._pdf_to_images(file_bytes)
-                
+
                 # Extract text from each page
                 pages = []
                 full_text = ""
-                
+
                 for page_num, image in enumerate(images, start=1):
                     logger.info(f"Extracting text from page {page_num}/{len(images)}...")
                     page_text = await self._extract_text_from_image(image, user_id=user_id, page_num=page_num)
@@ -477,7 +478,7 @@ JSON 형식으로 질문을 제공해주세요:
                                 "total_pages": len(images),
                             },
                         )
-                
+
                 result = {
                     "extracted_text": full_text.strip(),
                     "pages": pages
@@ -498,7 +499,7 @@ JSON 형식으로 질문을 제공해주세요:
                 logger.info("Extracting text from image...")
                 image = Image.open(io.BytesIO(file_bytes))
                 text = await self._extract_text_from_image(image, user_id=user_id, page_num=1)
-                
+
                 result = {
                     "extracted_text": text,
                     "pages": [{"page": 1, "text": text}]
@@ -513,11 +514,11 @@ JSON 형식으로 질문을 제공해주세요:
                         metadata={"type": "ocr", "file_type": "image", "pages": 1},
                     )
                 return result
-                
+
         except Exception as e:
             logger.error(f"Error extracting text from file: {e}")
             raise
-    
+
     async def _download_file(self, file_url: str) -> bytes:
         """Download file from URL"""
         # Handle data: URL
@@ -528,35 +529,35 @@ JSON 형식으로 질문을 제공해주세요:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
-        
+                raise ValueError("Invalid data URL format") from e
+
         # HTTP(S) URL
         async with httpx.AsyncClient() as client:
             response = await client.get(file_url, timeout=30.0)
             response.raise_for_status()
             return response.content
-    
-    def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
+
+    def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """Convert PDF to images"""
         from PIL import Image as PILImage
         PILImage.MAX_IMAGE_PIXELS = None
-        
+
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
             tmp_file.write(pdf_bytes)
             tmp_path = tmp_file.name
-        
+
         try:
             images = pdf2image.convert_from_path(tmp_path, dpi=dpi)
             logger.info(f"Converted PDF to {len(images)} images")
             return images
         finally:
             os.unlink(tmp_path)
-    
+
     async def _extract_text_from_image(
         self,
         image: Image.Image,
-        user_id: Optional[str] = None,
-        page_num: Optional[int] = None,
+        user_id: str | None = None,
+        page_num: int | None = None,
     ) -> str:
         """Extract text from image using Gemini Vision API"""
         try:
@@ -566,17 +567,17 @@ JSON 형식으로 질문을 제공해주세요:
                 image = image.convert('RGB')
             image.save(buffered, format="JPEG", quality=95)
             img_bytes = buffered.getvalue()
-            
+
             # Create prompt for OCR
             prompt = types.Part.from_text(
-                text="""Extract all text from this image. 
-                
+                text="""Extract all text from this image.
+
 Return the text exactly as it appears, preserving the layout and structure.
 Include all visible text including names, addresses, phone numbers, emails, dates, and any other information.
 
 Return ONLY the extracted text, without any additional commentary or formatting."""
             )
-            
+
             contents = [
                 types.Content(
                     role="user",
@@ -586,18 +587,18 @@ Return ONLY the extracted text, without any additional commentary or formatting.
                     ]
                 )
             ]
-            
+
             config = types.GenerateContentConfig(
                 temperature=0.1,  # Low temperature for accurate extraction
                 max_output_tokens=2048,
             )
-            
+
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=contents,
                 config=config
             )
-            
+
             extracted_text = response.text.strip()
             logger.info(f"Extracted {len(extracted_text)} characters from image")
 
@@ -610,9 +611,9 @@ Return ONLY the extracted text, without any additional commentary or formatting.
                 user_id=user_id,
                 metadata={"type": "ocr_image_call", "page": page_num},
             )
-            
+
             return extracted_text
-            
+
         except Exception as e:
             logger.error(f"Error extracting text from image: {e}")
             raise

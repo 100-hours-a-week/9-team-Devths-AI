@@ -4,12 +4,13 @@ VectorDB Service using ChromaDB
 Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
 """
 
-import os
 import logging
-from typing import List, Dict, Any, Optional
+import os
+from typing import Any
+
 import chromadb
-from chromadb.config import Settings
 import google.genai as genai
+from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class VectorDBService:
     """VectorDB Service for storing and retrieving embeddings"""
 
-    def __init__(self, api_key: Optional[str] = None, persist_directory: str = "./chroma_db"):
+    def __init__(self, api_key: str | None = None, persist_directory: str = "./chroma_db"):
         """
         Initialize VectorDB Service
 
@@ -73,7 +74,7 @@ class VectorDBService:
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
 
-    async def create_embedding(self, text: str) -> List[float]:
+    async def create_embedding(self, text: str) -> list[float]:
         """
         Create embedding using gemini-embedding-001
 
@@ -103,7 +104,7 @@ class VectorDBService:
         document_id: str,
         text: str,
         collection_type: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None
     ) -> str:
         """
         Add document to VectorDB
@@ -145,9 +146,9 @@ class VectorDBService:
 
     async def add_documents_batch(
         self,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
         collection_type: str
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Add multiple documents to VectorDB (for chunked documents)
 
@@ -207,8 +208,8 @@ class VectorDBService:
         query_text: str,
         collection_type: str,
         n_results: int = 5,
-        where: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+        where: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """
         Query VectorDB for similar documents
 
@@ -257,7 +258,7 @@ class VectorDBService:
         self,
         user_id: str,
         collection_type: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get all documents for a specific user
 
@@ -297,7 +298,7 @@ class VectorDBService:
         self,
         document_id: str,
         collection_type: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Get document by ID
 

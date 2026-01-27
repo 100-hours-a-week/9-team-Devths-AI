@@ -5,26 +5,25 @@ Gemini 3 Flash Preview의 bounding box detection을 사용하여 얼굴을 감�
 실패 시 OpenCV Haar Cascade를 fallback으로 사용합니다.
 """
 
+import asyncio
+import base64
 import io
+import logging
 import os
 import tempfile
-import base64
-import asyncio
-from typing import List, Dict, Any, Tuple, Optional
-from pathlib import Path
-import httpx
-from PIL import Image, ImageDraw
-import pdf2image
-import logging
+from typing import Any
+
 import google.genai as genai
-from google.genai import types
+import httpx
+import pdf2image
+from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
 # Presidio imports
 try:
-    from presidio_image_redactor import ImageAnalyzerEngine, ImageRedactorEngine
     from presidio_analyzer import AnalyzerEngine
+    from presidio_image_redactor import ImageAnalyzerEngine, ImageRedactorEngine
     PRESIDIO_AVAILABLE = True
 except ImportError:
     PRESIDIO_AVAILABLE = False
@@ -34,7 +33,7 @@ except ImportError:
 class GeminiPIIMaskingService:
     """Gemini 3 Flash Preview를 사용한 얼굴 PII 마스킹 서비스 (OpenCV fallback 포함)"""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         """
         Args:
             api_key: Gemini API 키 (환경변수 GOOGLE_API_KEY 또는 GEMINI_API_KEY 사용 가능)
@@ -78,7 +77,7 @@ class GeminiPIIMaskingService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
+                raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL 처리
         async with httpx.AsyncClient() as client:
@@ -86,7 +85,7 @@ class GeminiPIIMaskingService:
             response.raise_for_status()
             return response.content
 
-    def pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
+    def pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """
         PDF를 이미지 리스트로 변환
 
@@ -112,7 +111,7 @@ class GeminiPIIMaskingService:
         finally:
             os.unlink(tmp_path)
 
-    def detect_faces_with_opencv(self, image: Image.Image) -> List[Dict[str, Any]]:
+    def detect_faces_with_opencv(self, image: Image.Image) -> list[dict[str, Any]]:
         """
         OpenCV Haar Cascade를 사용한 얼굴 감지 (Gemini 실패 시 fallback)
 
@@ -183,7 +182,7 @@ class GeminiPIIMaskingService:
             logger.error(f"Error in OpenCV face detection: {e}", exc_info=True)
             return []
 
-    async def detect_faces_with_gemini(self, image: Image.Image) -> List[Dict[str, Any]]:
+    async def detect_faces_with_gemini(self, image: Image.Image) -> list[dict[str, Any]]:
         """
         Gemini Vision API의 bounding_box_detection을 사용하여 얼굴 감지
 
@@ -298,7 +297,7 @@ If no faces: {"faces": []}"""
             logger.info("Falling back to OpenCV due to error")
             return await asyncio.to_thread(self.detect_faces_with_opencv, image)
 
-    def extract_pii_from_pdf_page(self, pdf_bytes: bytes, page_num: int = 0) -> List[Dict[str, Any]]:
+    def extract_pii_from_pdf_page(self, pdf_bytes: bytes, page_num: int = 0) -> list[dict[str, Any]]:
         """
         EasyOCR + Regex로 PDF 이미지에서 텍스트 PII 감지
         (전화번호, 이메일, URL, 한글 이름, 주소, 대학교명)
@@ -311,9 +310,10 @@ If no faces: {"faces": []}"""
             감지된 PII 정보 리스트
         """
         try:
-            from easyocr import Reader
             import re
+
             import numpy as np
+            from easyocr import Reader
 
             detections = []
 
@@ -406,7 +406,7 @@ If no faces: {"faces": []}"""
             logger.error(f"Error extracting PII from PDF with EasyOCR: {e}", exc_info=True)
             return []
 
-    async def detect_text_pii_with_pdfplumber(self, pdf_bytes: bytes, page_num: int = 0) -> List[Dict[str, Any]]:
+    async def detect_text_pii_with_pdfplumber(self, pdf_bytes: bytes, page_num: int = 0) -> list[dict[str, Any]]:
         """
         비동기 래퍼: pdfplumber + Presidio로 텍스트 PII 감지
 
@@ -421,7 +421,7 @@ If no faces: {"faces": []}"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.extract_pii_from_pdf_page, pdf_bytes, page_num)
 
-    async def detect_text_pii_with_presidio(self, image: Image.Image) -> List[Dict[str, Any]]:
+    async def detect_text_pii_with_presidio(self, image: Image.Image) -> list[dict[str, Any]]:
         """
         Presidio를 사용하여 이미지에서 텍스트 PII 감지 (EasyOCR 사용)
 
@@ -440,8 +440,8 @@ If no faces: {"faces": []}"""
             loop = asyncio.get_event_loop()
 
             def _detect():
-                from easyocr import Reader
                 import numpy as np
+                from easyocr import Reader
 
                 # EasyOCR Reader 초기화 (한국어 + 영어)
                 reader = Reader(['ko', 'en'], gpu=True)
@@ -480,7 +480,7 @@ If no faces: {"faces": []}"""
                     logger.info(f"Presidio found in context: {result.entity_type} = '{pii_text}'")
 
                 # OCR 박스와 매칭
-                for (bbox, text, conf) in ocr_results:
+                for (bbox, text, _) in ocr_results:
                     if not text.strip():
                         continue
 
@@ -547,7 +547,7 @@ If no faces: {"faces": []}"""
     def mask_image_with_detections(
         self,
         image: Image.Image,
-        detections: List[Dict[str, Any]]
+        detections: list[dict[str, Any]]
     ) -> Image.Image:
         """
         감지된 PII 영역을 마스킹 처리
@@ -559,7 +559,7 @@ If no faces: {"faces": []}"""
         Returns:
             마스킹된 이미지
         """
-        logger.info(f"=== MASKING START ===")
+        logger.info("=== MASKING START ===")
         logger.info(f"Image size: {image.width}x{image.height}")
         logger.info(f"Detections to mask: {len(detections)}")
 
@@ -612,12 +612,12 @@ If no faces: {"faces": []}"""
                 draw.rectangle([x1_pad, y1_pad, x2_pad, y2_pad], fill='black', outline='black')
                 logger.info(f"  Rectangle with padding ({padding}px)")
 
-            logger.info(f"  ✓ Masked successfully")
+            logger.info("  ✓ Masked successfully")
 
         logger.info(f"=== MASKING COMPLETE: {len(detections)} face(s) masked ===")
         return masked
 
-    def images_to_pdf(self, images: List[Image.Image]) -> bytes:
+    def images_to_pdf(self, images: list[Image.Image]) -> bytes:
         """
         이미지 리스트를 PDF로 변환
 
@@ -652,7 +652,7 @@ If no faces: {"faces": []}"""
     async def mask_image_file(
         self,
         file_url: str
-    ) -> Tuple[bytes, bytes, List[Dict[str, Any]]]:
+    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         이미지 파일 마스킹 처리
 
@@ -698,7 +698,7 @@ If no faces: {"faces": []}"""
     async def mask_pdf(
         self,
         file_url: str
-    ) -> Tuple[bytes, bytes, List[Dict[str, Any]]]:
+    ) -> tuple[bytes, bytes, list[dict[str, Any]]]:
         """
         PDF 파일 마스킹 처리 (얼굴 감지 전용)
 
@@ -769,10 +769,10 @@ If no faces: {"faces": []}"""
 
 
 # 전역 서비스 인스턴스
-_gemini_service: Optional[GeminiPIIMaskingService] = None
+_gemini_service: GeminiPIIMaskingService | None = None
 
 
-def get_gemini_masking_service(api_key: Optional[str] = None) -> GeminiPIIMaskingService:
+def get_gemini_masking_service(api_key: str | None = None) -> GeminiPIIMaskingService:
     """Gemini PII 마스킹 서비스 싱글톤 인스턴스 반환"""
     global _gemini_service
     if _gemini_service is None:

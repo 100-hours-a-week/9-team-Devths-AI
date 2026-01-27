@@ -4,18 +4,23 @@ PII Masking API Routes
 게시판 첨부파일에서 개인정보를 자동으로 감지하고 마스킹 처리하는 API
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Header
-from typing import Optional
 import asyncio
+import base64
+import logging
 import uuid
 from datetime import datetime
-import logging
-import base64
 
-from app.schemas.common import AsyncTaskResponse, TaskStatusResponse, TaskStatus, ErrorCode
-from app.schemas.masking import MaskingDraftRequest, MaskingDraftResult, DetectedPII, MaskingModelType
-from app.services.gemini_masking import get_gemini_masking_service
+from fastapi import APIRouter, Header, HTTPException, status
+
+from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
+from app.schemas.masking import (
+    DetectedPII,
+    MaskingDraftRequest,
+    MaskingDraftResult,
+    MaskingModelType,
+)
 from app.services.chandra_masking import get_chandra_masking_service
+from app.services.gemini_masking import get_gemini_masking_service
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -33,7 +38,7 @@ task_store = get_task_store()
 background_tasks_set = set()
 
 
-async def verify_api_key(x_api_key: Optional[str] = Header(None)):
+async def verify_api_key(x_api_key: str | None = Header(None)):
     """API 키 검증"""
     if x_api_key != "your-api-key-here":
         raise HTTPException(
@@ -100,8 +105,8 @@ async def masking_draft(request: MaskingDraftRequest):
         AsyncTaskResponse: task_id와 처리 상태
     """
     task_id = f"task_masking_{uuid.uuid4().hex[:12]}"
-    
-    logger.info(f"=" * 80)
+
+    logger.info("=" * 80)
     logger.info(f"[MASKING_DRAFT] Creating new task: {task_id}")
     logger.info(f"[MASKING_DRAFT] Current tasks in store: {task_store.list_all()}")
 
@@ -118,7 +123,7 @@ async def masking_draft(request: MaskingDraftRequest):
     logger.info(f"[MASKING_DRAFT] Task {task_id} saved to file store")
     logger.info(f"[MASKING_DRAFT] Task exists: {task_store.exists(task_id)}")
     logger.info(f"[MASKING_DRAFT] Task data: {task_store.get(task_id)}")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     # 백그라운드에서 처리
     async def process_masking():
@@ -273,11 +278,11 @@ async def get_masking_task_status(task_id: str):
     Returns:
         TaskStatusResponse: 작업 상태 및 결과
     """
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
     logger.info(f"[GET_STATUS] Looking for task: {task_id}")
     logger.info(f"[GET_STATUS] All tasks in store: {task_store.list_all()}")
     logger.info(f"[GET_STATUS] Task exists: {task_store.exists(task_id)}")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     task = task_store.get(task_id)
     if task is None:
@@ -317,7 +322,7 @@ async def masking_health_check():
 
     # Gemini 체크
     try:
-        gemini_service = get_gemini_masking_service()
+        get_gemini_masking_service()  # noqa: F841
         health_status["models"]["gemini"] = {
             "status": "available",
             "provider": "Google Gemini 3 Flash Preview"
@@ -331,7 +336,7 @@ async def masking_health_check():
 
     # Chandra 체크
     try:
-        chandra_service = get_chandra_masking_service()
+        get_chandra_masking_service()  # noqa: F841
         health_status["models"]["chandra"] = {
             "status": "available",
             "provider": "datalab-to/chandra"

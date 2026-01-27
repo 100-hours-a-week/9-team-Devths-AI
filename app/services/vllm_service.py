@@ -4,16 +4,18 @@ vLLM Service for Llama-3-Korean-Bllossom-8B
 Provides chat functionality and OCR using vLLM API server.
 """
 
-import os
 import io
 import logging
-import httpx
+import os
 import tempfile
-from typing import List, Dict, Any, AsyncIterator, Optional
-from PIL import Image
-import pdf2image
+from collections.abc import AsyncIterator
+from typing import Any
 
-from app.utils.langfuse_client import trace_llm_call, create_generation
+import httpx
+import pdf2image
+from PIL import Image
+
+from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 class VLLMService:
     """vLLM Service for chatbot using GCP GPU server"""
 
-    def __init__(self, base_url: Optional[str] = None, ocr_only: bool = False, model_name: Optional[str] = None):
+    def __init__(self, base_url: str | None = None, ocr_only: bool = False, model_name: str | None = None):
         """
         Initialize vLLM Service
 
@@ -53,11 +55,11 @@ class VLLMService:
         self.model_name = model_name or os.getenv("VLLM_MODEL_NAME", "MLP-KTLim/llama-3-Korean-Bllossom-8B")
 
         # 로깅
-        logger.info(f"🌐 vLLM Service initialized with GCP GPU server")
+        logger.info("🌐 vLLM Service initialized with GCP GPU server")
         logger.info(f"📍 GCP URL: {self.base_url}")
         logger.info(f"📦 Model: {self.model_name}")
 
-    def get_server_info(self) -> Dict[str, Any]:
+    def get_server_info(self) -> dict[str, Any]:
         """Get GCP vLLM server information"""
         return {
             "server_url": self.base_url,
@@ -68,9 +70,9 @@ class VLLMService:
     async def generate_response(
         self,
         user_message: str,
-        context: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None,
-        system_prompt: Optional[str] = None
+        context: str | None = None,
+        history: list[dict[str, str]] | None = None,
+        system_prompt: str | None = None
     ) -> AsyncIterator[str]:
         """
         Generate streaming response from vLLM
@@ -87,21 +89,21 @@ class VLLMService:
         try:
             # Build messages
             messages = []
-            
+
             # Add system prompt if provided
             if system_prompt:
                 messages.append({
                     "role": "system",
                     "content": system_prompt
                 })
-            
+
             # Add context if provided
             if context:
                 messages.append({
                     "role": "system",
                     "content": f"관련 정보:\n{context}\n\n위 관련 정보를 참고하여 질문에 답변해주세요."
                 })
-            
+
             # Add history
             if history:
                 for msg in history:
@@ -113,12 +115,12 @@ class VLLMService:
                         # Pydantic model (ChatMessage)
                         role = msg.role.value if hasattr(msg.role, 'value') else str(msg.role)
                         content = msg.content
-                    
+
                     messages.append({
                         "role": role,
                         "content": content
                     })
-            
+
             # Add current user message
             messages.append({
                 "role": "user",
@@ -138,16 +140,16 @@ class VLLMService:
             # Make streaming request
             # URL 검증 및 정규화
             api_url = f"{self.base_url}/v1/chat/completions"
-            
+
             # URL이 유효한지 확인
             if not api_url.startswith(("http://", "https://")):
                 raise ValueError(f"Invalid URL format: {api_url}. URL must start with http:// or https://")
-            
+
             # Colab ngrok URL은 HTTPS일 수 있으므로 verify=False 허용 (개발 환경)
             verify_ssl = os.getenv("VLLM_VERIFY_SSL", "true").lower() == "true"
-            
+
             logger.debug(f"vLLM API 요청 URL: {api_url}")
-            
+
             async with httpx.AsyncClient(timeout=60.0, verify=verify_ssl) as client:
                 try:
                     async with client.stream(
@@ -170,26 +172,26 @@ class VLLMService:
                             logger.error(f"vLLM API error: {response.status_code}")
                             logger.error(f"Error details: {error_msg}")
                             raise Exception(f"vLLM 서버 오류 ({response.status_code}): {error_msg}")
-                        
+
                         # 스트리밍 응답 처리
                         logger.info("vLLM 스트리밍 응답 수신 시작")
                         chunk_count = 0
                         async for line in response.aiter_lines():
                             if not line.strip():
                                 continue
-                                
+
                             # SSE 형식: "data: {...}" 또는 "data: [DONE]"
                             if line.startswith("data: "):
                                 data_str = line[6:].strip()  # Remove "data: " prefix
-                                
+
                                 if data_str == "[DONE]":
                                     logger.info(f"vLLM 스트리밍 완료 (총 {chunk_count}개 청크)")
                                     break
-                                
+
                                 try:
                                     import json
                                     data = json.loads(data_str)
-                                    
+
                                     # Extract content from choices
                                     if "choices" in data and len(data["choices"]) > 0:
                                         delta = data["choices"][0].get("delta", {})
@@ -199,7 +201,7 @@ class VLLMService:
                                             if chunk_count <= 3:  # 처음 3개만 로깅
                                                 logger.info(f"vLLM 청크 {chunk_count}: {content[:50]}...")
                                             yield content
-                                except json.JSONDecodeError as e:
+                                except json.JSONDecodeError:
                                     logger.debug(f"JSON 파싱 스킵: {data_str[:50]}")
                                     continue
                                 except Exception as e:
@@ -207,20 +209,20 @@ class VLLMService:
                                     continue
                             elif line.strip():  # 빈 라인이 아닌 경우 로깅
                                 logger.debug(f"vLLM 응답 라인 (data: 없음): {line[:100]}")
-                        
+
                         if chunk_count == 0:
                             logger.warning("vLLM 응답에서 청크를 받지 못했습니다. 응답 형식을 확인하세요.")
-                                
+
                 except httpx.ConnectError as e:
                     logger.error(f"vLLM 서버 연결 실패: {self.base_url}")
                     logger.error(f"연결 오류: {str(e)}")
-                    raise Exception(f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}")
-                except httpx.TimeoutException:
+                    raise Exception(f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}") from e
+                except httpx.TimeoutException as e:
                     logger.error(f"vLLM 서버 응답 시간 초과: {self.base_url}")
-                    raise Exception("vLLM 서버 응답 시간이 초과되었습니다.")
+                    raise Exception("vLLM 서버 응답 시간이 초과되었습니다.") from e
                 except httpx.HTTPStatusError as e:
                     logger.error(f"vLLM HTTP 오류: {e.response.status_code} - {e.response.text}")
-                    raise Exception(f"vLLM 서버 오류: {e.response.status_code}")
+                    raise Exception(f"vLLM 서버 오류: {e.response.status_code}") from e
 
         except Exception as e:
             logger.error(f"Error generating vLLM response: {e}")
@@ -230,8 +232,8 @@ class VLLMService:
         self,
         file_url: str,
         file_type: str = "pdf",
-        user_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Extract text from image or PDF file using EasyOCR
 
@@ -244,8 +246,8 @@ class VLLMService:
             Dict with extracted_text and pages list
         """
         try:
-            from easyocr import Reader
             import numpy as np
+            from easyocr import Reader
 
             # EasyOCR Reader 초기화 (한국어 + 영어)
             reader = Reader(['ko', 'en'], gpu=True)
@@ -353,7 +355,7 @@ class VLLMService:
         except Exception as e:
             logger.error(f"[EasyOCR] Error extracting text from file: {e}")
             raise
-    
+
     async def _download_file(self, file_url: str) -> bytes:
         """Download file from URL"""
         # Handle data: URL
@@ -364,23 +366,23 @@ class VLLMService:
                 return base64.b64decode(encoded)
             except Exception as e:
                 logger.error(f"Failed to decode data URL: {e}")
-                raise ValueError("Invalid data URL format")
-        
+                raise ValueError("Invalid data URL format") from e
+
         # HTTP(S) URL
         async with httpx.AsyncClient() as client:
             response = await client.get(file_url, timeout=30.0)
             response.raise_for_status()
             return response.content
-    
-    def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> List[Image.Image]:
+
+    def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """Convert PDF to images"""
         from PIL import Image as PILImage
         PILImage.MAX_IMAGE_PIXELS = None
-        
+
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
             tmp_file.write(pdf_bytes)
             tmp_path = tmp_file.name
-        
+
         try:
             images = pdf2image.convert_from_path(tmp_path, dpi=dpi)
             logger.info(f"[vLLM OCR] Converted PDF to {len(images)} images")
