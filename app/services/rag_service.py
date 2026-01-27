@@ -12,6 +12,13 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+from app.prompts import (
+    SYSTEM_FOLLOWUP,
+    SYSTEM_GENERAL_CHAT,
+    SYSTEM_RAG_CHAT,
+    create_followup_prompt,
+)
+
 from .llm_service import LLMService
 from .vectordb_service import VectorDBService
 from .vllm_service import VLLMService
@@ -105,11 +112,7 @@ class RAGService:
             return ""
 
     async def retrieve_context(
-        self,
-        query: str,
-        user_id: str,
-        context_types: list[str] = None,
-        n_results: int = 3,
+        self, query: str, user_id: str, context_types: list[str] = None, n_results: int = 3
     ) -> str:
         """
         Retrieve relevant context from VectorDB
@@ -194,7 +197,8 @@ class RAGService:
 
             # Retrieve context if RAG is enabled
             if use_rag:
-                logger.info(f"Retrieving RAG context for user {user_id}")
+                # 사용자 ID는 로그에 포함하지 않음 (보안)
+                logger.info("Retrieving RAG context for user")
                 context = await self.retrieve_context(
                     query=user_message,
                     user_id=user_id,
@@ -207,10 +211,8 @@ class RAGService:
                 else:
                     logger.info("No context found, using general knowledge")
 
-            # System prompt for job search assistant
-            system_prompt = (
-                "당신은 취업 준비생을 돕는 AI 비서입니다. 간결하고 명확하게 답변해주세요."
-            )
+            # System prompt for job search assistant (from prompts module)
+            system_prompt = SYSTEM_RAG_CHAT if context else SYSTEM_GENERAL_CHAT
 
             # Select model
             if model == "vllm" and self.vllm:
@@ -379,3 +381,73 @@ class RAGService:
         except Exception as e:
             logger.error(f"Error evaluating interview answer: {e}")
             yield f"죄송합니다. 평가 중 오류가 발생했습니다: {str(e)}"
+
+    async def generate_followup_question(
+        self,
+        original_question: str,
+        candidate_answer: str,
+        star_analysis: dict[str, str] | None = None,
+        model: str = "gemini",
+        user_id: str | None = None,
+    ) -> AsyncIterator[str]:
+        """
+        꼬리질문 생성 (STAR 분석 기반)
+
+        Args:
+            original_question: 원본 면접 질문
+            candidate_answer: 지원자 답변
+            star_analysis: STAR 분석 결과 (Optional)
+            model: 사용할 모델 ("gemini" 또는 "vllm")
+            user_id: 사용자 ID (Gemini 사용 시)
+
+        Yields:
+            꼬리질문 생성 스트리밍 청크
+        """
+        try:
+            # STAR 분석이 없으면 기본값 사용
+            if star_analysis is None:
+                star_analysis = {
+                    "situation": "unknown",
+                    "task": "unknown",
+                    "action": "unknown",
+                    "result": "unknown",
+                }
+
+            # 꼬리질문 생성 프롬프트 (prompts 모듈 사용)
+            followup_prompt = create_followup_prompt(
+                original_question=original_question,
+                candidate_answer=candidate_answer,
+                star_analysis=star_analysis,
+            )
+
+            logger.info("🔍 [꼬리질문 생성] 시작")
+            # 사용자 입력은 로그에 포함하지 않음 (보안)
+            logger.info("   원본 질문: [REDACTED]")
+            logger.info("   답변 길이: %d자", len(candidate_answer))
+            # 모델명은 로그에 포함하지 않음 (보안)
+            logger.info("   모델: [REDACTED]")
+
+            # vLLM 또는 Gemini 선택
+            if model == "vllm" and self.vllm:
+                logger.info("💬 [vLLM] 꼬리질문 생성 시작")
+                async for chunk in self.vllm.generate_response(
+                    user_message=followup_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt=SYSTEM_FOLLOWUP,
+                ):
+                    yield chunk
+            else:
+                logger.info("💬 [Gemini] 꼬리질문 생성 시작")
+                async for chunk in self.llm.generate_response(
+                    user_message=followup_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt=SYSTEM_FOLLOWUP,
+                    user_id=user_id,
+                ):
+                    yield chunk
+
+        except Exception as e:
+            logger.error(f"Error generating followup question: {e}")
+            yield f"죄송합니다. 꼬리질문 생성 중 오류가 발생했습니다: {str(e)}"

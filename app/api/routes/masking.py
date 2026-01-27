@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
 from app.schemas.masking import (
@@ -90,14 +90,13 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     **주의:**
     - 사용자 수정은 프론트엔드에서 처리 (AI 불필요)
     """,
-    dependencies=[Depends(verify_api_key)],
 )
 async def masking_draft(request: MaskingDraftRequest):
     """
     게시판 첨부파일 마스킹
 
     Args:
-        request: 마스킹 요청 (file_url, file_type)
+        request: 마스킹 요청 (s3_key, file_type, model)
 
     Returns:
         AsyncTaskResponse: task_id와 처리 상태
@@ -127,10 +126,10 @@ async def masking_draft(request: MaskingDraftRequest):
     async def process_masking():
         logger.info(f"[PROCESS_MASKING] Starting masking task {task_id}")
         logger.info(f"[PROCESS_MASKING] Task exists in store: {task_store.exists(task_id)}")
-        logger.info(f"[PROCESS_MASKING] Using model: {request.model_type}")
+        logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:
             # 모델 선택
-            if request.model_type == MaskingModelType.CHANDRA:
+            if request.model == MaskingModelType.CHANDRA:
                 service = get_chandra_masking_service()
                 model_name = "Chandra"
             else:  # GEMINI
@@ -172,7 +171,7 @@ async def masking_draft(request: MaskingDraftRequest):
                 task_store.save(task_id, task_data)
 
                 masked_bytes, thumbnail_bytes, detections = await service.mask_image_file(
-                    file_url=str(request.file_url)
+                    file_url=str(request.s3_key)
                 )
 
             task_data = task_store.get(task_id)
@@ -215,7 +214,7 @@ async def masking_draft(request: MaskingDraftRequest):
             task_data["message"] = "마스킹 작업이 완료되었습니다."
             task_data["result"] = MaskingDraftResult(
                 success=True,
-                original_url=request.file_url,
+                original_url=request.s3_key,
                 masked_url=masked_url,
                 thumbnail_url=thumbnail_url,
                 detected_pii=detected_pii,
@@ -262,7 +261,6 @@ async def masking_draft(request: MaskingDraftRequest):
 
     **progress:** 0-100 (진행률)
     """,
-    dependencies=[Depends(verify_api_key)],
 )
 async def get_masking_task_status(task_id: str):
     """

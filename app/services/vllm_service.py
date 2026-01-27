@@ -37,10 +37,10 @@ class VLLMService:
         self.ocr_only = ocr_only
 
         if ocr_only:
-            logger.info("🔧 vLLM Service initialized in OCR-only mode (pytesseract)")
-            logger.info("💰 가성비 모드: vLLM 서버 없이 pytesseract OCR만 사용")
+            logger.info("🔧 vLLM Service initialized in OCR-only mode (EasyOCR)")
+            logger.info("💰 가성비 모드: vLLM 서버 없이 EasyOCR만 사용")
             self.base_url = None
-            self.model_name = "pytesseract-ocr"
+            self.model_name = "easyocr"
             return
 
         # GCP vLLM 서버 URL 읽기
@@ -50,7 +50,7 @@ class VLLMService:
         if not self.base_url:
             logger.warning("⚠️ GCP_VLLM_BASE_URL이 설정되지 않았습니다. OCR 전용 모드로 전환합니다.")
             self.ocr_only = True
-            self.model_name = "pytesseract-ocr"
+            self.model_name = "easyocr"
             return
 
         # vLLM 모델명 읽기
@@ -240,7 +240,7 @@ class VLLMService:
         user_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        Extract text from image or PDF file using pytesseract OCR
+        Extract text from image or PDF file using EasyOCR
 
         Args:
             file_url: URL of the file (http(s):// or data:)
@@ -251,39 +251,45 @@ class VLLMService:
             Dict with extracted_text and pages list
         """
         try:
-            import pytesseract
+            import numpy as np
+            from easyocr import Reader
+
+            # EasyOCR Reader 초기화 (한국어 + 영어)
+            reader = Reader(["ko", "en"], gpu=True)
 
             # 파일 단위 trace 생성 (페이지/이미지 generation을 여기에 연결)
             ocr_trace = trace_llm_call(
-                name="pytesseract_extract_text",
+                name="easyocr_extract_text",
                 user_id=user_id,
                 metadata={
                     "model": self.model_name,
                     "type": "ocr",
                     "file_type": file_type,
                     "file_url_prefix": file_url[:100],
-                    "ocr_engine": "pytesseract",
+                    "ocr_engine": "easyocr",
                 },
             )
 
             # Download file
-            logger.info(f"[vLLM OCR] Downloading file from {file_url[:100]}...")
+            logger.info(f"[EasyOCR] Downloading file from {file_url[:100]}...")
             file_bytes = await self._download_file(file_url)
 
             if file_type == "pdf":
                 # Convert PDF to images
-                logger.info("[vLLM OCR] Converting PDF to images...")
+                logger.info("[EasyOCR] Converting PDF to images...")
                 images = self._pdf_to_images(file_bytes)
 
-                # Extract text from each page using pytesseract
+                # Extract text from each page using EasyOCR
                 pages = []
                 full_text = ""
 
                 for page_num, image in enumerate(images, start=1):
-                    logger.info(
-                        f"[vLLM OCR] Extracting text from page {page_num}/{len(images)} using pytesseract..."
-                    )
-                    page_text = pytesseract.image_to_string(image, lang="kor+eng")
+                    logger.info(f"[EasyOCR] Extracting text from page {page_num}/{len(images)}...")
+                    # PIL Image를 numpy array로 변환
+                    img_array = np.array(image)
+                    results = reader.readtext(img_array)
+                    # EasyOCR 결과에서 텍스트만 추출
+                    page_text = "\n".join([text for (bbox, text, conf) in results])
                     pages.append({"page": page_num, "text": page_text})
                     full_text += f"\n\n[Page {page_num}]\n{page_text}"
 
@@ -291,7 +297,7 @@ class VLLMService:
                     if ocr_trace is not None:
                         create_generation(
                             trace=ocr_trace,
-                            name=f"pytesseract_ocr_page_{page_num}",
+                            name=f"easyocr_page_{page_num}",
                             model=self.model_name,
                             input_text=f"file_type=pdf page={page_num} file_url_prefix={file_url[:100]}",
                             output_text=page_text[:4000],
@@ -300,7 +306,7 @@ class VLLMService:
                                 "file_type": "pdf",
                                 "page": page_num,
                                 "total_pages": len(images),
-                                "ocr_engine": "pytesseract",
+                                "ocr_engine": "easyocr",
                             },
                         )
 
@@ -310,7 +316,7 @@ class VLLMService:
                 if ocr_trace is not None:
                     create_generation(
                         trace=ocr_trace,
-                        name="pytesseract_ocr_pdf_summary",
+                        name="easyocr_pdf_summary",
                         model=self.model_name,
                         input_text=f"file_type=pdf file_url_prefix={file_url[:100]}",
                         output_text=result["extracted_text"][:4000],
@@ -318,26 +324,28 @@ class VLLMService:
                             "type": "ocr",
                             "file_type": "pdf",
                             "pages": len(pages),
-                            "ocr_engine": "pytesseract",
+                            "ocr_engine": "easyocr",
                         },
                     )
 
                 logger.info(
-                    f"[vLLM OCR] Extracted {len(full_text)} characters from {len(pages)} pages"
+                    f"[EasyOCR] Extracted {len(full_text)} characters from {len(pages)} pages"
                 )
                 return result
             else:
                 # Single image
-                logger.info("[vLLM OCR] Extracting text from image using pytesseract...")
+                logger.info("[EasyOCR] Extracting text from image...")
                 image = Image.open(io.BytesIO(file_bytes))
-                text = pytesseract.image_to_string(image, lang="kor+eng")
+                img_array = np.array(image)
+                results = reader.readtext(img_array)
+                text = "\n".join([text for (bbox, text, conf) in results])
 
                 result = {"extracted_text": text, "pages": [{"page": 1, "text": text}]}
 
                 if ocr_trace is not None:
                     create_generation(
                         trace=ocr_trace,
-                        name="pytesseract_ocr_image",
+                        name="easyocr_image",
                         model=self.model_name,
                         input_text=f"file_type=image file_url_prefix={file_url[:100]}",
                         output_text=text[:4000],
@@ -345,15 +353,15 @@ class VLLMService:
                             "type": "ocr",
                             "file_type": "image",
                             "pages": 1,
-                            "ocr_engine": "pytesseract",
+                            "ocr_engine": "easyocr",
                         },
                     )
 
-                logger.info(f"[vLLM OCR] Extracted {len(text)} characters from image")
+                logger.info(f"[EasyOCR] Extracted {len(text)} characters from image")
                 return result
 
         except Exception as e:
-            logger.error(f"[vLLM OCR] Error extracting text from file: {e}")
+            logger.error(f"[EasyOCR] Error extracting text from file: {e}")
             raise
 
     async def _download_file(self, file_url: str) -> bytes:

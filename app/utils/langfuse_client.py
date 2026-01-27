@@ -8,9 +8,16 @@ import logging
 import os
 from typing import Any, TypedDict
 
-from langfuse import Langfuse
-
 logger = logging.getLogger(__name__)
+
+# langfuse는 선택 의존성: 설치되어 있지 않아도 서비스가 동작해야 함
+try:
+    from langfuse import Langfuse  # type: ignore
+
+    LANGFUSE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    Langfuse = Any  # type: ignore
+    LANGFUSE_AVAILABLE = False
 
 # 일부 langfuse 버전에서는 decorators 모듈이 없을 수 있음
 try:
@@ -43,6 +50,9 @@ def get_langfuse_client() -> Langfuse | None:
         Langfuse 클라이언트 인스턴스 또는 None (설정되지 않은 경우)
     """
     global _langfuse_client
+
+    if not LANGFUSE_AVAILABLE:
+        return None
 
     if _langfuse_client is not None:
         return _langfuse_client
