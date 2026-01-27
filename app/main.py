@@ -10,10 +10,7 @@ from app.api.routes import ai, masking
 load_dotenv()
 
 # 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s:     %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
 
 
 # FastAPI 애플리케이션 생성
@@ -71,7 +68,7 @@ async def root():
             {"id": 7, "endpoint": "POST /ai/chat", "type": "streaming"},
             {"id": 8, "endpoint": "POST /ai/calendar/parse", "type": "sync"},
             {"id": 9, "endpoint": "POST /ai/masking/draft", "type": "async"},
-        ]
+        ],
     }
 
 
@@ -82,19 +79,10 @@ async def health_check():
 
     서버 상태를 확인합니다.
     """
-    return {
-        "status": "healthy",
-        "service": "ai-server",
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "service": "ai-server", "version": "1.0.0"}
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
