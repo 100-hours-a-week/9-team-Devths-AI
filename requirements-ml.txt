@@ -4,9 +4,8 @@
 # pip install -r requirements-serving.txt -r requirements-ml.txt
 # ============================================
 
-# OCR
+# OCR (EasyOCR만 사용 - 02_OCR_모델_선정.md 참고)
 easyocr==1.7.0
-pytesseract==0.3.10
 
 # OpenCV for face detection
 opencv-python>=4.8.0
