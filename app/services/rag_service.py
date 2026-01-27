@@ -18,6 +18,7 @@ from app.prompts import (
     SYSTEM_RAG_CHAT,
     create_followup_prompt,
 )
+from app.utils.log_sanitizer import sanitize_log_input
 
 from .llm_service import LLMService
 from .vectordb_service import VectorDBService
@@ -197,7 +198,7 @@ class RAGService:
 
             # Retrieve context if RAG is enabled
             if use_rag:
-                logger.info(f"Retrieving RAG context for user {repr(user_id)}")
+                logger.info(f"Retrieving RAG context for user {sanitize_log_input(user_id)}")
                 context = await self.retrieve_context(
                     query=user_message,
                     user_id=user_id,
