@@ -2,7 +2,6 @@
 일반 채팅 및 RAG 관련 프롬프트 정의
 """
 
-from typing import Optional
 
 # ============================================================================
 # 시스템 프롬프트
@@ -58,13 +57,11 @@ GENERAL_CHAT_PROMPT = """사용자: {user_message}
 # 헬퍼 함수
 # ============================================================================
 
-def create_rag_prompt(user_message: str, context: Optional[str] = None) -> str:
+
+def create_rag_prompt(user_message: str, context: str | None = None) -> str:
     """RAG 컨텍스트가 있는 경우의 프롬프트 생성"""
     if context:
-        return RAG_CONTEXT_PROMPT.format(
-            context=context,
-            user_message=user_message
-        )
+        return RAG_CONTEXT_PROMPT.format(context=context, user_message=user_message)
     return GENERAL_CHAT_PROMPT.format(user_message=user_message)
 
 

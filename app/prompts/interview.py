@@ -7,7 +7,6 @@
 참고: 99.꼬리질문 테스트.ipynb
 """
 
-from typing import Dict, Optional
 
 # ============================================================================
 # 시스템 프롬프트
@@ -161,32 +160,24 @@ JSON만 출력하세요.
 # 헬퍼 함수
 # ============================================================================
 
+
 def create_analysis_prompt(resume_text: str, job_posting_text: str) -> str:
     """분석 프롬프트 생성"""
-    return ANALYSIS_PROMPT.format(
-        resume_text=resume_text,
-        job_posting_text=job_posting_text
-    )
+    return ANALYSIS_PROMPT.format(resume_text=resume_text, job_posting_text=job_posting_text)
 
 
 def create_interview_question_prompt(
-    resume_text: str,
-    job_posting_text: str,
-    interview_type: str = "technical"
+    resume_text: str, job_posting_text: str, interview_type: str = "technical"
 ) -> str:
     """면접 질문 생성 프롬프트"""
     interview_type_kr = "기술" if interview_type == "technical" else "인성"
     return INTERVIEW_QUESTION_PROMPT.format(
-        resume_text=resume_text,
-        job_posting_text=job_posting_text,
-        interview_type=interview_type_kr
+        resume_text=resume_text, job_posting_text=job_posting_text, interview_type=interview_type_kr
     )
 
 
 def create_followup_prompt(
-    original_question: str,
-    candidate_answer: str,
-    star_analysis: Optional[Dict] = None
+    original_question: str, candidate_answer: str, star_analysis: dict | None = None
 ) -> str:
     """꼬리질문 생성 프롬프트"""
     if star_analysis is None:
@@ -194,27 +185,25 @@ def create_followup_prompt(
             "situation": "unknown",
             "task": "unknown",
             "action": "unknown",
-            "result": "unknown"
+            "result": "unknown",
         }
-    
+
     return FOLLOWUP_PROMPT.format(
         original_question=original_question,
         candidate_answer=candidate_answer,
         star_situation=star_analysis.get("situation", "unknown"),
         star_task=star_analysis.get("task", "unknown"),
         star_action=star_analysis.get("action", "unknown"),
-        star_result=star_analysis.get("result", "unknown")
+        star_result=star_analysis.get("result", "unknown"),
     )
 
 
 def create_interview_report_prompt(
-    qa_history: str,
-    resume_text: str = "",
-    job_posting_text: str = ""
+    qa_history: str, resume_text: str = "", job_posting_text: str = ""
 ) -> str:
     """면접 리포트 생성 프롬프트"""
     return INTERVIEW_REPORT_PROMPT.format(
         qa_history=qa_history,
         resume_text=resume_text or "(이력서 정보 없음)",
-        job_posting_text=job_posting_text or "(채용공고 정보 없음)"
+        job_posting_text=job_posting_text or "(채용공고 정보 없음)",
     )
