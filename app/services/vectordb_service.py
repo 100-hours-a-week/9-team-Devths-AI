@@ -274,8 +274,10 @@ class VectorDBService:
                         }
                     )
 
+            from app.utils.log_sanitizer import sanitize_log_input
+
             logger.info(
-                f"Retrieved {len(formatted_results)} documents for user {user_id} from {collection_type}"
+                f"Retrieved {len(formatted_results)} documents for user {sanitize_log_input(user_id)} from {collection_type}"
             )
             return formatted_results
 
