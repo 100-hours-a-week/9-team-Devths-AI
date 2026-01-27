@@ -279,7 +279,8 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
-            logger.info(f"📌 사용자 ID: {sanitize_log_input(request.user_id)}")
+            safe_user_id = sanitize_log_input(request.user_id)
+            logger.info("📌 사용자 ID: %s", safe_user_id)
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -295,7 +296,8 @@ async def text_extract(request: TextExtractRequest):
                     file_type = doc_input.get_file_type_simple() or "pdf"
                     logger.info(f"   → 파일 타입 (MIME): {doc_input.file_type}")
                     logger.info(f"   → 파일 타입 (단순): {file_type}")
-                    logger.info(f"   → S3 키: {sanitize_log_input(doc_input.s3_key)}")
+                    safe_s3_key = sanitize_log_input(doc_input.s3_key)
+                    logger.info("   → S3 키: %s", safe_s3_key)
 
                     # vLLM 모드: EasyOCR 사용 (가성비)
                     if model == "vllm" and rag.vllm:
@@ -344,7 +346,8 @@ async def text_extract(request: TextExtractRequest):
                             "created_at": datetime.now().isoformat(),
                         },
                     )
-                    logger.info(f"   ✅ VectorDB 저장 완료: {sanitize_log_input(document_id)}")
+                    safe_document_id = sanitize_log_input(document_id)
+                    logger.info("   ✅ VectorDB 저장 완료: %s", safe_document_id)
 
                 return DocumentExtractResult(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
@@ -492,7 +495,8 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"📌 요청 모델: {model.upper()}")
     logger.info(f"📌 채팅 모드: {mode}")
     logger.info(f"📌 사용자 ID: {sanitize_log_input(request.user_id)}")
-    logger.info(f"📌 채팅방 ID: {sanitize_log_input(request.room_id)}")
+            safe_room_id = sanitize_log_input(request.room_id)
+            logger.info("📌 채팅방 ID: %s", safe_room_id)
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -528,7 +532,8 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 분석 요청: vLLM과 Gemini 완전 분리
                 # ===================================================================
-                logger.info(f"🔍 분석 요청 감지: {sanitize_log_input(user_message[:50])}...")
+                safe_message = sanitize_log_input(user_message[:50])
+                logger.info("🔍 분석 요청 감지: %s...", safe_message)
                 logger.info("")
 
                 # ---------------------------------------------------------------
@@ -619,8 +624,10 @@ async def generate_chat_stream(request: ChatRequest):
                     candidate_answer = history_dict[-1].get("content", "")
 
                     logger.info("🔍 [꼬리질문 생성] 감지")
-                    logger.info(f"   원본 질문: {sanitize_log_input(original_question[:50])}...")
-                    logger.info(f"   답변: {sanitize_log_input(candidate_answer[:50])}...")
+                    safe_question = sanitize_log_input(original_question[:50])
+                    safe_answer = sanitize_log_input(candidate_answer[:50])
+                    logger.info("   원본 질문: %s...", safe_question)
+                    logger.info("   답변: %s...", safe_answer)
                     logger.info("")
 
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)

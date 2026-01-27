@@ -198,7 +198,8 @@ class RAGService:
 
             # Retrieve context if RAG is enabled
             if use_rag:
-                logger.info(f"Retrieving RAG context for user {sanitize_log_input(user_id)}")
+                safe_user_id = sanitize_log_input(user_id)
+                logger.info("Retrieving RAG context for user %s", safe_user_id)
                 context = await self.retrieve_context(
                     query=user_message,
                     user_id=user_id,
@@ -421,7 +422,8 @@ class RAGService:
             )
 
             logger.info("🔍 [꼬리질문 생성] 시작")
-            logger.info(f"   원본 질문: {sanitize_log_input(original_question[:50])}...")
+            safe_question = sanitize_log_input(original_question[:50])
+            logger.info("   원본 질문: %s...", safe_question)
             logger.info(f"   답변 길이: {len(candidate_answer)}자")
             logger.info(f"   모델: {model}")
 
