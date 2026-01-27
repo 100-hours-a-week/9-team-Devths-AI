@@ -38,9 +38,9 @@ class PIIType(str, Enum):
 class MaskingDraftRequest(BaseModel):
     """게시판 첨부파일 마스킹 요청 (API 9)"""
 
-    file_url: str = Field(..., description="파일 URL (http(s):// 또는 data: URL)")
+    s3_key: str = Field(..., description="S3 파일 URL 또는 키")
     file_type: MaskingFileType = Field(..., description="파일 타입 (image/pdf)")
-    model_type: MaskingModelType = Field(
+    model: MaskingModelType = Field(
         default=MaskingModelType.GEMINI,
         description="사용할 AI 모델 (gemini: Google Gemini 1.5 Flash, chandra: datalab-to/chandra)",
     )
@@ -48,9 +48,9 @@ class MaskingDraftRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "file_url": "https://s3.amazonaws.com/bucket/document.png",
+                "s3_key": "https://s3.../document.png",
                 "file_type": "image",
-                "model_type": "gemini",
+                "model": "gemini",
             }
         }
 
