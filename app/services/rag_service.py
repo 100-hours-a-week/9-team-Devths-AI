@@ -424,9 +424,8 @@ class RAGService:
             # 사용자 입력은 로그에 포함하지 않음 (보안)
             logger.info("   원본 질문: [REDACTED]")
             logger.info("   답변 길이: %d자", len(candidate_answer))
-            # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
-            safe_model = str(model) if model else "UNKNOWN"
-            logger.info("   모델: %s", safe_model)
+            # 모델명은 로그에 포함하지 않음 (보안)
+            logger.info("   모델: [REDACTED]")
 
             # vLLM 또는 Gemini 선택
             if model == "vllm" and self.vllm:

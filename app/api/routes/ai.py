@@ -623,10 +623,9 @@ async def generate_chat_stream(request: ChatRequest):
                     candidate_answer = history_dict[-1].get("content", "")
 
                     logger.info("🔍 [꼬리질문 생성] 감지")
-                    safe_question = sanitize_log_input(original_question[:50])
-                    safe_answer = sanitize_log_input(candidate_answer[:50])
-                    logger.info("   원본 질문: %s...", safe_question)
-                    logger.info("   답변: %s...", safe_answer)
+                    # 사용자 입력은 로그에 포함하지 않음 (보안)
+                    logger.info("   원본 질문: [REDACTED]")
+                    logger.info("   답변: [REDACTED]")
                     logger.info("")
 
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
@@ -668,9 +667,8 @@ async def generate_chat_stream(request: ChatRequest):
                     logger.info("")
 
                     # RAG를 사용하여 컨텍스트 검색 및 응답 생성
-                    # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
-                    safe_model = str(model).upper() if model else "UNKNOWN"
-                    logger.info("🔍 [%s] RAG 검색 및 응답 생성 시작...", safe_model)
+                    # 모델명은 로그에 포함하지 않음 (보안)
+                    logger.info("🔍 RAG 검색 및 응답 생성 시작...")
                     async for chunk in rag.chat_with_rag(
                         user_message=user_message,
                         user_id=request.user_id,
@@ -682,11 +680,8 @@ async def generate_chat_stream(request: ChatRequest):
                         full_response += chunk
                         yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
-                    # 모델명은 사용자 입력이지만 enum으로 제한되어 있어 안전
-                    safe_model = str(model).upper() if model else "UNKNOWN"
-                    logger.info(
-                        "✅ [%s] 일반 대화 완료 (응답 길이: %d자)", safe_model, len(full_response)
-                    )
+                    # 모델명은 로그에 포함하지 않음 (보안)
+                    logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
         except Exception as e:
             error_msg = f"오류가 발생했습니다: {str(e)}"
