@@ -125,6 +125,7 @@ jobs:
           webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
           status: 'success'
           title: '✅ 2차 승인 완료 (TeamLead) - 배포 시작'
+          content: '@everyone'
           description: |
             **2차 승인자**: ${{ github.actor }}
             **승인 시각**: ${{ github.event.head_commit.timestamp }}

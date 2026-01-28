@@ -327,7 +327,7 @@ jobs:
             - Validation: ${{ needs.validate.result == 'success' && '✅' || '❌' }}
             - Build: ${{ needs.build.result == 'success' && '✅' || '❌' }}
 
-            ${{ github.ref_name == 'main' && format('**📦 아티팩트**: `{0}`\n**🚀 배포**: 수동 배포 준비 완료 ([배포하기]({1}/{2}/actions/workflows/deploy-prod.yml))', needs.build.outputs.artifact_name, github.server_url, github.repository) || '' }}
+            **🪣 S3 Key**: `${{ needs.build.outputs.s3_key }}`
 
             **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
 
