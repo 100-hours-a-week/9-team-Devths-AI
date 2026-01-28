@@ -44,15 +44,8 @@ router = APIRouter(
 )
 
 # 임시 작업 저장소 (실제로는 Redis 등 사용)
+# 백엔드에서 전달받은 task_id를 키로 사용하여 인메모리에 임시 보관
 tasks_db = {}
-task_id_counter = 0  # 정수 task_id 카운터
-
-
-def get_next_task_id() -> int:
-    """Get next task_id as integer"""
-    global task_id_counter
-    task_id_counter += 1
-    return task_id_counter
 
 
 # Initialize services
@@ -257,7 +250,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
 )
 async def text_extract(request: TextExtractRequest):
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
-    task_id = get_next_task_id()
+    task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
 
     # 비동기 작업 시작
     tasks_db[task_id] = {

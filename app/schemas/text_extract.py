@@ -115,6 +115,7 @@ class TextExtractRequest(BaseModel):
     각 문서는 파일 업로드 또는 텍스트 입력 중 하나의 방식으로 제공됩니다.
     """
 
+    task_id: int = Field(..., description="작업 ID (백엔드에서 생성)", example=1)
     room_id: int = Field(..., description="채팅방 ID", example=23)
     user_id: int = Field(..., description="사용자 ID", example=12)
     resume: DocumentInput = Field(..., description="이력서/포트폴리오 입력")
@@ -136,6 +137,7 @@ class TextExtractRequest(BaseModel):
                 {
                     "name": "파일 업로드 방식 (S3 key)",
                     "value": {
+                        "task_id": 1,
                         "model": "gemini",
                         "room_id": 23,
                         "user_id": 12,
@@ -154,6 +156,7 @@ class TextExtractRequest(BaseModel):
                 {
                     "name": "텍스트 직접 입력 방식",
                     "value": {
+                        "task_id": 2,
                         "model": "gemini",
                         "room_id": 23,
                         "user_id": 12,
@@ -168,6 +171,7 @@ class TextExtractRequest(BaseModel):
                 {
                     "name": "혼합 방식 (S3 key + 텍스트)",
                     "value": {
+                        "task_id": 3,
                         "model": "gemini",
                         "room_id": 23,
                         "user_id": 12,
