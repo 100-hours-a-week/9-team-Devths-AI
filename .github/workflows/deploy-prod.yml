@@ -40,22 +40,56 @@ jobs:
             **🔵🟢 배포 타입**: Blue/Green
             **🌍 환경**: 🚀 운영(PROD)
 
-            ⏳ **팀원 승인 대기 중...**
+            ⏳ **2단계 교차 승인 대기 중...**
+
+            **승인 프로세스**:
+            1️⃣ **1차 승인** (팀 리드) → 2️⃣ **2차 승인** (DevOps/시니어) → 🚀 **배포 실행**
 
             **승인 방법**:
             1. [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})로 이동
             2. **Review deployments** 버튼 클릭
-            3. 승인 코멘트 작성 후 **Approve and deploy** 클릭
+            3. 본인의 승인 단계 선택 후 **Approve and deploy** 클릭
 
-            **⚠️ 주의**: 승인 후 블루/그린 배포가 즉시 시작됩니다.
+            **⚠️ 주의**: 2명 모두 승인해야 블루/그린 배포가 시작됩니다.
           color: 16776960
           username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
-  # 운영 배포 (승인 필요)
+  # 1차 승인
+  first-approval:
+    name: 1차 승인 (DevOps/TechLead)
+    runs-on: ubuntu-22.04
+    needs: [notify-approval-request]
+    environment:
+      name: production-approval-1
+    steps:
+      - name: 1차 승인 완료
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ 1차 승인 완료"
+          echo "승인자: ${{ github.actor }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # 2차 승인
+  second-approval:
+    name: 2차 승인 (TeamLead)
+    runs-on: ubuntu-22.04
+    needs: [first-approval]
+    environment:
+      name: production-approval-2
+    steps:
+      - name: 2차 승인 완료
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ 2차 승인 완료 - 배포 시작 가능"
+          echo "승인자: ${{ github.actor }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  # 운영 배포 (2차 승인 후 자동 실행)
   deploy-production:
     name: Production Deployment (Blue/Green)
     runs-on: ubuntu-22.04
+    needs: [second-approval]
     environment:
       name: production
       url: https://ai.devths.com  # 운영 서버 URL로 변경
