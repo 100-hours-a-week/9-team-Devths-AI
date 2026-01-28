@@ -64,7 +64,7 @@ jobs:
 
             **⚠️ 주의**: 2명 모두 승인해야 배포가 시작됩니다.
           color: 16776960
-          username: GitHub FE Approval Bot
+          username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
   # 1차 승인
@@ -101,7 +101,7 @@ jobs:
             **다음 단계**: TeamLead의 2차 승인이 필요합니다.
             **승인 방법**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})에서 **Review deployments** 버튼 클릭
           color: 65280
-          username: GitHub FE Approval Bot
+          username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
   # 2차 승인
@@ -136,7 +136,7 @@ jobs:
 
             **진행 상황**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})에서 확인 가능
           color: 3066993
-          username: GitHub FE Approval Bot
+          username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
   # 운영 배포 (2차 승인 후 자동 실행)
@@ -253,7 +253,7 @@ jobs:
 
             **🔗 링크**: [워크플로우 확인하기](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           color: "${{ needs.deploy-production.result == 'success' && 65280 || 16711680 }}"
-          username: GitHub FE Production Deploy Bot
+          username: GitHub AI Production Deploy Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
       - name: Discord 취소 알림
@@ -284,5 +284,5 @@ jobs:
 
             **🔗 링크**: [워크플로우 확인하기](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           color: 16776960
-          username: GitHub FE Production Deploy Bot
+          username: GitHub AI Production Deploy Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
