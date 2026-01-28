@@ -111,6 +111,7 @@ class ChatRequest(BaseModel):
                 {
                     "name": "일반 대화",
                     "value": {
+                        "model": "gemini",
                         "room_id": 1,
                         "user_id": 12,
                         "message": "이력서 작성 팁 알려줘",
@@ -125,8 +126,9 @@ class ChatRequest(BaseModel):
                     },
                 },
                 {
-                    "name": "면접 질문 생성",
+                    "name": "면접 질문 생성 (면접 시작)",
                     "value": {
+                        "model": "gemini",
                         "room_id": 1,
                         "user_id": 12,
                         "message": "기술 면접 질문 생성해줘",
@@ -138,6 +140,19 @@ class ChatRequest(BaseModel):
                             "interview_type": "technical",
                             "question_count": 0,
                         },
+                    },
+                },
+                {
+                    "name": "면접 리포트 생성 (면접 종료)",
+                    "value": {
+                        "model": "gemini",
+                        "room_id": 1,
+                        "user_id": 12,
+                        "session_id": 23,
+                        "context": [
+                            {"question": "자기소개 해주세요", "answer": "안녕하세요..."},
+                            {"question": "프로젝트 경험을 말씀해주세요", "answer": "저는..."},
+                        ],
                     },
                 },
             ]
