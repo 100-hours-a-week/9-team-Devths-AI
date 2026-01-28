@@ -29,7 +29,6 @@ class DocumentInput(BaseModel):
     )
     text: str | None = Field(
         None,
-        min_length=10,
         description="직접 입력한 텍스트 (텍스트 입력 시)",
         example="이름: 홍길동\n경력: 3년\n기술스택: React, TypeScript...",
     )
@@ -145,11 +144,13 @@ class TextExtractRequest(BaseModel):
                             "file_id": 23,
                             "s3_key": "uploads/2026/01/9eb3907b-resume.pdf",
                             "file_type": "application/pdf",
+                            "text": None,
                         },
                         "job_posting": {
                             "file_id": 24,
                             "s3_key": "uploads/2026/01/abc123-job_posting.png",
                             "file_type": "image/png",
+                            "text": None,
                         },
                     },
                 },
@@ -161,10 +162,16 @@ class TextExtractRequest(BaseModel):
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
-                            "text": "이름: 홍길동\n경력: 3년\n기술스택: React, TypeScript..."
+                            "file_id": None,
+                            "s3_key": None,
+                            "file_type": None,
+                            "text": "이름: 홍길동\\n경력: 3년\\n기술스택: React, TypeScript...",
                         },
                         "job_posting": {
-                            "text": "카카오 백엔드 개발자 채용\n자격요건: Java, Spring..."
+                            "file_id": None,
+                            "s3_key": None,
+                            "file_type": None,
+                            "text": "카카오 백엔드 개발자 채용\\n자격요건: Java, Spring...",
                         },
                     },
                 },
@@ -179,9 +186,13 @@ class TextExtractRequest(BaseModel):
                             "file_id": 23,
                             "s3_key": "uploads/2026/01/9eb3907b-resume.pdf",
                             "file_type": "application/pdf",
+                            "text": None,
                         },
                         "job_posting": {
-                            "text": "카카오 백엔드 개발자 채용\n자격요건: Java, Spring..."
+                            "file_id": None,
+                            "s3_key": None,
+                            "file_type": None,
+                            "text": "카카오 백엔드 개발자 채용\\n자격요건: Java, Spring...",
                         },
                     },
                 },
