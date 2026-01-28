@@ -1,0 +1,73 @@
+name: Bug Issue Discord 알림
+
+on:
+  issues:
+    types: [ opened, reopened ] # 다시 열린 이슈도 포함
+
+jobs:
+  notify-bug-issue:
+    runs-on: ubuntu-22.04
+    if: contains(github.event.issue.labels.*.name, 'bug')
+    steps:
+      - name: 데이터 준비
+        id: prep
+        env:
+          USER_MAP: ${{ secrets.USER_MAP_JSON }}
+        run: |
+          # 1. 멘션 처리 함수 (사용자 매핑 로직 강화)
+          get_mention() {
+            local login=$1
+            local mapped=$(echo "$USER_MAP" | jq -r --arg id "$login" '.[$id] // empty')
+            if [ -n "$mapped" ]; then echo "$mapped"; else echo "@$login"; fi
+          }
+
+          # 2. 작성자 및 담당자 멘션 생성
+          AUTHOR=$(get_mention "${{ github.event.issue.user.login }}")
+          echo "author=$AUTHOR" >> $GITHUB_OUTPUT
+
+          ASSIGNEES=$(echo '${{ toJson(github.event.issue.assignees) }}' | jq -r --argjson map "$USER_MAP" '
+            [.[].login | ($map[.] // "@" + .)] | join(", ")
+          ')
+          echo "assignees=${ASSIGNEES:-'미지정 👤'}" >> $GITHUB_OUTPUT
+
+          # 3. 라벨을 예쁘게 포맷팅 (예: `bug`, `p0`)
+          LABELS=$(echo '${{ toJson(github.event.issue.labels.*.name) }}' | jq -r 'map("`" + . + "`") | join(", ")')
+          echo "labels=$LABELS" >> $GITHUB_OUTPUT
+
+      - name: Discord 알림 전송
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_BUG_URL }}
+          status: 'failure'
+
+          title: '🚨 BUG REPORT: ${{ github.event.issue.title }}'
+          url: ${{ github.event.issue.html_url }}
+
+          # 2. 역할 멘션은 content에 그대로 두어 최상단에 노출되게 합니다.
+          content: '${{ secrets.DISCORD_ROLE }} 버그가 접수되었습니다. 확인 부탁드립니다!'
+
+          description: |
+            **레포지토리**
+            ${{ github.event.repository.full_name }} (AI)
+
+            **작성자**
+            ${{ steps.prep.outputs.author }}
+
+            **담당자**
+            ${{ steps.prep.outputs.assignees }}
+
+            **라벨**
+            ${{ steps.prep.outputs.labels }}
+
+            **📝 내용**
+            ```text
+            ${{ github.event.issue.body }}
+            ```
+
+            ---
+            *이슈 #${{ github.event.issue.number }}*
+
+          # 4. 기타 스타일 옵션
+          color: 0xff4d4d
+          username: GitHub Bug Bot
+          avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png

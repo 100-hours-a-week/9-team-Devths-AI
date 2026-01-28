@@ -7,6 +7,27 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 APP_DIR="/home/ubuntu/ai"
 cd "$APP_DIR"
 
+# 0. 시스템 패키지 설치 (ML dependencies 필수)
+#echo "📦 Installing system packages for ML dependencies..."
+#export DEBIAN_FRONTEND=noninteractive
+#sudo apt-get update -qq
+#sudo apt-get install -y -qq \
+#    tesseract-ocr \
+#    tesseract-ocr-eng \
+#    tesseract-ocr-kor \
+#    libtesseract-dev \
+#    libgl1-mesa-glx \
+#    libglib2.0-0 \
+#    > /dev/null 2>&1
+#
+#if [ $? -eq 0 ]; then
+#    echo "✅ System packages installed"
+#    tesseract --version | head -n 1
+#else
+#    echo "⚠️  System package installation failed, but continuing..."
+#fi
+#echo ""
+
 # 1. Python 버전 확인 및 pyenv 설정
 echo "🐍 Checking Python version..."
 
