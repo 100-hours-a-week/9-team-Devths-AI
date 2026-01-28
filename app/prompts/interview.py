@@ -30,6 +30,7 @@ def load_prompt(template_name: str) -> str:
 # 시스템 프롬프트
 # ============================================================================
 
+
 def get_system_general() -> str:
     """일반 시스템 프롬프트"""
     return load_prompt("system_general")
