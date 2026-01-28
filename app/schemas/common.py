@@ -65,15 +65,15 @@ class TaskStatus(str, Enum):
 class AsyncTaskResponse(BaseModel):
     """비동기 작업 초기 응답"""
 
-    task_id: int = Field(..., description="작업 ID")
+    task_id: str | int = Field(..., description="작업 ID (text_extract: int, masking: str)")
     status: TaskStatus = Field(TaskStatus.PROCESSING, description="작업 상태")
     message: str | None = Field(None, description="상태 메시지")
 
 
 class TaskStatusResponse(BaseModel):
-    """비동기 작업 상태 조회 응답 (처리 중)"""
+    """비동기 작업 상태 조회 응답 (통합)"""
 
-    task_id: int = Field(..., description="작업 ID")
+    task_id: str | int = Field(..., description="작업 ID (text_extract: int, masking: str)")
     status: TaskStatus = Field(..., description="작업 상태")
     progress: int | None = Field(None, ge=0, le=100, description="진행률 (0-100)")
     message: str | None = Field(None, description="상태 메시지")

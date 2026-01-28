@@ -1,6 +1,7 @@
 """
-간단한 파일 기반 Task 저장소
+통합 파일 기반 Task 저장소
 
+모든 비동기 작업(text_extract, masking 등)을 통합 관리
 개발 환경에서 uvicorn --reload 모드에서도 task가 유지되도록 함
 프로덕션에서는 Redis 등으로 교체 필요
 """
@@ -12,9 +13,9 @@ from typing import Any
 
 
 class FileTaskStore:
-    """파일 기반 Task 저장소"""
+    """통합 파일 기반 Task 저장소"""
 
-    def __init__(self, storage_dir: str = "/tmp/masking_tasks"):
+    def __init__(self, storage_dir: str = "/tmp/ai_tasks"):
         self.storage_dir = Path(storage_dir)
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 

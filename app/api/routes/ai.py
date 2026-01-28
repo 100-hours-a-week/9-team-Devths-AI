@@ -34,6 +34,7 @@ from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
 from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# 임시 작업 저장소 (실제로는 Redis 등 사용)
-# 백엔드에서 전달받은 task_id를 키로 사용하여 인메모리에 임시 보관
-tasks_db = {}
+# 통합 작업 저장소 (파일 기반, 서버 재시작 시에도 유지)
+# 백엔드에서 전달받은 task_id를 키로 사용
+task_store = get_task_store()
 
 
 # Initialize services
@@ -252,13 +253,18 @@ async def text_extract(request: TextExtractRequest):
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
 
-    # 비동기 작업 시작
-    tasks_db[task_id] = {
-        "status": TaskStatus.PROCESSING,
-        "created_at": datetime.now(),
-        "room_id": request.room_id,
-        "request": request.model_dump(),
-    }
+    # 비동기 작업 시작 (통합 task_store 사용)
+    task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
+    task_store.save(
+        task_key,
+        {
+            "type": "text_extract",
+            "status": TaskStatus.PROCESSING,
+            "created_at": datetime.now(),
+            "room_id": request.room_id,
+            "request": request.model_dump(),
+        },
+    )
 
     # 백그라운드에서 처리
     async def process_text_extract():
@@ -373,14 +379,16 @@ async def text_extract(request: TextExtractRequest):
                 }
 
             # 결과 저장 (명세서에 따른 응답 구조)
-            tasks_db[task_id]["status"] = TaskStatus.COMPLETED
-            tasks_db[task_id]["result"] = TextExtractResult(
+            task_data = task_store.get(task_key) or {}
+            task_data["status"] = TaskStatus.COMPLETED
+            task_data["result"] = TextExtractResult(
                 success=True,
                 resume_ocr=resume_result.extracted_text,
                 job_posting_ocr=job_posting_result.extracted_text,
                 resume_analysis=analysis_result.get("resume_analysis"),
                 posting_analysis=analysis_result.get("posting_analysis"),
             ).model_dump()
+            task_store.save(task_key, task_data)
 
             logger.info("")
             logger.info("✅ 텍스트 추출 + 분석 완료!")
@@ -389,8 +397,10 @@ async def text_extract(request: TextExtractRequest):
 
         except Exception as e:
             logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
-            tasks_db[task_id]["status"] = TaskStatus.FAILED
-            tasks_db[task_id]["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
+            task_data = task_store.get(task_key) or {}
+            task_data["status"] = TaskStatus.FAILED
+            task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
+            task_store.save(task_key, task_data)
 
     asyncio.create_task(process_text_extract())
 
@@ -433,9 +443,12 @@ async def text_extract(request: TextExtractRequest):
         },
     },
 )
-async def get_task_status(task_id: int):
-    """비동기 작업 상태 조회"""
-    if task_id not in tasks_db:
+async def get_task_status(task_id: str):
+    """통합 비동기 작업 상태 조회 (text_extract, masking 등)"""
+    task_key = str(task_id)  # 문자열 키로 통일
+    task = task_store.get(task_key)
+
+    if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -443,8 +456,6 @@ async def get_task_status(task_id: int):
                 "message": f"작업을 찾을 수 없습니다: {task_id}",
             },
         )
-
-    task = tasks_db[task_id]
 
     # room_id를 result에 포함
     result = task.get("result")
