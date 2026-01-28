@@ -142,7 +142,7 @@ echo "📝 Logs: $LOG_FILE"
 nohup poetry run uvicorn app.main:app \
     --host "${HOST:-0.0.0.0}" \
     --port "${PORT:-8000}" \
-    --workers "${WORKERS:-2}" \
+    --workers "${WORKERS:-1}" \
     >> "$LOG_FILE" 2>&1 &
 
 # PID 저장
