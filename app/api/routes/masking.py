@@ -107,8 +107,9 @@ async def masking_draft(request: MaskingDraftRequest):
     logger.info(f"[MASKING_DRAFT] Creating new task: {task_id}")
     logger.info(f"[MASKING_DRAFT] Current tasks in store: {task_store.list_all()}")
 
-    # 초기 상태를 즉시 저장
+    # 초기 상태를 즉시 저장 (통합 저장소 사용)
     task_data = {
+        "type": "masking",  # 작업 타입 구분
         "status": TaskStatus.PROCESSING,
         "created_at": datetime.now(),
         "progress": 0,
@@ -243,7 +244,7 @@ async def masking_draft(request: MaskingDraftRequest):
     return AsyncTaskResponse(
         task_id=task_id,
         status=TaskStatus.PROCESSING,
-        message="마스킹 작업을 시작했습니다. task_id로 진행 상태를 확인하세요.",
+        message="마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
     )
 
 
@@ -253,6 +254,8 @@ async def masking_draft(request: MaskingDraftRequest):
     summary="마스킹 작업 상태 조회",
     description="""
     비동기 마스킹 작업의 상태를 조회합니다.
+
+    **통합 엔드포인트:** `/ai/task/{task_id}`로도 조회 가능합니다.
 
     **상태 종류:**
     - processing: 처리 중
