@@ -1,56 +1,39 @@
 """
 일반 채팅 및 RAG 관련 프롬프트 정의
+마크다운 템플릿을 사용하는 하이브리드 방식
 """
+
+from pathlib import Path
+
+# ============================================================================
+# 템플릿 로더
+# ============================================================================
+
+TEMPLATE_DIR = Path(__file__).parent / "templates" / "chat"
+
+
+def load_prompt(template_name: str) -> str:
+    """마크다운 템플릿 파일에서 프롬프트 로드"""
+    template_path = TEMPLATE_DIR / f"{template_name}.md"
+    try:
+        return template_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Template not found: {template_path}") from None
 
 
 # ============================================================================
 # 시스템 프롬프트
 # ============================================================================
 
-SYSTEM_GENERAL_CHAT = """당신은 취업 준비를 돕는 친절한 AI 어시스턴트 '메모아'입니다.
-취업, 이력서 작성, 면접 준비, 채용공고 분석 등에 대해 도움을 드립니다.
 
-## 핵심 규칙
-1. 항상 한국어로 자연스럽게 응답
-2. 구체적이고 실용적인 조언 제공
-3. 긍정적이고 격려하는 톤 유지
-4. 필요시 VectorDB에 저장된 사용자 정보 참조
-
-사용자의 질문에 친절하고 전문적으로 답변해주세요."""
-
-SYSTEM_RAG_CHAT = """당신은 취업 전문 AI 어시스턴트입니다.
-제공된 컨텍스트(이력서, 채용공고, 포트폴리오 정보)를 참고하여 답변합니다.
-
-## 컨텍스트 사용 규칙
-1. 컨텍스트에 관련 정보가 있으면 반드시 참조
-2. 컨텍스트에 없는 내용은 일반 지식으로 보충
-3. 불확실한 내용은 명시적으로 언급
-4. 사용자 맞춤형 조언 제공"""
+def get_system_general_chat() -> str:
+    """일반 채팅용 시스템 프롬프트"""
+    return load_prompt("system_general")
 
 
-# ============================================================================
-# RAG 컨텍스트 프롬프트
-# ============================================================================
-
-RAG_CONTEXT_PROMPT = """## 참고 정보
-{context}
-
----
-
-## 사용자 질문
-{user_message}
-
-위 참고 정보를 바탕으로 사용자의 질문에 답변해주세요.
-참고 정보가 질문과 관련이 없다면, 일반적인 지식으로 답변해도 됩니다."""
-
-
-# ============================================================================
-# 일반 채팅 프롬프트
-# ============================================================================
-
-GENERAL_CHAT_PROMPT = """사용자: {user_message}
-
-친절하고 전문적으로 답변해주세요."""
+def get_system_rag_chat() -> str:
+    """RAG 채팅용 시스템 프롬프트"""
+    return load_prompt("system_rag")
 
 
 # ============================================================================
@@ -61,10 +44,24 @@ GENERAL_CHAT_PROMPT = """사용자: {user_message}
 def create_rag_prompt(user_message: str, context: str | None = None) -> str:
     """RAG 컨텍스트가 있는 경우의 프롬프트 생성"""
     if context:
-        return RAG_CONTEXT_PROMPT.format(context=context, user_message=user_message)
-    return GENERAL_CHAT_PROMPT.format(user_message=user_message)
+        template = load_prompt("rag_context")
+        return template.format(context=context, user_message=user_message)
+
+    template = load_prompt("general_chat")
+    return template.format(user_message=user_message)
 
 
 def get_system_prompt(use_rag: bool = False) -> str:
     """시스템 프롬프트 반환"""
-    return SYSTEM_RAG_CHAT if use_rag else SYSTEM_GENERAL_CHAT
+    return get_system_rag_chat() if use_rag else get_system_general_chat()
+
+
+# ============================================================================
+# 역호환성을 위한 상수 (선택적)
+# ============================================================================
+
+# 기존 코드에서 직접 참조하는 경우를 위해 lazy loading
+SYSTEM_GENERAL_CHAT = get_system_general_chat()
+SYSTEM_RAG_CHAT = get_system_rag_chat()
+RAG_CONTEXT_PROMPT = load_prompt("rag_context")
+GENERAL_CHAT_PROMPT = load_prompt("general_chat")
