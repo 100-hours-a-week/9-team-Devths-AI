@@ -26,15 +26,16 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
     if [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
         DEPLOYMENT_GROUP_LOWER=$(echo "$CODEDEPLOY_DEPLOYMENT_GROUP" | tr '[:upper:]' '[:lower:]')
 
-        if [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
-            export PARAMETER_STORE_PATH="/Dev/AI/"
-            echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        # 더 구체적인 패턴부터 먼저 체크 (prod -> staging -> dev 순서)
+        if [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
+            export PARAMETER_STORE_PATH="/Prod/AI/"
+            echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
         elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"stg"* ]] || [[ "$DEPLOYMENT_GROUP_LOWER" == *"staging"* ]]; then
             export PARAMETER_STORE_PATH="/Stg/AI/"
             echo "🧪 Environment: Staging (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
-        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
-            export PARAMETER_STORE_PATH="/Prod/AI/"
-            echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
+        elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
+            export PARAMETER_STORE_PATH="/Dev/AI/"
+            echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
         else
             echo "⚠️  Unknown deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP"
         fi

@@ -17,7 +17,7 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   S3_BUCKET: ${{ secrets.AWS_S3_BUCKET_PROD }}
   CODEDEPLOY_APP_NAME: ${{ secrets.CODEDEPLOY_APP_NAME }}
-  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ secrets.CODE_DEPLOY_GROUP_NAME_PROD }}
+  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ secrets.CODEDEPLOY_GROUP_NAME_PROD }}
 
 jobs:
   # 승인 요청 알림 (즉시 실행)
@@ -125,6 +125,7 @@ jobs:
           webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
           status: 'success'
           title: '✅ 2차 승인 완료 (TeamLead) - 배포 시작'
+          content: '@everyone'
           description: |
             **2차 승인자**: ${{ github.actor }}
             **승인 시각**: ${{ github.event.head_commit.timestamp }}
