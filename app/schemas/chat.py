@@ -123,6 +123,7 @@ class ChatRequest(BaseModel):
                             "interview_type": None,
                             "question_count": None,
                         },
+                        "history": [],
                     },
                 },
                 {
@@ -140,6 +141,7 @@ class ChatRequest(BaseModel):
                             "interview_type": "technical",
                             "question_count": 0,
                         },
+                        "history": [],
                     },
                 },
                 {
@@ -148,11 +150,13 @@ class ChatRequest(BaseModel):
                         "model": "gemini",
                         "room_id": 1,
                         "user_id": 12,
+                        "message": None,
                         "session_id": 23,
                         "context": [
                             {"question": "자기소개 해주세요", "answer": "안녕하세요..."},
                             {"question": "프로젝트 경험을 말씀해주세요", "answer": "저는..."},
                         ],
+                        "history": [],
                     },
                 },
             ]
