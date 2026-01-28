@@ -26,10 +26,29 @@ if ! command -v aws &> /dev/null; then
     return 1 2>/dev/null || exit 1
 fi
 
-# Parameter Store에서 모든 파라미터 가져오기
+# AWS Region 자동 감지 (IMDSv2 지원)
+if [ -z "$AWS_REGION" ] && [ -z "$AWS_DEFAULT_REGION" ]; then
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
+    if [ -n "$TOKEN" ]; then
+        REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/placement/region)
+    else
+        # Fallback for IMDSv1
+        REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+    fi
+    
+    if [ -n "$REGION" ]; then
+        export AWS_REGION="$REGION"
+        export AWS_DEFAULT_REGION="$REGION"
+        echo "🌍 Auto-detected AWS Region: $REGION"
+    fi
+fi
+
+# Parameter Store에서 모든 파라미터 가져오기 (Recursive options added)
 PARAMS=$(aws ssm get-parameters-by-path \
     --path "$PARAMETER_PATH" \
+    --recursive \
     --with-decryption \
+    --max-items 100 \
     --query 'Parameters[*].[Name,Value]' \
     --output text 2>/dev/null)
 
