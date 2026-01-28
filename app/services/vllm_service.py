@@ -365,7 +365,15 @@ class VLLMService:
             raise
 
     async def _download_file(self, file_url: str) -> bytes:
-        """Download file from URL"""
+        """Download file from URL or S3 key
+
+        Supports:
+        - data: URLs (base64 encoded)
+        - http(s):// URLs (direct download)
+        - S3 keys (e.g., "uploads/2026/01/xxx.png") - converted to URL using S3_BASE_URL
+        """
+        import os
+
         # Handle data: URL
         if file_url.startswith("data:"):
             try:
@@ -377,11 +385,28 @@ class VLLMService:
                 logger.error(f"Failed to decode data URL: {e}")
                 raise ValueError("Invalid data URL format") from e
 
-        # HTTP(S) URL
-        async with httpx.AsyncClient() as client:
-            response = await client.get(file_url, timeout=30.0)
-            response.raise_for_status()
-            return response.content
+        # Handle HTTP(S) URL (direct download)
+        if file_url.startswith("http://") or file_url.startswith("https://"):
+            async with httpx.AsyncClient() as client:
+                response = await client.get(file_url, timeout=30.0)
+                response.raise_for_status()
+                return response.content
+
+        # Handle S3 key (convert to full URL)
+        # e.g., "uploads/2026/01/xxx.png" → "https://bucket.s3.amazonaws.com/uploads/2026/01/xxx.png"
+        s3_base_url = os.getenv("S3_BASE_URL", "").rstrip("/")
+        if s3_base_url:
+            full_url = f"{s3_base_url}/{file_url.lstrip('/')}"
+            logger.info(f"Converting S3 key to URL: {file_url[:50]}... → {full_url[:80]}...")
+            async with httpx.AsyncClient() as client:
+                response = await client.get(full_url, timeout=30.0)
+                response.raise_for_status()
+                return response.content
+
+        # S3_BASE_URL not configured and not a valid URL
+        raise ValueError(
+            f"Cannot download file: S3_BASE_URL not configured and '{file_url[:50]}...' is not a valid URL"
+        )
 
     def _pdf_to_images(self, pdf_bytes: bytes, dpi: int = 200) -> list[Image.Image]:
         """Convert PDF to images"""

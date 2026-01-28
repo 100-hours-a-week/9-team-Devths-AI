@@ -19,8 +19,8 @@ class DocumentInput(BaseModel):
     file_id: int | None = Field(None, description="파일 ID (파일 업로드 시)", example=23)
     s3_key: str | None = Field(
         None,
-        description="S3 파일 URL 또는 키 (파일 업로드 시)",
-        example="https://bucket.s3.amazonaws.com/users/12/resume/abc123.pdf",
+        description="S3 파일 키 또는 URL (예: 'uploads/2026/01/xxx.png' 또는 'https://...')",
+        example="uploads/2026/01/9eb3907b-xxx.pdf",
     )
     file_type: str | None = Field(
         None,
@@ -134,19 +134,19 @@ class TextExtractRequest(BaseModel):
         json_schema_extra = {
             "examples": [
                 {
-                    "name": "파일 업로드 방식",
+                    "name": "파일 업로드 방식 (S3 key)",
                     "value": {
                         "model": "gemini",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
                             "file_id": 23,
-                            "s3_key": "https://bucket.s3.amazonaws.com/users/12/resume/abc123.pdf",
+                            "s3_key": "uploads/2026/01/9eb3907b-resume.pdf",
                             "file_type": "application/pdf",
                         },
                         "job_posting": {
                             "file_id": 24,
-                            "s3_key": "https://bucket.s3.amazonaws.com/users/12/job_posting/def456.png",
+                            "s3_key": "uploads/2026/01/abc123-job_posting.png",
                             "file_type": "image/png",
                         },
                     },
@@ -166,14 +166,14 @@ class TextExtractRequest(BaseModel):
                     },
                 },
                 {
-                    "name": "혼합 방식",
+                    "name": "혼합 방식 (S3 key + 텍스트)",
                     "value": {
                         "model": "gemini",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
                             "file_id": 23,
-                            "s3_key": "https://bucket.s3.amazonaws.com/users/12/resume/abc123.pdf",
+                            "s3_key": "uploads/2026/01/9eb3907b-resume.pdf",
                             "file_type": "application/pdf",
                         },
                         "job_posting": {
