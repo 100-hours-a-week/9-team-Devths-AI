@@ -10,7 +10,6 @@
 
 from pathlib import Path
 
-
 # ============================================================================
 # 템플릿 로더
 # ============================================================================
@@ -24,7 +23,7 @@ def load_prompt(template_name: str) -> str:
     try:
         return template_path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        raise FileNotFoundError(f"Template not found: {template_path}")
+        raise FileNotFoundError(f"Template not found: {template_path}") from None
 
 
 # ============================================================================

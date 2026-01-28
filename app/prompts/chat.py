@@ -5,7 +5,6 @@
 
 from pathlib import Path
 
-
 # ============================================================================
 # 템플릿 로더
 # ============================================================================
@@ -19,7 +18,7 @@ def load_prompt(template_name: str) -> str:
     try:
         return template_path.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
-        raise FileNotFoundError(f"Template not found: {template_path}")
+        raise FileNotFoundError(f"Template not found: {template_path}") from None
 
 
 # ============================================================================
@@ -46,7 +45,7 @@ def create_rag_prompt(user_message: str, context: str | None = None) -> str:
     if context:
         template = load_prompt("rag_context")
         return template.format(context=context, user_message=user_message)
-    
+
     template = load_prompt("general_chat")
     return template.format(user_message=user_message)
 
