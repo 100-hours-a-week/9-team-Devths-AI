@@ -255,13 +255,16 @@ async def text_extract(request: TextExtractRequest):
 
     # 비동기 작업 시작 (통합 task_store 사용)
     task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
-    task_store.save(task_key, {
-        "type": "text_extract",
-        "status": TaskStatus.PROCESSING,
-        "created_at": datetime.now(),
-        "room_id": request.room_id,
-        "request": request.model_dump(),
-    })
+    task_store.save(
+        task_key,
+        {
+            "type": "text_extract",
+            "status": TaskStatus.PROCESSING,
+            "created_at": datetime.now(),
+            "room_id": request.room_id,
+            "request": request.model_dump(),
+        },
+    )
 
     # 백그라운드에서 처리
     async def process_text_extract():
