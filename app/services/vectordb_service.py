@@ -124,6 +124,9 @@ class VectorDBService:
             doc_metadata["document_id"] = document_id
             doc_metadata["collection_type"] = collection_type
 
+            # ChromaDB는 None 값을 허용하지 않음 - 필터링
+            doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
+
             # Add to collection
             collection.add(
                 ids=[document_id],
@@ -175,6 +178,9 @@ class VectorDBService:
                 # Prepare metadata
                 metadata["document_id"] = doc_id
                 metadata["collection_type"] = collection_type
+
+                # ChromaDB는 None 값을 허용하지 않음 - 필터링
+                metadata = {k: v for k, v in metadata.items() if v is not None}
 
                 ids.append(doc_id)
                 embeddings.append(embedding)
