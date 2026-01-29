@@ -139,11 +139,12 @@ chown ubuntu:ubuntu "$LOG_FILE"
 echo "🌐 Starting server on ${HOST:-0.0.0.0}:${PORT:-8000}"
 echo "📝 Logs: $LOG_FILE"
 
-# Poetry를 통해 uvicorn 실행
+# Poetry를 통해 uvicorn 실행 (로그 레벨 설정 포함)
 nohup poetry run uvicorn app.main:app \
     --host "${HOST:-0.0.0.0}" \
     --port "${PORT:-8000}" \
     --workers "${WORKERS:-1}" \
+    --log-level info \
     >> "$LOG_FILE" 2>&1 &
 
 # PID 저장
