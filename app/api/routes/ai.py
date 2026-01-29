@@ -543,7 +543,7 @@ async def generate_chat_stream(request: ChatRequest):
                         error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
                         # 사용자 ID는 로그에 포함하지 않음 (보안)
                         logger.error("⚠️ VectorDB에 문서가 없습니다")
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
+                        yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
                         full_response = error_msg
                     else:
                         logger.info(f"✅ [1/3] VectorDB 조회 완료: {len(full_context)}자")
@@ -570,7 +570,7 @@ async def generate_chat_stream(request: ChatRequest):
                             system_prompt="당신은 채용 전문가입니다. 이력서와 채용공고를 분석하여 명확한 피드백을 제공하세요.",
                         ):
                             full_response += chunk
-                            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                            yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                         logger.info(f"✅ [3/3] Llama 분석 완료 (응답 길이: {len(full_response)}자)")
 
@@ -596,7 +596,7 @@ async def generate_chat_stream(request: ChatRequest):
                         model="gemini",
                     ):
                         full_response += chunk
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                        yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                     logger.info(f"✅ [2/2] Gemini 분석 완료 (응답 길이: {len(full_response)}자)")
             else:
@@ -634,7 +634,7 @@ async def generate_chat_stream(request: ChatRequest):
                         user_id=request.user_id,
                     ):
                         full_response += chunk
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                        yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                     logger.info(f"✅ [꼬리질문 생성] 완료 (응답 길이: {len(full_response)}자)")
 
@@ -667,23 +667,17 @@ async def generate_chat_stream(request: ChatRequest):
                         model=model,
                     ):
                         full_response += chunk
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                        yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                     # 모델명은 로그에 포함하지 않음 (보안)
                     logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
         except Exception as e:
             error_msg = f"오류가 발생했습니다: {str(e)}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': error_msg}, ensure_ascii=False)}{sse_end}"
+            yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
             full_response = error_msg
 
-        result = {
-            "success": True,
-            "mode": "general",
-            "response": full_response,
-            "tool_used": {"tool": "RAG", "description": "VectorDB 검색 후 LLM 응답 생성"},
-        }
-        yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
+        yield f"data: [DONE]{sse_end}"
 
     # 2. 면접 모드 - 맞춤형 질문 생성 및 대화
     elif mode == ChatMode.INTERVIEW:
@@ -693,7 +687,7 @@ async def generate_chat_stream(request: ChatRequest):
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
             content = f"{interview_type_kr} 면접 질문을 생성 중입니다...{newline}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}{sse_end}"
+            yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}{sse_end}"
 
             # RAG를 사용하여 사용자 맞춤 면접 질문 생성
             # resume, portfolio, job_posting 컬렉션에서 컨텍스트 검색
@@ -735,7 +729,7 @@ async def generate_chat_stream(request: ChatRequest):
                     system_prompt=SYSTEM_INTERVIEW,
                 ):
                     full_question += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
             else:
                 logger.info("💬 [Gemini] 면접 질문 생성 시작")
                 async for chunk in rag.llm.generate_response(
@@ -746,20 +740,20 @@ async def generate_chat_stream(request: ChatRequest):
                     user_id=request.user_id,
                 ):
                     full_question += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
-            result = {
+            {
                 "success": True,
                 "mode": "interview_question",
                 "response": full_question.strip(),
                 "interview_type": interview_type,
             }
-            yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
+            yield f"data: [DONE]{sse_end}"
 
         except Exception as e:
             logger.error(f"Interview question generation error: {e}")
-            error_result = {"success": False, "mode": "interview", "error": str(e)}
-            yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
+            {"success": False, "mode": "interview", "error": str(e)}
+            yield f"data: [DONE]{sse_end}"
 
     # 3. 리포트 모드 - 면접 평가 리포트 생성
     elif mode == ChatMode.REPORT:
@@ -769,16 +763,11 @@ async def generate_chat_stream(request: ChatRequest):
             qa_list = request.context.qa_list or []
 
             if not qa_list:
-                error_result = {
-                    "success": False,
-                    "mode": "report",
-                    "error": "Q&A 목록이 비어있습니다.",
-                }
-                yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
+                yield f"data: [DONE]{sse_end}"
                 return
 
             content = f"{interview_type_kr} 면접 평가 리포트를 생성 중입니다...{newline}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}{sse_end}"
+            yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}{sse_end}"
 
             # Q&A 목록을 텍스트로 변환
             qa_text = ""
@@ -817,7 +806,7 @@ async def generate_chat_stream(request: ChatRequest):
                     system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
                 ):
                     full_report += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
             else:
                 logger.info("📊 [Gemini] 면접 평가 리포트 생성 시작")
                 async for chunk in rag.llm.generate_response(
@@ -828,21 +817,21 @@ async def generate_chat_stream(request: ChatRequest):
                     user_id=request.user_id,
                 ):
                     full_report += chunk
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
+                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
-            result = {
+            {
                 "success": True,
                 "mode": "report",
                 "response": full_report.strip(),
                 "interview_type": interview_type,
                 "interview_id": request.interview_id,
             }
-            yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
+            yield f"data: [DONE]{sse_end}"
 
         except Exception as e:
             logger.error(f"Interview report generation error: {e}")
-            error_result = {"success": False, "mode": "report", "error": str(e)}
-            yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
+            {"success": False, "mode": "report", "error": str(e)}
+            yield f"data: [DONE]{sse_end}"
 
 
 @router.post(
