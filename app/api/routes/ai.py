@@ -677,12 +677,6 @@ async def generate_chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
             full_response = error_msg
 
-        result = {
-            "success": True,
-            "mode": "general",
-            "response": full_response,
-            "tool_used": {"tool": "RAG", "description": "VectorDB 검색 후 LLM 응답 생성"},
-        }
         yield f"data: [DONE]{sse_end}"
 
     # 2. 면접 모드 - 맞춤형 질문 생성 및 대화
@@ -748,7 +742,7 @@ async def generate_chat_stream(request: ChatRequest):
                     full_question += chunk
                     yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
-            result = {
+            {
                 "success": True,
                 "mode": "interview_question",
                 "response": full_question.strip(),
@@ -758,7 +752,7 @@ async def generate_chat_stream(request: ChatRequest):
 
         except Exception as e:
             logger.error(f"Interview question generation error: {e}")
-            error_result = {"success": False, "mode": "interview", "error": str(e)}
+            {"success": False, "mode": "interview", "error": str(e)}
             yield f"data: [DONE]{sse_end}"
 
     # 3. 리포트 모드 - 면접 평가 리포트 생성
@@ -769,11 +763,6 @@ async def generate_chat_stream(request: ChatRequest):
             qa_list = request.context.qa_list or []
 
             if not qa_list:
-                error_result = {
-                    "success": False,
-                    "mode": "report",
-                    "error": "Q&A 목록이 비어있습니다.",
-                }
                 yield f"data: [DONE]{sse_end}"
                 return
 
@@ -830,7 +819,7 @@ async def generate_chat_stream(request: ChatRequest):
                     full_report += chunk
                     yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
-            result = {
+            {
                 "success": True,
                 "mode": "report",
                 "response": full_report.strip(),
@@ -841,7 +830,7 @@ async def generate_chat_stream(request: ChatRequest):
 
         except Exception as e:
             logger.error(f"Interview report generation error: {e}")
-            error_result = {"success": False, "mode": "report", "error": str(e)}
+            {"success": False, "mode": "report", "error": str(e)}
             yield f"data: [DONE]{sse_end}"
 
 

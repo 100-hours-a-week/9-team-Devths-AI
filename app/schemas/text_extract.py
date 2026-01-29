@@ -37,7 +37,7 @@ class DocumentInput(BaseModel):
     def validate_input_source(cls, v, values):
         """s3_key 또는 text 중 하나는 필수"""
         s3_key = values.get("s3_key")
-        
+
         # 빈 문자열은 None으로 처리
         s3_key = s3_key if s3_key else None
         text = v if v else None
@@ -56,11 +56,11 @@ class DocumentInput(BaseModel):
     def validate_file_type(cls, v, values):
         """s3_key 사용 시 file_type 필수, MIME 타입 허용"""
         s3_key = values.get("s3_key")
-        
+
         # 빈 문자열은 None으로 처리
         s3_key = s3_key if s3_key else None
         file_type = v if v else None
-        
+
         if s3_key and not file_type:
             raise ValueError("s3_key 사용 시 file_type은 필수입니다")
         if file_type:
