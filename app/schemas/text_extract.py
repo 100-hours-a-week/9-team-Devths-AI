@@ -35,16 +35,16 @@ class DocumentInput(BaseModel):
 
     @validator("text", always=True)
     def validate_input_source(cls, v, values):
-        """s3_key 또는 text 중 하나는 필수"""
+        """s3_key 또는 text 중 하나는 필수 (둘 다 있으면 s3_key 우선)"""
         s3_key = values.get("s3_key")
 
         # 둘 다 없으면 에러
         if not v and not s3_key:
             raise ValueError("s3_key 또는 text 중 하나는 필수입니다")
 
-        # 둘 다 있으면 에러
+        # 둘 다 있으면 s3_key 우선, text는 무시
         if v and s3_key:
-            raise ValueError("s3_key와 text를 동시에 사용할 수 없습니다")
+            return None  # s3_key가 있으면 text는 무시
 
         return v
 
