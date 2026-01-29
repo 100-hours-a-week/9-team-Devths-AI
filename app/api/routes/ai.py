@@ -14,12 +14,8 @@ from app.prompts import (
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
-    AnalysisResult,
     ChatMode,
     ChatRequest,
-    MatchingResult,
-    PostingAnalysis,
-    ResumeAnalysis,
 )
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
 from app.schemas.text_extract import (
