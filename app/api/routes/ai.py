@@ -480,11 +480,8 @@ async def get_task_status(task_id: str):
 async def generate_chat_stream(request: ChatRequest):
     """채팅 응답 스트리밍 생성"""
 
-    # context가 배열인 경우 면접 리포트 모드로 간주
-    if isinstance(request.context, list):
-        mode = ChatMode.INTERVIEW_REPORT
-    else:
-        mode = request.context.mode if request.context else ChatMode.GENERAL
+    # context에서 모드 결정 (normal 또는 interview)
+    mode = request.context.mode if request.context else ChatMode.NORMAL
 
     rag = get_services()
     newline = "\n"
@@ -506,18 +503,12 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info("")
 
     # 1. 일반 대화 (RAG 활용)
-    if mode == ChatMode.GENERAL:
+    if mode == ChatMode.NORMAL:
         full_response = ""
 
         try:
-            # Convert ChatMessage list to dict list for service compatibility
-            history_dict = [
-                {
-                    "role": msg.role.value if hasattr(msg.role, "value") else str(msg.role),
-                    "content": msg.content,
-                }
-                for msg in request.history
-            ]
+            # 히스토리 없이 단일 요청/응답 처리 (명세서 기준)
+            history_dict = []
 
             # Determine if this is an analysis request
             user_message = request.message or ""
@@ -525,13 +516,8 @@ async def generate_chat_stream(request: ChatRequest):
                 keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"]
             )
 
-            # 면접 세션이 활성화되어 있고, 이전 질문이 있으면 꼬리질문 생성
-            is_followup = (
-                request.session_id is not None
-                and len(history_dict) >= 2
-                and history_dict[-2].get("role") == "assistant"
-                and history_dict[-1].get("role") == "user"
-            )
+            # 면접 모드 여부 확인
+            is_followup = request.interview_id is not None and request.context.mode == ChatMode.INTERVIEW
 
             if is_analysis:
                 # ===================================================================
@@ -622,7 +608,7 @@ async def generate_chat_stream(request: ChatRequest):
                 logger.info("💬 일반 대화 모드")
                 logger.info("")
 
-                # 면접 세션에서 꼬리질문 생성 (session_id가 있고, 이전 질문-답변 쌍이 있는 경우)
+                # 면접 세션에서 꼬리질문 생성 (interview_id가 있고, 이전 질문-답변 쌍이 있는 경우)
                 if is_followup:
                     original_question = history_dict[-2].get("content", "")
                     candidate_answer = history_dict[-1].get("content", "")
@@ -701,47 +687,12 @@ async def generate_chat_stream(request: ChatRequest):
         }
         yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
-    # 2. 분석 모드 (RAG 사용)
-    elif mode == ChatMode.ANALYSIS:
+    # 2. 면접 모드 - 맞춤형 질문 생성 및 대화
+    elif mode == ChatMode.INTERVIEW:
         try:
-            content1 = f"이력서를 분석 중입니다...{newline}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': content1}, ensure_ascii=False)}{sse_end}"
-            await asyncio.sleep(0.3)
-
-            content2 = f"채용공고를 분석 중입니다...{newline}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': content2}, ensure_ascii=False)}{sse_end}"
-            await asyncio.sleep(0.3)
-
-            content3 = f"매칭도를 계산 중입니다...{newline}"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': content3}, ensure_ascii=False)}{sse_end}"
-
-            # RAG를 사용하여 실제 분석 수행
-            analysis_result = await rag.analyze_resume_and_posting(
-                user_id=request.user_id,
-                resume_id=request.context.resume_id,
-                posting_id=request.context.posting_id,
-            )
-
-            # Convert to Pydantic models
-            analysis = AnalysisResult(
-                resume_analysis=ResumeAnalysis(**analysis_result.get("resume_analysis", {})),
-                posting_analysis=PostingAnalysis(**analysis_result.get("posting_analysis", {})),
-                matching=MatchingResult(**analysis_result.get("matching", {})),
-            )
-
-            result = {"success": True, "mode": "analysis", "analysis": analysis.model_dump()}
-            yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
-
-        except Exception as e:
-            error_result = {"success": False, "mode": "analysis", "error": str(e)}
-            yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
-
-    # 3. 면접 모드 - 맞춤형 질문 생성 및 대화
-    elif mode == ChatMode.INTERVIEW_QUESTION:
-        try:
-            # 면접 타입에 따라 프롬프트 조정
-            interview_type = request.context.interview_type or "technical"
-            interview_type_kr = "기술" if interview_type == "technical" else "인성"
+            # 면접 타입에 따라 프롬프트 조정 (behavior: 인성, tech: 기술)
+            interview_type = request.context.interview_type or "tech"
+            interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
             content = f"{interview_type_kr} 면접 질문을 생성 중입니다...{newline}"
             yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}{sse_end}"
@@ -809,107 +760,105 @@ async def generate_chat_stream(request: ChatRequest):
 
         except Exception as e:
             logger.error(f"Interview question generation error: {e}")
-            error_result = {"success": False, "mode": "interview_question", "error": str(e)}
+            error_result = {"success": False, "mode": "interview", "error": str(e)}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
-    # 4. 면접 리포트 (Pydantic AI 사용)
-    elif mode == ChatMode.INTERVIEW_REPORT:
+    # 3. 리포트 모드 - 면접 평가 리포트 생성
+    elif mode == ChatMode.REPORT:
         try:
-            chunks = [
-                f"면접 답변을 분석 중입니다...{newline}",
-                f"종합 리포트를 작성 중입니다...{newline}",
-            ]
+            interview_type = request.context.interview_type or "tech"
+            interview_type_kr = "기술" if interview_type == "tech" else "인성"
+            qa_list = request.context.qa_list or []
 
-            for chunk in chunks:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
-                await asyncio.sleep(0.5)
+            if not qa_list:
+                error_result = {"success": False, "mode": "report", "error": "Q&A 목록이 비어있습니다."}
+                yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
+                return
 
-            # context가 배열인 경우 (면접 리포트 모드)
-            qa_list = request.context if isinstance(request.context, list) else []
+            content = f"{interview_type_kr} 면접 평가 리포트를 생성 중입니다...{newline}"
+            yield f"data: {json.dumps({'type': 'chunk', 'content': content}, ensure_ascii=False)}{sse_end}"
 
-            # Q&A 배열을 문자열로 변환하여 프롬프트 생성
-            qa_history = "\n".join(
-                [f"Q: {item.get('question', '')}\nA: {item.get('answer', '')}" for item in qa_list]
+            # Q&A 목록을 텍스트로 변환
+            qa_text = ""
+            for i, qa in enumerate(qa_list, 1):
+                q = qa.get("question", "")
+                a = qa.get("answer", "")
+                qa_text += f"질문 {i}: {q}\n답변 {i}: {a}\n\n"
+
+            # 평가 리포트 프롬프트
+            report_prompt = f"""
+다음은 {interview_type_kr} 면접 Q&A 기록입니다:
+
+{qa_text}
+
+위 면접 내용을 바탕으로 상세한 평가 리포트를 작성해주세요.
+다음 항목을 포함해주세요:
+1. 각 답변에 대한 개별 평가 (잘한 점, 개선점)
+2. 전체적인 강점 패턴
+3. 전체적인 약점 패턴
+4. 향후 학습 가이드
+"""
+
+            full_report = ""
+
+            # vLLM 또는 Gemini 선택
+            model_choice = (
+                request.model.value if hasattr(request.model, "value") else str(request.model)
             )
 
-            # 면접 리포트 생성 프롬프트
-            from app.prompts import create_interview_report_prompt
-
-            report_prompt = create_interview_report_prompt(
-                qa_history=qa_history, resume_text="", job_posting_text=""
-            )
-
-            # LLM으로 리포트 생성
-            full_report_text = ""
-            async for chunk in rag.llm.generate_response(
-                user_message=report_prompt,
-                context=None,
-                history=[],
-                system_prompt="당신은 면접 평가 전문가입니다. JSON 형식으로만 응답하세요.",
-                user_id=request.user_id,
-            ):
-                full_report_text += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
-
-            # JSON 파싱 시도
-            from app.parsers import extract_json_from_text
-
-            parsed_report = extract_json_from_text(full_report_text)
-
-            if parsed_report:
-                result = {"success": True, "mode": "interview_report", "report": parsed_report}
+            if model_choice == "vllm" and rag.vllm:
+                logger.info("📊 [vLLM] 면접 평가 리포트 생성 시작")
+                async for chunk in rag.vllm.generate_response(
+                    user_message=report_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
+                ):
+                    full_report += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
             else:
-                # 파싱 실패 시 기본 구조
-                result = {
-                    "success": True,
-                    "mode": "interview_report",
-                    "report": {
-                        "evaluations": [
-                            {
-                                "question": qa.get("question", ""),
-                                "answer": qa.get("answer", ""),
-                                "good_points": [],
-                                "improvements": [],
-                            }
-                            for qa in qa_list
-                        ],
-                        "strength_patterns": [],
-                        "weakness_patterns": [],
-                        "learning_guide": [],
-                    },
-                }
+                logger.info("📊 [Gemini] 면접 평가 리포트 생성 시작")
+                async for chunk in rag.llm.generate_response(
+                    user_message=report_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
+                    user_id=request.user_id,
+                ):
+                    full_report += chunk
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk}, ensure_ascii=False)}{sse_end}"
 
+            result = {
+                "success": True,
+                "mode": "report",
+                "response": full_report.strip(),
+                "interview_type": interview_type,
+                "interview_id": request.interview_id,
+            }
             yield f"data: {json.dumps({'type': 'complete', 'data': result}, ensure_ascii=False)}{sse_end}"
 
         except Exception as e:
             logger.error(f"Interview report generation error: {e}")
-            error_result = {"success": False, "mode": "interview_report", "error": str(e)}
+            error_result = {"success": False, "mode": "report", "error": str(e)}
             yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
 
 
 @router.post(
     "/chat",
-    summary="채팅 처리 (통합: 대화/분석/면접)",
+    summary="채팅 스트리밍 (일반/면접/리포트)",
     description="""
-    모든 LLM 응답을 통합 처리합니다.
-
-    **v3.0 변경사항:**
-    - `/ai/analyze`, `/ai/interview/*` 통합
-    - context.mode로 기능 구분
-    - Pydantic AI로 구조화된 출력
+    채팅 스트리밍 응답을 처리합니다.
 
     **처리 방식:** 스트리밍 (SSE)
 
     **모드:**
-    - general: 일반 대화
-    - analysis: 이력서/채용공고 분석
-    - interview_question: 면접 질문 생성
-    - interview_report: 면접 리포트
+    - normal: 일반 대화
+    - interview: 면접 질문 생성
+    - report: 면접 평가 리포트 생성
 
-    **Pydantic AI 사용:**
-    - analysis: AnalysisResult
-    - interview_question: InterviewQuestion
-    - interview_report: InterviewReport
+    **면접 타입 (context.interview_type):**
+    - behavior: 인성 면접
+    - tech: 기술 면접
     """,
     responses={
         400: {
@@ -930,7 +879,7 @@ async def generate_chat_stream(request: ChatRequest):
                             "value": {
                                 "detail": {
                                     "code": "INVALID_MODE",
-                                    "message": "mode는 general, interview_question, interview_report 중 하나여야 합니다",
+                                    "message": "mode는 normal 또는 interview 중 하나여야 합니다",
                                     "field": "context.mode",
                                 }
                             }
@@ -939,7 +888,7 @@ async def generate_chat_stream(request: ChatRequest):
                             "value": {
                                 "detail": {
                                     "code": "INVALID_INTERVIEW_TYPE",
-                                    "message": "interview_type은 technical 또는 personality만 가능합니다",
+                                    "message": "interview_type은 behavior 또는 tech만 가능합니다",
                                     "field": "context.interview_type",
                                 }
                             }
@@ -965,7 +914,7 @@ async def generate_chat_stream(request: ChatRequest):
                     "example": {
                         "detail": {
                             "code": "MISSING_CONTEXT",
-                            "message": "면접 리포트 생성 시 context는 Q&A 배열이어야 합니다",
+                            "message": "면접 모드 시 context.resume_ocr 또는 context.job_posting_ocr이 필요합니다",
                         }
                     }
                 }
@@ -1013,7 +962,7 @@ async def generate_chat_stream(request: ChatRequest):
     },
 )
 async def chat(request: ChatRequest):
-    """채팅 처리 (통합)"""
+    """채팅 처리 (일반/면접)"""
     return StreamingResponse(generate_chat_stream(request), media_type="text/event-stream")
 
 
