@@ -53,7 +53,9 @@ class InterviewType(str, Enum):
 class ChatContext(BaseModel):
     """채팅 컨텍스트 (모드별 추가 정보)"""
 
-    mode: ChatMode = Field(default=ChatMode.NORMAL, description="채팅 모드 (normal/interview/report)")
+    mode: ChatMode = Field(
+        default=ChatMode.NORMAL, description="채팅 모드 (normal/interview/report)"
+    )
 
     # 문서 정보 (OCR 텍스트)
     resume_ocr: str | None = Field(None, description="이력서 OCR 텍스트 (면접 모드 시)")
@@ -83,7 +85,9 @@ class ChatRequest(BaseModel):
     room_id: int = Field(..., description="채팅방 ID")
     user_id: int = Field(..., description="사용자 ID")
     message: str | None = Field(None, description="사용자 메시지")
-    interview_id: int | None = Field(None, description="면접 ID (면접 모드일 때만 값 있음, 일반 채팅이면 null)")
+    interview_id: int | None = Field(
+        None, description="면접 ID (면접 모드일 때만 값 있음, 일반 채팅이면 null)"
+    )
     model: LLMModel = Field(
         default=LLMModel.GEMINI, description="사용할 LLM 모델 (gemini 또는 vllm)"
     )

@@ -513,7 +513,9 @@ async def generate_chat_stream(request: ChatRequest):
             )
 
             # 면접 모드 여부 확인
-            is_followup = request.interview_id is not None and request.context.mode == ChatMode.INTERVIEW
+            is_followup = (
+                request.interview_id is not None and request.context.mode == ChatMode.INTERVIEW
+            )
 
             if is_analysis:
                 # ===================================================================
@@ -767,7 +769,11 @@ async def generate_chat_stream(request: ChatRequest):
             qa_list = request.context.qa_list or []
 
             if not qa_list:
-                error_result = {"success": False, "mode": "report", "error": "Q&A 목록이 비어있습니다."}
+                error_result = {
+                    "success": False,
+                    "mode": "report",
+                    "error": "Q&A 목록이 비어있습니다.",
+                }
                 yield f"data: {json.dumps({'type': 'complete', 'data': error_result}, ensure_ascii=False)}{sse_end}"
                 return
 
