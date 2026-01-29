@@ -1,4 +1,6 @@
 import logging
+import os
+import sys
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -9,8 +11,51 @@ from app.api.routes import ai, masking
 # .env 파일 로드
 load_dotenv()
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+# ============================================================================
+# 로깅 설정 (운영 서버 호환)
+# ============================================================================
+
+
+def setup_logging():
+    """운영 환경과 로컬 환경 모두에서 로그가 출력되도록 설정"""
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+
+    # 루트 로거 설정
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, log_level, logging.INFO))
+
+    # 기존 핸들러 제거 (중복 방지)
+    root_logger.handlers.clear()
+
+    # stdout 핸들러 (uvicorn이 캡처)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setLevel(logging.INFO)
+    stdout_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    root_logger.addHandler(stdout_handler)
+
+    # uvicorn 로거도 동일하게 설정
+    for logger_name in ["uvicorn", "uvicorn.error", "uvicorn.access"]:
+        logger = logging.getLogger(logger_name)
+        logger.handlers.clear()
+        logger.addHandler(stdout_handler)
+        logger.setLevel(logging.INFO)
+
+    # 앱 로거 설정
+    app_logger = logging.getLogger("app")
+    app_logger.setLevel(logging.INFO)
+
+    return root_logger
+
+
+# 로깅 초기화
+setup_logging()
+logger = logging.getLogger(__name__)
+logger.info("=" * 60)
+logger.info("🚀 AI Server logging initialized")
+logger.info(f"   Log level: {os.getenv('LOG_LEVEL', 'INFO')}")
+logger.info("=" * 60)
 
 
 # FastAPI 애플리케이션 생성
