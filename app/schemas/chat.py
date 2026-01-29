@@ -9,6 +9,7 @@ class MessageRole(str, Enum):
 
     USER = "user"
     ASSISTANT = "assistant"
+    SYSTEM = "system"
 
 
 class ChatMessage(BaseModel):
@@ -30,10 +31,9 @@ class ToolName(str, Enum):
 class ChatMode(str, Enum):
     """채팅 모드"""
 
-    GENERAL = "general"  # 일반 대화
-    ANALYSIS = "analysis"  # 이력서/채용공고 분석
-    INTERVIEW_QUESTION = "interview_question"  # 면접 질문 생성
-    INTERVIEW_REPORT = "interview_report"  # 면접 리포트
+    NORMAL = "normal"  # 일반 대화
+    INTERVIEW = "interview"  # 면접 모드 (질문 생성)
+    REPORT = "report"  # 면접 평가 리포트 생성
 
 
 class LLMModel(str, Enum):
@@ -43,18 +43,30 @@ class LLMModel(str, Enum):
     VLLM = "vllm"  # vLLM (Llama-3-Korean-Bllossom-8B)
 
 
+class InterviewType(str, Enum):
+    """면접 유형"""
+
+    BEHAVIOR = "behavior"  # 인성 면접
+    TECH = "tech"  # 기술 면접
+
+
 class ChatContext(BaseModel):
     """채팅 컨텍스트 (모드별 추가 정보)"""
 
-    mode: ChatMode = Field(default=ChatMode.GENERAL, description="채팅 모드")
+    mode: ChatMode = Field(
+        default=ChatMode.NORMAL, description="채팅 모드 (normal/interview/report)"
+    )
 
     # 문서 정보 (OCR 텍스트)
-    resume_ocr: str | None = Field(None, description="이력서 OCR 텍스트 (면접 질문 생성 시)")
-    job_posting_ocr: str | None = Field(None, description="채용공고 OCR 텍스트 (면접 질문 생성 시)")
+    resume_ocr: str | None = Field(None, description="이력서 OCR 텍스트 (면접 모드 시)")
+    job_posting_ocr: str | None = Field(None, description="채용공고 OCR 텍스트 (면접 모드 시)")
 
     # 면접 모드
-    interview_type: str | None = Field(None, description="면접 유형 (personality/technical)")
+    interview_type: str | None = Field(None, description="면접 유형 (behavior/tech)")
     question_count: int | None = Field(None, description="현재까지 생성된 질문 수")
+
+    # 리포트 모드
+    qa_list: list[dict] | None = Field(None, description="Q&A 목록 (리포트 생성 시)")
 
     class Config:
         extra = "allow"  # 추가 필드 허용
@@ -73,30 +85,25 @@ class ChatRequest(BaseModel):
     room_id: int = Field(..., description="채팅방 ID")
     user_id: int = Field(..., description="사용자 ID")
     message: str | None = Field(None, description="사용자 메시지")
-    session_id: int | None = Field(None, description="면접 세션 ID (면접 모드 시 필수)")
+    interview_id: int | None = Field(
+        None, description="면접 ID (면접 모드일 때만 값 있음, 일반 채팅이면 null)"
+    )
     model: LLMModel = Field(
         default=LLMModel.GEMINI, description="사용할 LLM 모델 (gemini 또는 vllm)"
     )
-    context: ChatContext | list[QAItem] | list[dict[str, str]] | None = Field(
-        default_factory=lambda: ChatContext(mode=ChatMode.GENERAL),
-        description="채팅 컨텍스트 (일반 대화/면접 질문 시: ChatContext, 면접 리포트 시: Q&A 배열)",
-    )
-    history: list[ChatMessage] = Field(
-        default=[], max_length=20, description="대화 히스토리 (최근 20개)"
+    context: ChatContext = Field(
+        default_factory=lambda: ChatContext(mode=ChatMode.NORMAL),
+        description="채팅 컨텍스트",
     )
 
     @validator("context", pre=True)
     def parse_context(cls, v):
         """context를 적절한 타입으로 파싱"""
         if v is None:
-            return ChatContext(mode=ChatMode.GENERAL)
+            return ChatContext(mode=ChatMode.NORMAL)
 
         # 이미 ChatContext 인스턴스면 그대로 반환
         if isinstance(v, ChatContext):
-            return v
-
-        # 리스트인 경우 (면접 리포트 모드)
-        if isinstance(v, list):
             return v
 
         # 딕셔너리인 경우 ChatContext로 변환
@@ -109,15 +116,15 @@ class ChatRequest(BaseModel):
         json_schema_extra = {
             "examples": [
                 {
-                    "name": "일반 대화",
+                    "name": "일반 모드",
                     "value": {
                         "model": "gemini",
                         "room_id": 1,
-                        "user_id": 12,
-                        "message": "이력서 작성 팁 알려줘",
-                        "session_id": None,
+                        "user_id": 10,
+                        "message": "질문 내용",
+                        "interview_id": None,
                         "context": {
-                            "mode": "general",
+                            "mode": "normal",
                             "resume_ocr": None,
                             "job_posting_ocr": None,
                             "interview_type": None,
@@ -126,34 +133,38 @@ class ChatRequest(BaseModel):
                     },
                 },
                 {
-                    "name": "면접 질문 생성 (면접 시작)",
+                    "name": "면접 모드",
                     "value": {
                         "model": "gemini",
                         "room_id": 1,
-                        "user_id": 12,
-                        "message": "기술 면접 질문 생성해줘",
-                        "session_id": 23,
+                        "user_id": 10,
+                        "message": "질문 내용",
+                        "interview_id": 100,
                         "context": {
-                            "mode": "interview_question",
-                            "resume_ocr": "OCR 내용",
-                            "job_posting_ocr": "OCR 내용",
-                            "interview_type": "technical",
-                            "question_count": 0,
+                            "mode": "interview",
+                            "resume_ocr": "이력서 OCR 텍스트",
+                            "job_posting_ocr": "채용공고 OCR 텍스트",
+                            "interview_type": "behavior",
+                            "question_count": 3,
                         },
                     },
                 },
                 {
-                    "name": "면접 리포트 생성 (면접 종료)",
+                    "name": "리포트 모드",
                     "value": {
                         "model": "gemini",
                         "room_id": 1,
-                        "user_id": 12,
+                        "user_id": 10,
                         "message": None,
-                        "session_id": 23,
-                        "context": [
-                            {"question": "자기소개 해주세요", "answer": "안녕하세요..."},
-                            {"question": "프로젝트 경험을 말씀해주세요", "answer": "저는..."},
-                        ],
+                        "interview_id": 100,
+                        "context": {
+                            "mode": "report",
+                            "interview_type": "tech",
+                            "qa_list": [
+                                {"question": "자기소개 해주세요", "answer": "안녕하세요..."},
+                                {"question": "프로젝트 경험을 말씀해주세요", "answer": "저는..."},
+                            ],
+                        },
                     },
                 },
             ]
