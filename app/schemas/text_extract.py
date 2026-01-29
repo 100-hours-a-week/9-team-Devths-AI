@@ -37,24 +37,33 @@ class DocumentInput(BaseModel):
     def validate_input_source(cls, v, values):
         """s3_key 또는 text 중 하나는 필수"""
         s3_key = values.get("s3_key")
+        
+        # 빈 문자열은 None으로 처리
+        s3_key = s3_key if s3_key else None
+        text = v if v else None
 
         # 둘 다 없으면 에러
-        if not v and not s3_key:
+        if not text and not s3_key:
             raise ValueError("s3_key 또는 text 중 하나는 필수입니다")
 
         # 둘 다 있으면 에러
-        if v and s3_key:
+        if text and s3_key:
             raise ValueError("s3_key와 text를 동시에 사용할 수 없습니다")
 
-        return v
+        return text
 
     @validator("file_type")
     def validate_file_type(cls, v, values):
         """s3_key 사용 시 file_type 필수, MIME 타입 허용"""
         s3_key = values.get("s3_key")
-        if s3_key and not v:
+        
+        # 빈 문자열은 None으로 처리
+        s3_key = s3_key if s3_key else None
+        file_type = v if v else None
+        
+        if s3_key and not file_type:
             raise ValueError("s3_key 사용 시 file_type은 필수입니다")
-        if v:
+        if file_type:
             # MIME 타입 검증: application/pdf, image/png, image/jpeg 등
             valid_mimes = [
                 "application/pdf",
@@ -68,9 +77,9 @@ class DocumentInput(BaseModel):
             # 또는 단순 타입 (pdf, image)도 허용 (하위 호환성)
             simple_types = ["pdf", "image"]
 
-            if v not in valid_mimes and v not in simple_types:
+            if file_type not in valid_mimes and file_type not in simple_types:
                 raise ValueError("file_type은 pdf 또는 image만 가능합니다")
-        return v
+        return file_type
 
     def get_file_type_simple(self) -> str | None:
         """MIME 타입을 단순 타입(pdf/image)으로 변환"""
