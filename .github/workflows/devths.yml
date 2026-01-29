@@ -132,7 +132,7 @@ jobs:
 
   # 4. 배포 패키지 생성 및 S3 업로드
   # - develop: 일반 배포 (자동)
-  # - release: 블루/그린 배포 (자동)
+  # - release: 일반 배포 (자동)
   # - main: 아티팩트만 생성/업로드, 배포는 수동 워크플로우 사용
   build:
     name: build
@@ -219,11 +219,11 @@ jobs:
             echo "✅ Upload complete"
           fi
 
-      - name: CodeDeploy 배포 시작 (develop - 일반 배포)
-        id: codedeploy-dev
-        if: github.ref_name == 'develop'
+      - name: CodeDeploy 배포 시작
+        id: codedeploy
+        if: github.ref_name == 'develop' || github.ref_name == 'release'
         run: |
-          echo "🚀 Starting CodeDeploy deployment (Standard)..."
+          echo "🚀 Starting CodeDeploy deployment..."
           S3_KEY="${{ steps.upload.outputs.s3_key }}"
           DEPLOYMENT_ID=$(aws deploy create-deployment \
             --application-name ${{ env.CODEDEPLOY_APP_NAME }} \
@@ -247,49 +247,6 @@ jobs:
             echo "deployment_error=$ERROR_MSG" >> $GITHUB_OUTPUT
             echo "❌ Deployment failed: $ERROR_MSG"
             exit 1
-          fi
-
-      - name: CodeDeploy 배포 시작 (release - 블루/그린)
-        id: codedeploy-stg
-        if: github.ref_name == 'release'
-        run: |
-          echo "🔵🟢 Starting CodeDeploy deployment (Blue/Green)..."
-          S3_KEY="${{ steps.upload.outputs.s3_key }}"
-          DEPLOYMENT_ID=$(aws deploy create-deployment \
-            --application-name ${{ env.CODEDEPLOY_APP_NAME }} \
-            --deployment-group-name ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }} \
-            --s3-location bucket=${{ env.S3_BUCKET }},key=$S3_KEY,bundleType=zip \
-            --description "Deploy from GitHub Actions - ${{ github.ref_name }} branch (Blue/Green)" \
-            --query 'deploymentId' \
-            --output text)
-
-          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
-          echo "✅ Blue/Green Deployment started: $DEPLOYMENT_ID"
-
-          # 배포 상태 모니터링
-          echo "⏳ Waiting for Blue/Green deployment to complete..."
-          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
-            echo "deployment_status=Success" >> $GITHUB_OUTPUT
-            echo "✅ Blue/Green Deployment completed successfully!"
-          else
-            ERROR_MSG=$(aws deploy get-deployment --deployment-id $DEPLOYMENT_ID --query 'deploymentInfo.errorInformation.message' --output text 2>&1 || echo "Unknown error")
-            echo "deployment_status=Failed" >> $GITHUB_OUTPUT
-            echo "deployment_error=$ERROR_MSG" >> $GITHUB_OUTPUT
-            echo "❌ Blue/Green Deployment failed: $ERROR_MSG"
-            exit 1
-          fi
-
-      - name: Set deployment outputs
-        id: codedeploy
-        run: |
-          if [ "${{ github.ref_name }}" == "develop" ]; then
-            echo "deployment_id=${{ steps.codedeploy-dev.outputs.deployment_id }}" >> $GITHUB_OUTPUT
-            echo "deployment_status=${{ steps.codedeploy-dev.outputs.deployment_status }}" >> $GITHUB_OUTPUT
-            echo "deployment_error=${{ steps.codedeploy-dev.outputs.deployment_error }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref_name }}" == "release" ]; then
-            echo "deployment_id=${{ steps.codedeploy-stg.outputs.deployment_id }}" >> $GITHUB_OUTPUT
-            echo "deployment_status=${{ steps.codedeploy-stg.outputs.deployment_status }}" >> $GITHUB_OUTPUT
-            echo "deployment_error=${{ steps.codedeploy-stg.outputs.deployment_error }}" >> $GITHUB_OUTPUT
           fi
 
   # 5. 디스코드 통합 알림 - CI
@@ -327,7 +284,7 @@ jobs:
             - Validation: ${{ needs.validate.result == 'success' && '✅' || '❌' }}
             - Build: ${{ needs.build.result == 'success' && '✅' || '❌' }}
 
-            ${{ github.ref_name == 'main' && format('**📦 아티팩트**: `{0}`\n**🚀 배포**: 수동 배포 준비 완료 ([배포하기]({1}/{2}/actions/workflows/deploy-prod.yml))', needs.build.outputs.artifact_name, github.server_url, github.repository) || '' }}
+            **🪣 S3 Key**: `${{ needs.build.outputs.s3_key }}`
 
             **🔗 링크**: [커밋 확인하기](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
 
