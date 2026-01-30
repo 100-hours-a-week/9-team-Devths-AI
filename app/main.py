@@ -111,6 +111,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors()},
     )
 
+
 # 라우터 등록
 app.include_router(ai.router)
 app.include_router(masking.router)
