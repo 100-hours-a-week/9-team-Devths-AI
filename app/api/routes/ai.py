@@ -861,36 +861,104 @@ async def generate_chat_stream(request: ChatRequest):
                 logger.info("💬 일반 대화 모드")
                 logger.info("")
 
-                # 면접 세션에서 꼬리질문 생성 (interview_id가 있고, 이전 질문-답변 쌍이 있는 경우)
+                # 면접 세션에서 꼬리질문 생성 또는 피드백 (interview_id가 있고, 이전 질문-답변 쌍이 있는 경우)
                 if is_followup:
-                    original_question = history_dict[-2].get("content", "")
-                    candidate_answer = history_dict[-1].get("content", "")
+                    # 면접 Q&A 개수 카운트 (assistant=질문, user=답변)
+                    interview_qa_count = len([h for h in history_dict if h.get("role") == "user"])
 
-                    logger.info("🔍 [꼬리질문 생성] 감지")
-                    logger.info(f"   원본 질문: {original_question[:50]}...")
-                    logger.info(f"   답변: {candidate_answer[:50]}...")
-                    logger.info("")
+                    logger.info(f"📊 현재 면접 답변 수: {interview_qa_count}개")
 
-                    # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
-                    star_analysis = {
-                        "situation": "unknown",
-                        "task": "unknown",
-                        "action": "unknown",
-                        "result": "unknown",
-                    }
+                    # 5번째 답변 후 → 피드백 생성
+                    if interview_qa_count >= 5:
+                        logger.info("🎯 [면접 종료] 5개 답변 완료 → 피드백 생성 시작")
 
-                    # 꼬리질문 생성
-                    async for chunk in rag.generate_followup_question(
-                        original_question=original_question,
-                        candidate_answer=candidate_answer,
-                        star_analysis=star_analysis,
-                        model=model,
-                        user_id=request.user_id,
-                    ):
-                        full_response += chunk
-                        yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
+                        # 종료 메시지
+                        end_msg = "면접이 종료되었습니다. 답변 평가를 시작합니다.\n\n"
+                        yield f"data: {json.dumps({'chunk': end_msg}, ensure_ascii=False)}{sse_end}"
+                        full_response += end_msg
 
-                    logger.info(f"✅ [꼬리질문 생성] 완료 (응답 길이: {len(full_response)}자)")
+                        # Q&A 목록 생성
+                        qa_pairs = []
+                        for i in range(0, len(history_dict), 2):
+                            if i + 1 < len(history_dict):
+                                qa_pairs.append(
+                                    {
+                                        "question": history_dict[i].get("content", ""),
+                                        "answer": history_dict[i + 1].get("content", ""),
+                                    }
+                                )
+
+                        # 피드백 프롬프트
+                        feedback_prompt = (
+                            "다음 면접 Q&A에 대해 각 답변마다 피드백을 제공해주세요:\n\n"
+                        )
+                        for i, qa in enumerate(qa_pairs[:5], 1):
+                            feedback_prompt += (
+                                f"질문 {i}: {qa['question']}\n답변 {i}: {qa['answer']}\n\n"
+                            )
+
+                        feedback_prompt += """각 답변에 대해 다음 형식으로 피드백해주세요:
+
+질문 1
+[질문 내용]
+
+답변 1
+[답변 내용]
+
+평가
+- 잘한 점: [구체적으로]
+- 개선점: [구체적으로]
+- 추천 답변: [더 나은 답변 예시]
+
+(질문 2~5도 같은 형식으로)
+
+마크다운 문법(#, **, ```)을 사용하지 마세요."""
+
+                        # 피드백 생성
+                        async for chunk in rag.llm.generate_response(
+                            user_message=feedback_prompt,
+                            context=None,
+                            history=[],
+                            system_prompt="당신은 전문 면접관입니다. 지원자의 답변을 평가하고 구체적인 피드백을 제공합니다. 마크다운 문법을 사용하지 마세요.",
+                            user_id=request.user_id,
+                        ):
+                            full_response += chunk
+                            yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
+
+                        logger.info(
+                            f"✅ [면접 피드백] 생성 완료 (응답 길이: {len(full_response)}자)"
+                        )
+
+                    else:
+                        # 5개 미만 → 꼬리질문 계속 생성
+                        original_question = history_dict[-2].get("content", "")
+                        candidate_answer = history_dict[-1].get("content", "")
+
+                        logger.info("🔍 [꼬리질문 생성] 감지")
+                        logger.info(f"   원본 질문: {original_question[:50]}...")
+                        logger.info(f"   답변: {candidate_answer[:50]}...")
+                        logger.info("")
+
+                        # 간단한 STAR 분석
+                        star_analysis = {
+                            "situation": "unknown",
+                            "task": "unknown",
+                            "action": "unknown",
+                            "result": "unknown",
+                        }
+
+                        # 꼬리질문 생성
+                        async for chunk in rag.generate_followup_question(
+                            original_question=original_question,
+                            candidate_answer=candidate_answer,
+                            star_analysis=star_analysis,
+                            model=model,
+                            user_id=request.user_id,
+                        ):
+                            full_response += chunk
+                            yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
+
+                        logger.info(f"✅ [꼬리질문 생성] 완료 (응답 길이: {len(full_response)}자)")
 
                 else:
                     # 일반 대화 또는 면접 질문 요청
