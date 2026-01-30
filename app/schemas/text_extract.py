@@ -245,11 +245,16 @@ class TextExtractResult(BaseModel):
         None,
         description="채용공고 분석 결과 (company, position, required_skills, preferred_skills)",
     )
+    formatted_text: str | None = Field(
+        None,
+        description="포맷팅된 분석 결과 텍스트 (백엔드에서 바로 표시용, 마크다운 없음)",
+    )
 
     class Config:
         json_schema_extra = {
             "example": {
                 "success": True,
+                "summary": "카카오 | 백엔드 개발자",
                 "resume_ocr": "이름: 홍길동\n경력: 3년\n기술스택: React, TypeScript...",
                 "job_posting_ocr": "카카오 백엔드 개발자 채용\n자격요건: Java, Spring...",
                 "resume_analysis": {
@@ -263,5 +268,6 @@ class TextExtractResult(BaseModel):
                     "required_skills": ["Java", "Spring", "MySQL"],
                     "preferred_skills": ["Docker", "Kubernetes"],
                 },
+                "formatted_text": "지원 회사 및 직무 : 카카오 | 백엔드 개발자\n\n이력서 분석\n\n장점\n1. React 숙련도\n2. 프로젝트 경험\n\n단점\n1. 백엔드 경험 부족\n\n채용 공고 분석\n\n기업 / 포지션\n카카오 / 백엔드 개발자\n\n필수 역량\n- Java\n- Spring\n- MySQL\n\n우대 사항\n- Docker\n- Kubernetes",
             }
         }

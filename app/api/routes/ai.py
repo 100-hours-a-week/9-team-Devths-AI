@@ -84,6 +84,74 @@ def get_services():
     return rag_service
 
 
+def format_analysis_text(
+    resume_analysis: dict | None,
+    posting_analysis: dict | None,
+    summary: str | None,
+) -> str:
+    """분석 결과를 plain text로 포맷팅 (마크다운 없이)
+
+    백엔드에서 바로 화면에 표시할 수 있도록 포맷팅된 텍스트를 생성합니다.
+    """
+    lines = []
+
+    # 회사/직무
+    if summary:
+        lines.append(f"지원 회사 및 직무 : {summary}")
+        lines.append("")
+
+    # 이력서 분석
+    if resume_analysis:
+        lines.append("이력서 분석")
+        lines.append("")
+        lines.append("장점")
+        strengths = resume_analysis.get("strengths", [])
+        for i, strength in enumerate(strengths[:5], 1):
+            lines.append(f"{i}. {strength}")
+        lines.append("")
+        lines.append("단점")
+        weaknesses = resume_analysis.get("weaknesses", [])
+        for i, weakness in enumerate(weaknesses[:5], 1):
+            lines.append(f"{i}. {weakness}")
+        lines.append("")
+
+    # 채용공고 분석
+    if posting_analysis:
+        lines.append("채용 공고 분석")
+        lines.append("")
+        company = posting_analysis.get("company", "")
+        position = posting_analysis.get("position", "")
+        lines.append("기업 / 포지션")
+        lines.append(f"{company} / {position}")
+        lines.append("")
+        lines.append("필수 역량")
+        for skill in posting_analysis.get("required_skills", [])[:5]:
+            lines.append(f"- {skill}")
+        lines.append("")
+        lines.append("우대 사항")
+        for skill in posting_analysis.get("preferred_skills", [])[:5]:
+            lines.append(f"- {skill}")
+        lines.append("")
+
+    # 매칭도
+    if resume_analysis and posting_analysis:
+        lines.append("매칭도")
+        lines.append("")
+        lines.append("나와 지원 직무에 맞는 점")
+        # matches 필드가 있으면 사용, 없으면 strengths에서 가져옴
+        matches = resume_analysis.get("matches", resume_analysis.get("strengths", [])[:3])
+        for match in matches[:3] if matches else []:
+            lines.append(f"- {match}")
+        lines.append("")
+        lines.append("나와 지원 직무에 맞지 않는 점")
+        # gaps 필드가 있으면 사용, 없으면 weaknesses에서 가져옴
+        gaps = resume_analysis.get("gaps", resume_analysis.get("weaknesses", [])[:3])
+        for gap in gaps[:3] if gaps else []:
+            lines.append(f"- {gap}")
+
+    return "\n".join(lines)
+
+
 async def verify_api_key(x_api_key: str | None = Header(None)):
     """API 키 검증"""
     # 실제로는 환경변수나 DB에서 확인
@@ -405,6 +473,14 @@ async def text_extract(request: TextExtractRequest):
             # 결과 저장 (명세서에 따른 응답 구조)
             task_data = task_store.get(task_key) or {}
             task_data["status"] = TaskStatus.COMPLETED
+
+            # formatted_text 생성 (백엔드에서 바로 표시용)
+            formatted_text = format_analysis_text(
+                resume_analysis=analysis_result.get("resume_analysis"),
+                posting_analysis=analysis_result.get("posting_analysis"),
+                summary=chat_title,
+            )
+
             task_data["result"] = TextExtractResult(
                 success=True,
                 summary=chat_title or None,
@@ -412,6 +488,7 @@ async def text_extract(request: TextExtractRequest):
                 job_posting_ocr=job_posting_result.extracted_text,
                 resume_analysis=analysis_result.get("resume_analysis"),
                 posting_analysis=analysis_result.get("posting_analysis"),
+                formatted_text=formatted_text,
             ).model_dump()
             task_store.save(task_key, task_data)
 
