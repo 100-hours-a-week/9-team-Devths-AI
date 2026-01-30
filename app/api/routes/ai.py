@@ -940,9 +940,6 @@ async def generate_chat_stream(request: ChatRequest):
             interview_type = request.context.interview_type or "tech"
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
-            content = f"{interview_type_kr} 면접 질문을 생성 중입니다...{newline}"
-            yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}{sse_end}"
-
             # RAG를 사용하여 사용자 맞춤 면접 질문 생성
             # resume, portfolio, job_posting 컬렉션에서 컨텍스트 검색
             context = await rag.retrieve_context(
