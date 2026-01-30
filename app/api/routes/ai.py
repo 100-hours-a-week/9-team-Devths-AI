@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -517,10 +518,8 @@ async def with_heartbeat(generator, interval: float = 10.0):
                 yield ": heartbeat\n\n"
     finally:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 async def generate_chat_stream(request: ChatRequest):
