@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from app.prompts import (
     SYSTEM_INTERVIEW,
     create_interview_question_prompt,
+    get_extract_title_prompt,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
@@ -520,6 +521,45 @@ async def generate_chat_stream(request: ChatRequest):
                 # ===================================================================
                 # 사용자 메시지는 로그에 포함하지 않음 (보안)
                 logger.info("🔍 분석 요청 감지")
+                logger.info("")
+
+                # 채팅방 제목 추출 (회사명/채용직무)
+                chat_title = ""
+                try:
+                    logger.info("📝 [0/3] 채팅방 제목 추출 중...")
+                    # VectorDB에서 채용공고만 가져오기
+                    job_posting_docs = await rag.retrieve_all_documents(
+                        user_id=request.user_id, context_types=["job_posting"]
+                    )
+
+                    if job_posting_docs:
+                        # 채용공고 텍스트 (앞 1000자만)
+                        posting_text = job_posting_docs[:1000]
+                        title_prompt = f"""{get_extract_title_prompt()}
+
+## 채용공고 텍스트
+{posting_text}
+"""
+                        # Gemini로 제목 추출 (빠르고 정확)
+                        title_response = ""
+                        async for chunk in rag.llm.generate_response(
+                            user_message=title_prompt,
+                            context=None,
+                            history=[],
+                            system_prompt="당신은 채용공고에서 회사명과 직무를 정확히 추출하는 AI입니다.",
+                        ):
+                            title_response += chunk
+
+                        chat_title = title_response.strip()
+                        logger.info(f"✅ [0/3] 채팅방 제목: {chat_title}")
+
+                        # 채팅방 제목을 SSE로 전송
+                        yield f"data: {json.dumps({'summary': chat_title}, ensure_ascii=False)}{sse_end}"
+                    else:
+                        logger.warning("⚠️ 채용공고를 찾을 수 없어 제목 추출 생략")
+                except Exception as e:
+                    logger.error(f"❌ 채팅방 제목 추출 실패: {e}")
+                    # 실패해도 계속 진행
                 logger.info("")
 
                 # ---------------------------------------------------------------
