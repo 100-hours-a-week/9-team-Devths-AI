@@ -374,11 +374,40 @@ async def text_extract(request: TextExtractRequest):
                     },
                 }
 
+            # 채팅방 제목 추출 (회사명/채용직무)
+            chat_title = ""
+            try:
+                logger.info("📝 채팅방 제목 추출 중...")
+                # 채용공고 텍스트 (앞 1000자만)
+                posting_text = job_posting_result.extracted_text[:1000]
+                title_prompt = f"""{get_extract_title_prompt()}
+
+## 채용공고 텍스트
+{posting_text}
+"""
+                # Gemini로 제목 추출
+                title_response = ""
+                async for chunk in rag.llm.generate_response(
+                    user_message=title_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt="당신은 채용공고에서 회사명과 직무를 정확히 추출하는 AI입니다.",
+                ):
+                    title_response += chunk
+
+                chat_title = title_response.strip()
+                logger.info(f"✅ 채팅방 제목: {chat_title}")
+            except Exception as e:
+                logger.error(f"❌ 채팅방 제목 추출 실패: {e}")
+                # 실패해도 계속 진행
+            logger.info("")
+
             # 결과 저장 (명세서에 따른 응답 구조)
             task_data = task_store.get(task_key) or {}
             task_data["status"] = TaskStatus.COMPLETED
             task_data["result"] = TextExtractResult(
                 success=True,
+                summary=chat_title or None,
                 resume_ocr=resume_result.extracted_text,
                 job_posting_ocr=job_posting_result.extracted_text,
                 resume_analysis=analysis_result.get("resume_analysis"),

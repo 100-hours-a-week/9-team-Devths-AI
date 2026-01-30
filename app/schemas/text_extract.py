@@ -235,6 +235,7 @@ class TextExtractResult(BaseModel):
     """
 
     success: bool = Field(True, description="성공 여부")
+    summary: str | None = Field(None, description="채팅방 제목 (회사명/채용직무)")
     resume_ocr: str = Field(..., description="이력서 OCR 텍스트")
     job_posting_ocr: str = Field(..., description="채용공고 OCR 텍스트")
     resume_analysis: dict[str, Any] | None = Field(
