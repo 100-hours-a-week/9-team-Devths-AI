@@ -668,13 +668,21 @@ async def generate_chat_stream(request: ChatRequest):
 - [부족하거나 보완이 필요한 역량 2]
 - [부족하거나 보완이 필요한 역량 3]
 
-위 형식 그대로 출력하세요. JSON이나 마크다운 문법을 사용하지 마세요."""
+위 형식 그대로 출력하세요.
+
+절대 금지:
+- # ## ### 제목 기호 사용 금지
+- ** __ 볼드/이탤릭 기호 사용 금지
+- ``` 코드 블록 사용 금지
+- JSON 형식 사용 금지
+
+그냥 일반 텍스트로 작성하세요."""
 
                         async for chunk in rag.vllm.generate_response(
                             user_message=analysis_prompt,
                             context=None,
                             history=[],
-                            system_prompt="당신은 채용 전문가입니다. 이력서와 채용공고를 분석하여 명확한 피드백을 제공하세요.",
+                            system_prompt="당신은 채용 전문가입니다. 마크다운 문법(#, ##, **, ```)을 절대 사용하지 말고 일반 텍스트로만 응답하세요.",
                         ):
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
