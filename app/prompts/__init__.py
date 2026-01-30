@@ -9,6 +9,7 @@ from app.prompts.chat import (
     SYSTEM_GENERAL_CHAT,
     SYSTEM_RAG_CHAT,
     create_rag_prompt,
+    get_extract_title_prompt,
     get_system_prompt,
 )
 from app.prompts.interview import (
@@ -49,5 +50,6 @@ __all__ = [
     "RAG_CONTEXT_PROMPT",
     "GENERAL_CHAT_PROMPT",
     "create_rag_prompt",
+    "get_extract_title_prompt",
     "get_system_prompt",
 ]
