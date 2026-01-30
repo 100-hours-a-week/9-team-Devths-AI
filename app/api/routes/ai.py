@@ -274,8 +274,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
-            # 사용자 ID는 로그에 포함하지 않음 (보안)
-            logger.info("📌 사용자 ID: [REDACTED]")
+            logger.info(f"📌 사용자 ID: {request.user_id}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -473,6 +472,57 @@ async def get_task_status(task_id: str):
 # ============================================================================
 
 
+async def with_heartbeat(generator, interval: float = 10.0):
+    """
+    SSE 스트리밍에 heartbeat 추가 (504 타임아웃 방지)
+
+    nginx/ALB 타임아웃 방지를 위해 주기적으로 SSE 코멘트 전송
+    SSE 코멘트(`:`)는 클라이언트에서 무시됨
+
+    Args:
+        generator: 원본 async generator
+        interval: heartbeat 간격 (초)
+    """
+    # 초기 heartbeat (연결 즉시 응답)
+    yield ": connected\n\n"
+
+    # 비동기 이터레이터를 queue로 변환하여 타임아웃 처리
+    queue = asyncio.Queue()
+    done = False
+
+    async def fill_queue():
+        nonlocal done
+        try:
+            async for chunk in generator:
+                await queue.put(chunk)
+        finally:
+            done = True
+            await queue.put(None)  # 종료 신호
+
+    # 백그라운드에서 원본 generator 실행
+    task = asyncio.create_task(fill_queue())
+
+    try:
+        while True:
+            try:
+                # interval 초 동안 대기하며 데이터 확인
+                chunk = await asyncio.wait_for(queue.get(), timeout=interval)
+                if chunk is None:
+                    break
+                yield chunk
+            except asyncio.TimeoutError:
+                # 타임아웃 시 heartbeat 전송
+                if done:
+                    break
+                yield ": heartbeat\n\n"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 async def generate_chat_stream(request: ChatRequest):
     """채팅 응답 스트리밍 생성"""
 
@@ -489,12 +539,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    # 모델명과 모드는 사용자 입력이므로 로그에 포함하지 않음 (보안)
-    logger.info("📌 요청 모델: [REDACTED]")
-    logger.info("📌 채팅 모드: [REDACTED]")
-    # 사용자 ID와 채팅방 ID는 로그에 포함하지 않음 (보안)
-    logger.info("📌 사용자 ID: [REDACTED]")
-    logger.info("📌 채팅방 ID: [REDACTED]")
+    logger.info(f"📌 요청 모델: {model.upper()}")
+    logger.info(f"📌 채팅 모드: {mode}")
+    logger.info(f"📌 사용자 ID: {request.user_id}")
+    logger.info(f"📌 채팅방 ID: {request.room_id}")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -612,9 +660,8 @@ async def generate_chat_stream(request: ChatRequest):
                     candidate_answer = history_dict[-1].get("content", "")
 
                     logger.info("🔍 [꼬리질문 생성] 감지")
-                    # 사용자 입력은 로그에 포함하지 않음 (보안)
-                    logger.info("   원본 질문: [REDACTED]")
-                    logger.info("   답변: [REDACTED]")
+                    logger.info(f"   원본 질문: {original_question[:50]}...")
+                    logger.info(f"   답변: {candidate_answer[:50]}...")
                     logger.info("")
 
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
@@ -954,7 +1001,16 @@ async def generate_chat_stream(request: ChatRequest):
 )
 async def chat(request: ChatRequest):
     """채팅 처리 (일반/면접)"""
-    return StreamingResponse(generate_chat_stream(request), media_type="text/event-stream")
+    return StreamingResponse(
+        with_heartbeat(generate_chat_stream(request), interval=10.0),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Type": "text/event-stream; charset=utf-8",
+        },
+    )
 
 
 # ============================================================================
