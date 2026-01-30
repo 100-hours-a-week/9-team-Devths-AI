@@ -140,13 +140,13 @@ def format_analysis_text(
         lines.append("나와 지원 직무에 맞는 점")
         # matches 필드가 있으면 사용, 없으면 strengths에서 가져옴
         matches = resume_analysis.get("matches", resume_analysis.get("strengths", [])[:3])
-        for match in (matches[:3] if matches else []):
+        for match in matches[:3] if matches else []:
             lines.append(f"- {match}")
         lines.append("")
         lines.append("나와 지원 직무에 맞지 않는 점")
         # gaps 필드가 있으면 사용, 없으면 weaknesses에서 가져옴
         gaps = resume_analysis.get("gaps", resume_analysis.get("weaknesses", [])[:3])
-        for gap in (gaps[:3] if gaps else []):
+        for gap in gaps[:3] if gaps else []:
             lines.append(f"- {gap}")
 
     return "\n".join(lines)
