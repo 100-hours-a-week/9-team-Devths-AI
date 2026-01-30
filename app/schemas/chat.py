@@ -106,8 +106,16 @@ class ChatRequest(BaseModel):
         if isinstance(v, ChatContext):
             return v
 
+        # 리스트인 경우 → Q&A 배열로 간주 (리포트 모드)
+        # 백엔드가 context: [{"question": "...", "answer": "..."}] 형태로 보낼 때 대응
+        if isinstance(v, list):
+            return ChatContext(mode=ChatMode.REPORT, qa_list=v)
+
         # 딕셔너리인 경우 ChatContext로 변환
         if isinstance(v, dict):
+            # mode 값을 소문자로 정규화 (REPORT → report)
+            if "mode" in v and isinstance(v["mode"], str):
+                v["mode"] = v["mode"].lower()
             return ChatContext(**v)
 
         return v

@@ -3,8 +3,10 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.routes import ai, masking
 
@@ -84,6 +86,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# 422 에러 핸들러 (디버깅용 상세 로그)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """422 Validation Error 발생 시 요청 body 로깅"""
+    try:
+        body = await request.body()
+        body_str = body.decode("utf-8")[:2000]  # 최대 2000자
+    except Exception:
+        body_str = "[body 읽기 실패]"
+
+    logger.error("=" * 80)
+    logger.error("❌ [422 Validation Error]")
+    logger.error(f"   URL: {request.url}")
+    logger.error(f"   Method: {request.method}")
+    logger.error(f"   Body: {body_str}")
+    logger.error(f"   Errors: {exc.errors()}")
+    logger.error("=" * 80)
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
+
 
 # 라우터 등록
 app.include_router(ai.router)
