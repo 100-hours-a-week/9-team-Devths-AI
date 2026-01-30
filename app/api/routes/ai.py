@@ -274,8 +274,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(f"📌 요청 모델: {model.upper()}")
-            # 사용자 ID는 로그에 포함하지 않음 (보안)
-            logger.info("📌 사용자 ID: [REDACTED]")
+            logger.info(f"📌 사용자 ID: {request.user_id}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -489,12 +488,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    # 모델명과 모드는 사용자 입력이므로 로그에 포함하지 않음 (보안)
-    logger.info("📌 요청 모델: [REDACTED]")
-    logger.info("📌 채팅 모드: [REDACTED]")
-    # 사용자 ID와 채팅방 ID는 로그에 포함하지 않음 (보안)
-    logger.info("📌 사용자 ID: [REDACTED]")
-    logger.info("📌 채팅방 ID: [REDACTED]")
+    logger.info(f"📌 요청 모델: {model.upper()}")
+    logger.info(f"📌 채팅 모드: {mode}")
+    logger.info(f"📌 사용자 ID: {request.user_id}")
+    logger.info(f"📌 채팅방 ID: {request.room_id}")
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -612,9 +609,8 @@ async def generate_chat_stream(request: ChatRequest):
                     candidate_answer = history_dict[-1].get("content", "")
 
                     logger.info("🔍 [꼬리질문 생성] 감지")
-                    # 사용자 입력은 로그에 포함하지 않음 (보안)
-                    logger.info("   원본 질문: [REDACTED]")
-                    logger.info("   답변: [REDACTED]")
+                    logger.info(f"   원본 질문: {original_question[:50]}...")
+                    logger.info(f"   답변: {candidate_answer[:50]}...")
                     logger.info("")
 
                     # 간단한 STAR 분석 (실제로는 LLM으로 분석할 수 있지만, 여기서는 기본값 사용)
