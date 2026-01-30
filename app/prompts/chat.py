@@ -51,6 +51,11 @@ def create_rag_prompt(user_message: str, context: str | None = None) -> str:
     return template.format(user_message=user_message)
 
 
+def get_extract_title_prompt() -> str:
+    """채팅방 제목 추출 프롬프트 (회사명/채용직무)"""
+    return load_prompt("extract_title")
+
+
 def get_system_prompt(use_rag: bool = False) -> str:
     """시스템 프롬프트 반환"""
     return get_system_rag_chat() if use_rag else get_system_general_chat()

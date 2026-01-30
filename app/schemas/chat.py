@@ -274,6 +274,9 @@ class ChatResponse(BaseModel):
     success: bool = Field(True, description="성공 여부")
     mode: ChatMode = Field(..., description="응답 모드")
 
+    # 채팅방 제목 (회사명/채용직무)
+    summary: str | None = Field(None, description="채팅방 제목 (회사명/채용직무)")
+
     # 일반 대화
     response: str | None = Field(None, description="텍스트 응답")
 
