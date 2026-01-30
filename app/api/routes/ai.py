@@ -520,6 +520,69 @@ async def text_extract(request: TextExtractRequest):
     summary="비동기 작업 상태 조회",
     description="비동기 처리 작업의 상태를 조회하고 결과를 확인합니다.",
     responses={
+        200: {
+            "description": "성공",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "processing": {
+                            "summary": "처리 중",
+                            "value": {
+                                "task_id": 32,
+                                "status": "processing",
+                                "progress": None,
+                                "message": None,
+                                "result": None,
+                                "error": None,
+                            },
+                        },
+                        "completed": {
+                            "summary": "완료 (text_extract)",
+                            "value": {
+                                "task_id": 32,
+                                "status": "completed",
+                                "progress": 100,
+                                "message": None,
+                                "result": {
+                                    "success": True,
+                                    "summary": "카카오 | 백엔드 개발자",
+                                    "resume_ocr": "이름: 홍길동\n경력: 3년...",
+                                    "job_posting_ocr": "카카오 백엔드 채용\n자격요건: Java...",
+                                    "resume_analysis": {
+                                        "strengths": ["Java/Spring 숙련도", "프로젝트 경험"],
+                                        "weaknesses": ["클라우드 경험 부족"],
+                                        "suggestions": ["AWS 학습 권장"],
+                                    },
+                                    "posting_analysis": {
+                                        "company": "카카오",
+                                        "position": "백엔드 개발자",
+                                        "required_skills": ["Java", "Spring", "MySQL"],
+                                        "preferred_skills": ["Docker", "Kubernetes"],
+                                    },
+                                    "formatted_text": "지원 회사 및 직무 : 카카오 | 백엔드 개발자\n\n이력서 분석\n\n장점\n1. Java/Spring 숙련도\n2. 프로젝트 경험\n\n단점\n1. 클라우드 경험 부족\n\n채용 공고 분석\n\n기업 / 포지션\n카카오 / 백엔드 개발자\n\n필수 역량\n- Java\n- Spring\n- MySQL\n\n우대 사항\n- Docker\n- Kubernetes",
+                                    "room_id": 23,
+                                },
+                                "error": None,
+                            },
+                        },
+                        "failed": {
+                            "summary": "실패",
+                            "value": {
+                                "task_id": 32,
+                                "status": "failed",
+                                "progress": None,
+                                "message": None,
+                                "result": None,
+                                "error": {
+                                    "code": "OCR_FAILED",
+                                    "message": "이미지에서 텍스트를 추출할 수 없습니다",
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
         401: {
             "description": "Unauthorized",
             "content": {
