@@ -954,7 +954,15 @@ async def generate_chat_stream(request: ChatRequest):
 )
 async def chat(request: ChatRequest):
     """채팅 처리 (일반/면접)"""
-    return StreamingResponse(generate_chat_stream(request), media_type="text/event-stream")
+    return StreamingResponse(
+        generate_chat_stream(request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # nginx 버퍼링 비활성화
+        },
+    )
 
 
 # ============================================================================
