@@ -2,7 +2,10 @@ name: Devths-AI CICD 파이프라인
 
 on:
   push:
-    branches: [develop, release, main]
+    branches:
+      - develop
+      - release/**
+      - main
 
 env:
   PYTHON_VERSION: '3.10'
@@ -11,7 +14,7 @@ env:
   S3_BUCKET: ${{ github.ref_name == 'main' && secrets.AWS_S3_BUCKET_PROD || secrets.AWS_S3_BUCKET }}
   S3_PREFIX: AI/${{ github.ref_name }}
   CODEDEPLOY_APP_NAME: ${{ secrets.CODEDEPLOY_APP_NAME }}
-  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ github.ref_name == 'main' && secrets.CODEDEPLOY_GROUP_NAME_PROD || (github.ref_name == 'release' && secrets.CODEDEPLOY_GROUP_NAME_STAGING || secrets.CODEDEPLOY_GROUP_NAME_DEV) }}
+  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ github.ref_name == 'main' && secrets.CODEDEPLOY_GROUP_NAME_PROD || (startsWith(github.ref_name, 'release/') && secrets.CODEDEPLOY_GROUP_NAME_STAGING || secrets.CODEDEPLOY_GROUP_NAME_DEV) }}
 
 jobs:
   # 1. 코드 품질 검사 (Ruff)
@@ -221,7 +224,7 @@ jobs:
 
       - name: CodeDeploy 배포 시작
         id: codedeploy
-        if: github.ref_name == 'develop' || github.ref_name == 'release'
+        if: github.ref_name == 'develop' || startsWith(github.ref_name, 'release/')
         run: |
           echo "🚀 Starting CodeDeploy deployment..."
           S3_KEY="${{ steps.upload.outputs.s3_key }}"
@@ -276,7 +279,7 @@ jobs:
           description: |
             **커밋 메시지**: ${{ steps.prep.outputs.title }}
             **브랜치**: `${{ steps.prep.outputs.branch }}`
-            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (github.ref_name == 'release' && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
+            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (startsWith(github.ref_name, 'release/') && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
 
             **📊 상세 결과**:
             - Lint/Format: ${{ needs.lint.result == 'success' && '✅' || '❌' }}
@@ -296,7 +299,7 @@ jobs:
   notify-discord-cd:
     runs-on: ubuntu-22.04
     needs: [build]
-    if: always() && needs.build.result != 'skipped' && (github.ref_name == 'develop' || github.ref_name == 'release')
+    if: always() && needs.build.result != 'skipped' && (github.ref_name == 'develop' || startsWith(github.ref_name, 'release/'))
     steps:
       - name: 데이터 준비
         id: prep
@@ -314,7 +317,7 @@ jobs:
           description: |
             **커밋 메시지**: ${{ steps.prep.outputs.title }}
             **브랜치**: `${{ steps.prep.outputs.branch }}`
-            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (github.ref_name == 'release' && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
+            **환경**: ${{ github.ref_name == 'main' && '🚀 운영(PROD)' || (startsWith(github.ref_name, 'release/') && '🧪 스테이징(STAGING)' || '🛠️ 개발(DEV)') }}
 
             **📦 아티팩트**: `${{ needs.build.outputs.artifact_name }}`
             **🪣 S3 Key**: `${{ needs.build.outputs.s3_key }}`
