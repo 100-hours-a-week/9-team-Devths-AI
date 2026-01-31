@@ -5,11 +5,10 @@ uvicorn reload 모드에서도 작동하도록 파일 시스템 사용
 """
 
 import json
-import os
-from pathlib import Path
-from typing import Dict, Any, Optional
-from datetime import datetime
 import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +22,7 @@ def _get_task_file(task_id: str) -> Path:
     return TASKS_DIR / f"{task_id}.json"
 
 
-def save_task(task_id: str, task_data: Dict[str, Any]) -> None:
+def save_task(task_id: str, task_data: dict[str, Any]) -> None:
     """작업 데이터 저장"""
     try:
         # datetime 객체를 문자열로 변환
@@ -32,14 +31,14 @@ def save_task(task_id: str, task_data: Dict[str, Any]) -> None:
             task_data_copy["created_at"] = task_data_copy["created_at"].isoformat()
 
         file_path = _get_task_file(task_id)
-        with open(file_path, 'w') as f:
+        with open(file_path, "w") as f:
             json.dump(task_data_copy, f)
         logger.debug(f"Saved task {task_id} to {file_path}")
     except Exception as e:
         logger.error(f"Failed to save task {task_id}: {e}")
 
 
-def load_task(task_id: str) -> Optional[Dict[str, Any]]:
+def load_task(task_id: str) -> dict[str, Any] | None:
     """작업 데이터 로드"""
     try:
         file_path = _get_task_file(task_id)
@@ -47,7 +46,7 @@ def load_task(task_id: str) -> Optional[Dict[str, Any]]:
             logger.debug(f"Task {task_id} not found at {file_path}")
             return None
 
-        with open(file_path, 'r') as f:
+        with open(file_path) as f:
             task_data = json.load(f)
 
         # created_at을 datetime 객체로 변환

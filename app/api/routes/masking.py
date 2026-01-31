@@ -4,18 +4,23 @@ PII Masking API Routes
 게시판 첨부파일에서 개인정보를 자동으로 감지하고 마스킹 처리하는 API
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends, Header
-from typing import Optional
 import asyncio
+import base64
+import logging
 import uuid
 from datetime import datetime
-import logging
-import base64
 
-from app.schemas.common import AsyncTaskResponse, TaskStatusResponse, TaskStatus, ErrorCode
-from app.schemas.masking import MaskingDraftRequest, MaskingDraftResult, DetectedPII, MaskingModelType
-from app.services.gemini_masking import get_gemini_masking_service
+from fastapi import APIRouter, Header, HTTPException, status
+
+from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
+from app.schemas.masking import (
+    DetectedPII,
+    MaskingDraftRequest,
+    MaskingDraftResult,
+    MaskingModelType,
+)
 from app.services.chandra_masking import get_chandra_masking_service
+from app.services.gemini_masking import get_gemini_masking_service
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -33,13 +38,10 @@ task_store = get_task_store()
 background_tasks_set = set()
 
 
-async def verify_api_key(x_api_key: Optional[str] = Header(None)):
+async def verify_api_key(x_api_key: str | None = Header(None)):
     """API 키 검증"""
     if x_api_key != "your-api-key-here":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     return x_api_key
 
 
@@ -88,47 +90,47 @@ async def verify_api_key(x_api_key: Optional[str] = Header(None)):
     **주의:**
     - 사용자 수정은 프론트엔드에서 처리 (AI 불필요)
     """,
-    dependencies=[Depends(verify_api_key)]
 )
 async def masking_draft(request: MaskingDraftRequest):
     """
     게시판 첨부파일 마스킹
 
     Args:
-        request: 마스킹 요청 (file_url, file_type)
+        request: 마스킹 요청 (s3_key, file_type, model)
 
     Returns:
         AsyncTaskResponse: task_id와 처리 상태
     """
     task_id = f"task_masking_{uuid.uuid4().hex[:12]}"
-    
-    logger.info(f"=" * 80)
+
+    logger.info("=" * 80)
     logger.info(f"[MASKING_DRAFT] Creating new task: {task_id}")
     logger.info(f"[MASKING_DRAFT] Current tasks in store: {task_store.list_all()}")
 
-    # 초기 상태를 즉시 저장
+    # 초기 상태를 즉시 저장 (통합 저장소 사용)
     task_data = {
+        "type": "masking",  # 작업 타입 구분
         "status": TaskStatus.PROCESSING,
         "created_at": datetime.now(),
         "progress": 0,
         "message": "마스킹 작업을 시작합니다...",
-        "request": request.model_dump()
+        "request": request.model_dump(),
     }
     task_store.save(task_id, task_data)
 
     logger.info(f"[MASKING_DRAFT] Task {task_id} saved to file store")
     logger.info(f"[MASKING_DRAFT] Task exists: {task_store.exists(task_id)}")
     logger.info(f"[MASKING_DRAFT] Task data: {task_store.get(task_id)}")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     # 백그라운드에서 처리
     async def process_masking():
         logger.info(f"[PROCESS_MASKING] Starting masking task {task_id}")
         logger.info(f"[PROCESS_MASKING] Task exists in store: {task_store.exists(task_id)}")
-        logger.info(f"[PROCESS_MASKING] Using model: {request.model_type}")
+        logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:
             # 모델 선택
-            if request.model_type == MaskingModelType.CHANDRA:
+            if request.model == MaskingModelType.CHANDRA:
                 service = get_chandra_masking_service()
                 model_name = "Chandra"
             else:  # GEMINI
@@ -170,7 +172,7 @@ async def masking_draft(request: MaskingDraftRequest):
                 task_store.save(task_id, task_data)
 
                 masked_bytes, thumbnail_bytes, detections = await service.mask_image_file(
-                    file_url=str(request.file_url)
+                    file_url=str(request.s3_key)
                 )
 
             task_data = task_store.get(task_id)
@@ -180,8 +182,8 @@ async def masking_draft(request: MaskingDraftRequest):
 
             # 실제로는 S3에 업로드하고 URL 반환
             # 여기서는 base64 data URL로 반환 (데모용)
-            masked_base64 = base64.b64encode(masked_bytes).decode('utf-8')
-            thumbnail_base64 = base64.b64encode(thumbnail_bytes).decode('utf-8')
+            masked_base64 = base64.b64encode(masked_bytes).decode("utf-8")
+            thumbnail_base64 = base64.b64encode(thumbnail_bytes).decode("utf-8")
 
             # data URL 형식 (전체 base64 포함)
             file_ext = "pdf" if request.file_type == "pdf" else "png"
@@ -200,7 +202,7 @@ async def masking_draft(request: MaskingDraftRequest):
                         DetectedPII(
                             type=pii_type,
                             coordinates=det.get("coordinates", [0, 0, 0, 0]),
-                            confidence=det.get("confidence", 0.0)
+                            confidence=det.get("confidence", 0.0),
                         )
                     )
                 except ValueError:
@@ -213,10 +215,10 @@ async def masking_draft(request: MaskingDraftRequest):
             task_data["message"] = "마스킹 작업이 완료되었습니다."
             task_data["result"] = MaskingDraftResult(
                 success=True,
-                original_url=request.file_url,
+                original_url=request.s3_key,
                 masked_url=masked_url,
                 thumbnail_url=thumbnail_url,
-                detected_pii=detected_pii
+                detected_pii=detected_pii,
             ).model_dump()
             task_store.save(task_id, task_data)
 
@@ -227,10 +229,7 @@ async def masking_draft(request: MaskingDraftRequest):
             task_data = task_store.get(task_id) or {}
             task_data["status"] = TaskStatus.FAILED
             task_data["message"] = f"마스킹 작업 실패: {str(e)}"
-            task_data["error"] = {
-                "code": ErrorCode.PROCESSING_ERROR,
-                "message": str(e)
-            }
+            task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
             task_store.save(task_id, task_data)
 
     # asyncio.create_task로 작업 생성 및 추적
@@ -245,7 +244,7 @@ async def masking_draft(request: MaskingDraftRequest):
     return AsyncTaskResponse(
         task_id=task_id,
         status=TaskStatus.PROCESSING,
-        message="마스킹 작업을 시작했습니다. task_id로 진행 상태를 확인하세요."
+        message="마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
     )
 
 
@@ -256,6 +255,8 @@ async def masking_draft(request: MaskingDraftRequest):
     description="""
     비동기 마스킹 작업의 상태를 조회합니다.
 
+    **통합 엔드포인트:** `/ai/task/{task_id}`로도 조회 가능합니다.
+
     **상태 종류:**
     - processing: 처리 중
     - completed: 완료
@@ -263,7 +264,6 @@ async def masking_draft(request: MaskingDraftRequest):
 
     **progress:** 0-100 (진행률)
     """,
-    dependencies=[Depends(verify_api_key)]
 )
 async def get_masking_task_status(task_id: str):
     """
@@ -275,21 +275,18 @@ async def get_masking_task_status(task_id: str):
     Returns:
         TaskStatusResponse: 작업 상태 및 결과
     """
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
     logger.info(f"[GET_STATUS] Looking for task: {task_id}")
     logger.info(f"[GET_STATUS] All tasks in store: {task_store.list_all()}")
     logger.info(f"[GET_STATUS] Task exists: {task_store.exists(task_id)}")
-    logger.info(f"=" * 80)
+    logger.info("=" * 80)
 
     task = task_store.get(task_id)
     if task is None:
         logger.error(f"[GET_STATUS] Task {task_id} NOT FOUND!")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "code": ErrorCode.TASK_NOT_FOUND,
-                "message": "작업을 찾을 수 없습니다."
-            }
+            detail={"code": ErrorCode.TASK_NOT_FOUND, "message": "작업을 찾을 수 없습니다."},
         )
 
     logger.info(f"[GET_STATUS] Task {task_id} found! Status: {task['status']}")
@@ -300,50 +297,38 @@ async def get_masking_task_status(task_id: str):
         progress=task.get("progress"),
         message=task.get("message"),
         result=task.get("result"),
-        error=task.get("error")
+        error=task.get("error"),
     )
 
 
 @router.get(
-    "/health",
-    summary="PII 마스킹 서비스 헬스 체크",
-    description="PII 마스킹 서비스 상태 확인"
+    "/health", summary="PII 마스킹 서비스 헬스 체크", description="PII 마스킹 서비스 상태 확인"
 )
 async def masking_health_check():
     """PII 마스킹 서비스 헬스 체크"""
-    health_status = {
-        "status": "healthy",
-        "service": "pii-masking",
-        "models": {}
-    }
+    health_status = {"status": "healthy", "service": "pii-masking", "models": {}}
 
     # Gemini 체크
     try:
-        gemini_service = get_gemini_masking_service()
+        get_gemini_masking_service()
         health_status["models"]["gemini"] = {
             "status": "available",
-            "provider": "Google Gemini 3 Flash Preview"
+            "provider": "Google Gemini 3 Flash Preview",
         }
     except Exception as e:
         logger.error(f"Gemini health check failed: {e}")
-        health_status["models"]["gemini"] = {
-            "status": "error",
-            "error": str(e)
-        }
+        health_status["models"]["gemini"] = {"status": "error", "error": str(e)}
 
     # Chandra 체크
     try:
-        chandra_service = get_chandra_masking_service()
+        get_chandra_masking_service()
         health_status["models"]["chandra"] = {
             "status": "available",
-            "provider": "datalab-to/chandra"
+            "provider": "datalab-to/chandra",
         }
     except Exception as e:
         logger.error(f"Chandra health check failed: {e}")
-        health_status["models"]["chandra"] = {
-            "status": "error",
-            "error": str(e)
-        }
+        health_status["models"]["chandra"] = {"status": "error", "error": str(e)}
 
     # 모든 모델이 실패하면 전체 상태 error
     if all(m.get("status") == "error" for m in health_status["models"].values()):

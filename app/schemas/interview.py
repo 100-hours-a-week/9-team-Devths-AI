@@ -1,22 +1,25 @@
-from pydantic import BaseModel, Field
-from typing import List
 from enum import Enum
+
+from pydantic import BaseModel, Field
 
 
 class InterviewType(str, Enum):
     """면접 타입"""
+
     PERSONALITY = "personality"
     TECHNICAL = "technical"
 
 
 class EndedBy(str, Enum):
     """면접 종료 방식"""
+
     AUTO = "auto"  # 5개 완료
     MANUAL = "manual"  # 직접 종료
 
 
 class InterviewQuestionRequest(BaseModel):
     """면접 질문 생성 요청 (API 4)"""
+
     room_id: str = Field(..., description="채팅방 ID")
     session_id: str = Field(..., description="면접 세션 ID")
     interview_type: InterviewType = Field(..., description="면접 타입 (personality/technical)")
@@ -30,13 +33,14 @@ class InterviewQuestionRequest(BaseModel):
                 "session_id": "session_abc123",
                 "interview_type": "technical",
                 "resume_text": "이력서 텍스트...",
-                "posting_text": "채용공고 텍스트..."
+                "posting_text": "채용공고 텍스트...",
             }
         }
 
 
 class InterviewQuestionResponse(BaseModel):
     """면접 질문 생성 응답 (API 4)"""
+
     success: bool = Field(True, description="성공 여부")
     question_id: str = Field(..., description="생성된 질문 ID")
     question: str = Field(..., description="생성된 질문")
@@ -50,13 +54,14 @@ class InterviewQuestionResponse(BaseModel):
                 "question_id": "q_001",
                 "question": "React의 Virtual DOM이 무엇인가요?",
                 "is_followup": False,
-                "question_number": 1
+                "question_number": 1,
             }
         }
 
 
 class InterviewSaveRequest(BaseModel):
     """면접 Q&A 저장 요청 (API 5)"""
+
     room_id: str = Field(..., description="채팅방 ID")
     session_id: str = Field(..., description="면접 세션 ID")
     question_id: str = Field(..., description="질문 ID")
@@ -74,13 +79,14 @@ class InterviewSaveRequest(BaseModel):
                 "question": "React의 Virtual DOM이 무엇인가요?",
                 "answer": "실제 DOM과 비교해서 변경된 부분만 업데이트하는 거예요",
                 "is_followup": False,
-                "question_number": 1
+                "question_number": 1,
             }
         }
 
 
 class InterviewSaveResponse(BaseModel):
     """면접 Q&A 저장 응답 (API 5)"""
+
     success: bool = Field(True, description="성공 여부")
     qa_id: str = Field(..., description="저장된 Q&A ID")
     session_id: str = Field(..., description="면접 세션 ID")
@@ -94,13 +100,14 @@ class InterviewSaveResponse(BaseModel):
                 "qa_id": "qa_001",
                 "session_id": "session_abc123",
                 "saved_count": 1,
-                "max_questions": 5
+                "max_questions": 5,
             }
         }
 
 
 class InterviewReportRequest(BaseModel):
     """면접 평가 요청 (API 6)"""
+
     room_id: str = Field(..., description="채팅방 ID")
     session_id: str = Field(..., description="면접 세션 ID")
     interview_type: InterviewType = Field(..., description="면접 타입")
@@ -116,36 +123,39 @@ class InterviewReportRequest(BaseModel):
                 "interview_type": "technical",
                 "resume_text": "이력서 텍스트...",
                 "posting_text": "채용공고 텍스트...",
-                "ended_by": "auto"
+                "ended_by": "auto",
             }
         }
 
 
 class QAEvaluation(BaseModel):
     """Q&A 평가"""
+
     qa_id: str = Field(..., description="Q&A ID")
     question: str = Field(..., description="질문")
     answer: str = Field(..., description="답변")
     score: int = Field(..., ge=0, le=100, description="점수 (0-100)")
-    good_points: List[str] = Field(..., description="잘한 점")
-    improvements: List[str] = Field(..., description="개선할 점")
+    good_points: list[str] = Field(..., description="잘한 점")
+    improvements: list[str] = Field(..., description="개선할 점")
 
 
 class Report(BaseModel):
     """면접 리포트"""
+
     total_score: int = Field(..., ge=0, le=100, description="총점")
     grade: str = Field(..., description="등급 (A+, A, B+, B, C+, C, D, F)")
-    strength_patterns: List[str] = Field(..., description="강점 패턴")
-    weakness_patterns: List[str] = Field(..., description="약점 패턴")
-    learning_guide: List[str] = Field(..., description="학습 가이드")
+    strength_patterns: list[str] = Field(..., description="강점 패턴")
+    weakness_patterns: list[str] = Field(..., description="약점 패턴")
+    learning_guide: list[str] = Field(..., description="학습 가이드")
 
 
 class InterviewReportResponse(BaseModel):
     """면접 평가 응답 (API 6)"""
+
     success: bool = Field(True, description="성공 여부")
     room_id: str = Field(..., description="채팅방 ID")
     session_id: str = Field(..., description="면접 세션 ID")
-    evaluations: List[QAEvaluation] = Field(..., description="Q&A별 평가")
+    evaluations: list[QAEvaluation] = Field(..., description="Q&A별 평가")
     report: Report = Field(..., description="종합 리포트")
 
     class Config:
@@ -161,7 +171,7 @@ class InterviewReportResponse(BaseModel):
                         "answer": "실제 DOM과 비교해서...",
                         "score": 80,
                         "good_points": ["Virtual DOM의 기본 개념을 잘 이해하고 있음"],
-                        "improvements": ["Reconciliation 알고리즘 설명 추가하면 좋음"]
+                        "improvements": ["Reconciliation 알고리즘 설명 추가하면 좋음"],
                     }
                 ],
                 "report": {
@@ -169,7 +179,7 @@ class InterviewReportResponse(BaseModel):
                     "grade": "B+",
                     "strength_patterns": ["기술 개념에 대한 이해도가 높음"],
                     "weakness_patterns": ["심화 개념 설명이 부족함"],
-                    "learning_guide": ["React 심화 개념 학습 (Fiber, Concurrent Mode)"]
-                }
+                    "learning_guide": ["React 심화 개념 학습 (Fiber, Concurrent Mode)"],
+                },
             }
         }
