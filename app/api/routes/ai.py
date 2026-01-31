@@ -362,32 +362,29 @@ async def text_extract(request: TextExtractRequest):
                     safe_s3_key = sanitize_log_input(doc_input.s3_key)
                     logger.info("   → S3 키: %s", safe_s3_key)
 
-                    # vLLM 모드: EasyOCR 사용 (가성비)
-                    if model == "vllm" and rag.vllm:
-                        logger.info("   💰 [vLLM 가성비 모드] EasyOCR 시작")
-                        ocr_result = await rag.vllm.extract_text_from_file(
-                            file_url=str(doc_input.s3_key),
-                            file_type=file_type,
-                            user_id=str(request.user_id),
-                        )
-                        extracted_text = ocr_result["extracted_text"]
-                        pages = [PageText(**page) for page in ocr_result["pages"]]
-                        logger.info(
-                            f"   ✅ [vLLM OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})"
-                        )
+                    # OCRService 사용 (EasyOCR Primary + Gemini Fallback)
+                    # 02_OCR_모델_선정.md 기반: EasyOCR(무료/빠름) → Gemini(고정확도) 폴백
+                    logger.info("   🔍 [OCRService] EasyOCR Primary + Gemini Fallback 시작")
+                    ocr_result = await rag.ocr.extract_text(
+                        file_url=str(doc_input.s3_key),
+                        file_type=file_type,
+                        user_id=str(request.user_id),
+                        fallback_enabled=True,
+                    )
+                    ocr_engine = ocr_result.get("ocr_engine", "unknown")
+                    fallback_reason = ocr_result.get("fallback_reason")
+                    extracted_text = ocr_result.get("extracted_text", "")
+                    pages = [PageText(**page) for page in ocr_result.get("pages", [])]
 
-                    # Gemini 모드: Gemini Vision API 사용 (고성능)
-                    else:
-                        if model == "vllm" and not rag.vllm:
-                            logger.warning("   ⚠️ vLLM 서비스 사용 불가 → Gemini로 자동 변경")
-                        logger.info("   🚀 [Gemini 고성능 모드] Gemini Vision API OCR 시작")
-                        ocr_result = await rag.llm.extract_text_from_file(
-                            file_url=str(doc_input.s3_key), file_type=file_type
-                        )
-                        extracted_text = ocr_result["extracted_text"]
-                        pages = [PageText(**page) for page in ocr_result["pages"]]
+                    if fallback_reason:
                         logger.info(
-                            f"   ✅ [Gemini OCR] 추출 완료: {len(extracted_text)}자 (페이지: {len(pages)})"
+                            f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료 (폴백 사유: {fallback_reason}): "
+                            f"{len(extracted_text)}자 (페이지: {len(pages)})"
+                        )
+                    else:
+                        logger.info(
+                            f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료: "
+                            f"{len(extracted_text)}자 (페이지: {len(pages)})"
                         )
 
                 # 텍스트 직접 입력
