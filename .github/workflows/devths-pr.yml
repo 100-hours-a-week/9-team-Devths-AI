@@ -2,7 +2,10 @@ name: Devths-AI CI 파이프라인
 
 on:
   pull_request:
-    branches: [develop, release, main]
+    branches:
+      - develop
+      - release/**
+      - main
 
 env:
   PYTHON_VERSION: '3.10'

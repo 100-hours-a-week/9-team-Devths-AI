@@ -49,7 +49,7 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
                 export PARAMETER_STORE_PATH="/Dev/AI/"
                 echo "🛠️  Environment: Development (from branch: $DEPLOY_BRANCH)"
                 ;;
-            release)
+            release/*)
                 export PARAMETER_STORE_PATH="/Stg/AI/"
                 echo "🧪 Environment: Staging (from branch: $DEPLOY_BRANCH)"
                 ;;
