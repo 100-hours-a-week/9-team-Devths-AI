@@ -342,7 +342,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info(f"{'='*80}")
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
-            logger.info(f"📌 요청 모델: {model.upper()}")
+            logger.info(f"📌 OCR 전략: {'EasyOCR Primary + Gemini Fallback' if model == 'auto' else model.upper()}")
             logger.info(f"📌 사용자 ID: {request.user_id}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
