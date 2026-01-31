@@ -48,6 +48,9 @@ openai = "^2.15.0"
 # RAG and VectorDB (서빙에 필수)
 chromadb = "^0.4.24"
 
+# OCR (EasyOCR - Primary OCR, 02_OCR_모델_선정.md 참고)
+easyocr = "^1.7.0"
+
 # ============================================
 # ML Dependencies (선택적 - 모델 추론/학습용)
 # poetry install --with ml 로 설치
@@ -56,9 +59,6 @@ chromadb = "^0.4.24"
 optional = true
 
 [tool.poetry.group.ml.dependencies]
-# OCR (EasyOCR만 사용 - 02_OCR_모델_선정.md 참고)
-easyocr = "^1.7.0"
-
 # OpenCV for face detection
 opencv-python = "^4.8.0"
 

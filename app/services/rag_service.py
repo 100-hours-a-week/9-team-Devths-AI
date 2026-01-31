@@ -20,6 +20,7 @@ from app.prompts import (
 )
 
 from .llm_service import LLMService
+from .ocr_service import OCRService
 from .vectordb_service import VectorDBService
 from .vllm_service import VLLMService
 
@@ -34,6 +35,7 @@ class RAGService:
         llm_service: LLMService,
         vectordb_service: VectorDBService,
         vllm_service: VLLMService | None = None,
+        ocr_service: OCRService | None = None,
     ):
         """
         Initialize RAG Service
@@ -42,11 +44,14 @@ class RAGService:
             llm_service: LLM service instance (Gemini)
             vectordb_service: VectorDB service instance
             vllm_service: vLLM service instance (optional)
+            ocr_service: OCR service instance (EasyOCR + Gemini Fallback)
         """
         self.llm = llm_service
         self.vllm = vllm_service
         self.vectordb = vectordb_service
-        logger.info("RAG Service initialized")
+        # OCRService: 전달받거나 자동 생성
+        self.ocr = ocr_service or OCRService(llm_service=llm_service)
+        logger.info("RAG Service initialized (with OCRService)")
 
     async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
         """
