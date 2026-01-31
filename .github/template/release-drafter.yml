@@ -1,0 +1,54 @@
+name-template: 'v$RESOLVED_VERSION 🌈'
+tag-template: 'v$RESOLVED_VERSION'
+commitish: main
+
+categories:
+  - title: '🚀 새로운 기능 (Features)'
+    labels:
+      - 'feat'
+      - 'feature'
+  - title: '✨ 기능 개선 (Improvements)'
+    labels:
+      - 'enhancement'
+      - 'refactor'
+  - title: '🐛 버그 수정 (Bug Fixes)'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+  - title: '🛠️ 인프라 및 유지보수'
+    labels:
+      - 'infra'
+      - 'chore'
+
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+change-title-escapes: '\<*_&'
+
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'minor'
+  patch:
+    labels:
+      - 'patch'
+  default: patch
+
+template: |
+  > ⚠️ **주의: 이 릴리즈는 현재 배포 준비 중인 초안입니다.**
+  > 최종 배포는 `main` 브랜치 머지 시 자동으로 수행되니, **절대 [Publish release] 버튼을 누르지 마세요!**
+
+  ## 📋 릴리즈 요약
+  이번 버전에 포함된 새로운 변경사항들입니다.
+
+  ## 🎯 주요 변경사항
+  $CHANGES
+
+  ## 👥 기여자
+  이번 릴리즈에 기여해주신 분들께 감사드립니다! 🎉
+  $CONTRIBUTORS
+
+  ## 📚 전체 변경 내역
+  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
