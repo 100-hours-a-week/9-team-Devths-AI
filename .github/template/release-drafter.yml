@@ -1,6 +1,5 @@
 name-template: 'v$RESOLVED_VERSION 🌈'
 tag-template: 'v$RESOLVED_VERSION'
-commitish: main
 
 categories:
   - title: '🚀 새로운 기능 (Features)'
