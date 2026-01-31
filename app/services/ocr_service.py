@@ -215,7 +215,7 @@ class OCRService:
                         trace=ocr_trace,
                         name="easyocr_image",
                         model="easyocr",
-                        input_text=f"file_type=image",
+                        input_text="file_type=image",
                         output_text=text[:4000],
                         metadata={
                             "type": "ocr",
