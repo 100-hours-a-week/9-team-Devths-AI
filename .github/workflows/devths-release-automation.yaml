@@ -1,10 +1,10 @@
-name: Devths-AI Release 자동화
+name: Devths-FE Release 자동화
 
 on:
   push:
     branches:
-      - release/*
-      - main
+      - 'release/*'
+      - 'main'
 
 permissions:
   contents: write
@@ -22,23 +22,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 전체 히스토리 가져오기 (태그 포함)
+          fetch-depth: 0
 
       - name: RC Prerelease 생성/업데이트
         uses: actions/github-script@v7
         with:
           script: |
-            const fs = require('fs');
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 1. 브랜치명에서 버전 추출 (release/v1.2.0 -> v1.2.0)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             const branchName = context.ref.replace('refs/heads/', '');
             const versionMatch = branchName.match(/release\/(v\d+\.\d+\.\d+)/);
 
             if (!versionMatch) {
               core.setFailed(`❌ 브랜치명에서 버전을 추출할 수 없습니다: ${branchName}`);
-              core.setFailed(`💡 브랜치명 형식: release/vX.Y.Z (예: release/v1.2.0)`);
               return;
             }
 
@@ -46,40 +40,23 @@ jobs:
             const rcTag = `${version}-rc`;
 
             console.log(`📦 Release 버전: ${version}`);
-            console.log(`🏷️  RC 태그: ${rcTag}`);
+            console.log(`🏷️ RC 태그: ${rcTag}`);
 
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 2. main 브랜치의 최신 태그 찾기
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             let latestMainTag = null;
-
             try {
-              // main 브랜치의 모든 태그 가져오기
               const { data: tags } = await github.rest.repos.listTags({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 per_page: 100
               });
-
-              // vX.Y.Z 형식의 정식 태그만 필터링 (RC 제외)
-              const mainTags = tags.filter(tag =>
-                /^v\d+\.\d+\.\d+$/.test(tag.name)
-              );
-
+              const mainTags = tags.filter(tag => /^v\d+\.\d+\.\d+$/.test(tag.name));
               if (mainTags.length > 0) {
                 latestMainTag = mainTags[0].name;
                 console.log(`✅ main 최신 태그: ${latestMainTag}`);
-              } else {
-                console.log(`⚠️  main 브랜치에 태그가 없습니다. 전체 히스토리를 릴리즈 노트에 포함합니다.`);
               }
             } catch (error) {
-              console.log(`⚠️  태그 조회 중 오류: ${error.message}`);
+              console.log(`⚠️ 태그 조회 오류: ${error.message}`);
             }
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 3. GitHub Generate Release Notes API 호출
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n📝 릴리즈 노트 생성 중...`);
 
             const generateNotesParams = {
               owner: context.repo.owner,
@@ -87,32 +64,17 @@ jobs:
               tag_name: rcTag,
               target_commitish: branchName
             };
+            if (latestMainTag) generateNotesParams.previous_tag_name = latestMainTag;
 
-            if (latestMainTag) {
-              generateNotesParams.previous_tag_name = latestMainTag;
-            }
+            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes(generateNotesParams);
 
-            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes(
-              generateNotesParams
-            );
-
-            console.log(`✅ 릴리즈 노트 생성 완료`);
-
-            // 릴리즈 노트에 RC 안내 추가
-            const rcBody = `> ⚠️ **주의: 이것은 릴리즈 후보(Release Candidate) 버전입니다.**
-> 최종 릴리즈는 \`main\` 브랜치 머지 후 자동으로 생성됩니다.
-
-${releaseNotes.body}
-
----
-**📍 베이스 브랜치**: \`${branchName}\`
-**📌 이전 태그**: \`${latestMainTag || 'N/A (최초 릴리즈)'}\`
-**🔄 자동 생성**: GitHub Release Notes API`;
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 4. 기존 RC Release 찾기
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n🔍 기존 RC Release 확인 중...`);
+            const rcBody = `> ⚠️ **주의: 이것은 릴리즈 후보(Release Candidate) 버전입니다.**\n` +
+                           `> 최종 릴리즈는 \`main\` 브랜치 머지 후 자동으로 생성됩니다.\n\n` +
+                           `${releaseNotes.body}\n\n` +
+                           `---\n` +
+                           `**📍 베이스 브랜치**: \`${branchName}\`\n` +
+                           `**📌 이전 태그**: \`${latestMainTag || 'N/A'}\`\n` +
+                           `**🔄 자동 생성**: GitHub Release Notes API`;
 
             let existingRelease = null;
             try {
@@ -122,74 +84,34 @@ ${releaseNotes.body}
                 tag: rcTag
               });
               existingRelease = release;
-              console.log(`✅ 기존 RC Release 발견: ${release.html_url}`);
             } catch (error) {
-              if (error.status === 404) {
-                console.log(`ℹ️  기존 RC Release 없음 (새로 생성)`);
-              } else {
-                throw error;
-              }
+              if (error.status !== 404) throw error;
             }
 
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 5. RC Release 생성 또는 업데이트
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            let releaseUrl;
-
             if (existingRelease) {
-              // 업데이트
-              console.log(`\n♻️  RC Release 업데이트 중...`);
-
-              const { data: updatedRelease } = await github.rest.repos.updateRelease({
+              await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 release_id: existingRelease.id,
-                tag_name: rcTag,
-                name: `${version} (Release Candidate)`,
+                name: `${version} (RC)`,
                 body: rcBody,
-                draft: true,
                 prerelease: true,
                 target_commitish: branchName
               });
-
-              releaseUrl = updatedRelease.html_url;
-              console.log(`✅ RC Release 업데이트 완료`);
             } else {
-              // 새로 생성
-              console.log(`\n📦 RC Release 생성 중...`);
-
-              const { data: newRelease } = await github.rest.repos.createRelease({
+              await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: rcTag,
-                name: `${version} (Release Candidate)`,
+                name: `${version} (RC)`,
                 body: rcBody,
-                draft: true,
                 prerelease: true,
                 target_commitish: branchName
               });
-
-              releaseUrl = newRelease.html_url;
-              console.log(`✅ RC Release 생성 완료`);
             }
 
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 6. 결과 출력
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`✅ RC Release 준비 완료`);
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`📦 버전: ${version}`);
-            console.log(`🏷️  태그: ${rcTag}`);
-            console.log(`🔗 URL: ${releaseUrl}`);
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
-            core.setOutput('version', version);
-            core.setOutput('rc_tag', rcTag);
-            core.setOutput('release_url', releaseUrl);
-
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # main 브랜치: 정식 Release 배포 + RC 정리
+  # main 브랜치: 정식 Release 배포
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   production-release:
     name: 정식 Release 배포
@@ -205,29 +127,15 @@ ${releaseNotes.body}
         uses: actions/github-script@v7
         with:
           script: |
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 1. 커밋 메시지에서 버전 추출 (필수)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`🔍 커밋 메시지에서 버전 감지 중...`);
-
             const commitMessage = context.payload.head_commit?.message || '';
             const commitVersionMatch = commitMessage.match(/release\/(v\d+\.\d+\.\d+)/);
 
             if (!commitVersionMatch) {
-              core.setFailed(`❌ 커밋 메시지에서 버전을 찾을 수 없습니다.`);
-              core.setFailed(`💡 release/* 브랜치를 main에 머지하세요. (예: release/v1.2.0)`);
-              core.setFailed(`📋 현재 커밋 메시지: ${commitMessage}`);
+              console.log("⚠️ 머지 커밋 메시지에서 버전을 찾을 수 없습니다. 배포를 건너뜁니다.");
               return;
             }
 
             const newVersion = commitVersionMatch[1];
-            console.log(`✅ 배포 버전: ${newVersion}`);
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 2. main의 최신 태그 찾기 (릴리즈 노트 생성용)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n🔍 이전 릴리즈 태그 확인 중...`);
-
             let latestMainTag = null;
 
             try {
@@ -236,95 +144,29 @@ ${releaseNotes.body}
                 repo: context.repo.repo,
                 per_page: 100
               });
-
-              // vX.Y.Z 형식의 정식 태그만 필터링
-              const mainTags = tags.filter(tag =>
-                /^v\d+\.\d+\.\d+$/.test(tag.name)
-              );
-
-              if (mainTags.length > 0) {
-                latestMainTag = mainTags[0].name;
-                console.log(`✅ 이전 태그: ${latestMainTag}`);
-              } else {
-                console.log(`ℹ️  최초 릴리즈 (이전 태그 없음)`);
-              }
+              const mainTags = tags.filter(tag => /^v\d+\.\d+\.\d+$/.test(tag.name));
+              if (mainTags.length > 0) latestMainTag = mainTags[0].name;
             } catch (error) {
-              console.log(`⚠️  태그 조회 실패: ${error.message}`);
+              console.log(`⚠️ 태그 조회 실패: ${error.message}`);
             }
 
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 3. 동일 버전 릴리즈 중복 확인
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            try {
-              const { data: existingRelease } = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: newVersion
-              });
-
-              if (!existingRelease.draft && !existingRelease.prerelease) {
-                console.log(`⚠️  ${newVersion} 정식 릴리즈가 이미 존재합니다.`);
-                console.log(`🔗 ${existingRelease.html_url}`);
-                console.log(`ℹ️  중복 릴리즈 생성을 건너뜁니다.`);
-                return;
-              }
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-              // 404는 정상 (릴리즈 없음)
-            }
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 4. GitHub Generate Release Notes API 호출
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n📝 릴리즈 노트 생성 중...`);
-
-            const generateNotesParams = {
+            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: newVersion,
-              target_commitish: 'main'
-            };
-
-            if (latestMainTag) {
-              generateNotesParams.previous_tag_name = latestMainTag;
-            }
-
-            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes(
-              generateNotesParams
-            );
-
-            console.log(`✅ 릴리즈 노트 생성 완료`);
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 5. 정식 Release 생성 (Publish)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n🚀 정식 Release 생성 중...`);
+              target_commitish: 'main',
+              previous_tag_name: latestMainTag || undefined
+            });
 
             const { data: release } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: newVersion,
-              name: releaseNotes.name || newVersion,
+              name: newVersion,
               body: releaseNotes.body,
               draft: false,
               prerelease: false,
               target_commitish: 'main'
             });
 
-            console.log(`✅ 정식 Release 생성 완료`);
-            console.log(`🔗 ${release.html_url}`);
-
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // 6. 결과 출력
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`🎉 정식 Release 배포 완료`);
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(`📦 버전: ${newVersion}`);
-            console.log(`🔗 URL: ${release.html_url}`);
-            console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
-            core.setOutput('version', newVersion);
-            core.setOutput('release_url', release.html_url);
+            console.log(`✅ 정식 Release 생성 완료: ${release.html_url}`);
