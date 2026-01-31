@@ -128,8 +128,11 @@ class TextExtractRequest(BaseModel):
     user_id: int = Field(..., description="사용자 ID", example=12)
     resume: DocumentInput = Field(..., description="이력서/포트폴리오 입력")
     job_posting: DocumentInput = Field(..., description="채용공고 입력")
-    model: Literal["gemini", "vllm"] | None = Field(
-        "gemini", description="사용할 모델 (gemini: Gemini Vision API OCR, vllm: EasyOCR + Llama)"
+    model: Literal["auto", "gemini", "vllm"] | None = Field(
+        "auto",
+        description="OCR 모델 선택 (auto: EasyOCR Primary + Gemini Fallback 권장, "
+        "gemini: Gemini Vision API 전용, vllm: EasyOCR 전용). "
+        "02_OCR_모델_선정.md 기반으로 auto 사용 시 EasyOCR → Gemini 폴백 전략 적용",
     )
 
     @validator("resume", "job_posting")
@@ -146,7 +149,7 @@ class TextExtractRequest(BaseModel):
                     "name": "파일 업로드 방식 (S3 key)",
                     "value": {
                         "task_id": 1,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
@@ -167,7 +170,7 @@ class TextExtractRequest(BaseModel):
                     "name": "텍스트 직접 입력 방식",
                     "value": {
                         "task_id": 2,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
@@ -188,7 +191,7 @@ class TextExtractRequest(BaseModel):
                     "name": "혼합 방식 (S3 key + 텍스트)",
                     "value": {
                         "task_id": 3,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
