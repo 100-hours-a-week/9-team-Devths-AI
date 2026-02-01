@@ -26,11 +26,11 @@ class InterviewDatasetService:
         valid_file = self.data_dir / "interview_dataset_valid.json"
 
         if train_file.exists():
-            with open(train_file, "r", encoding="utf-8") as f:
+            with open(train_file, encoding="utf-8") as f:
                 self.train_data = json.load(f)
 
         if valid_file.exists():
-            with open(valid_file, "r", encoding="utf-8") as f:
+            with open(valid_file, encoding="utf-8") as f:
                 self.valid_data = json.load(f)
 
     def get_questions_by_occupation(
