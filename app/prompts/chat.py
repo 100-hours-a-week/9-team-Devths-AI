@@ -56,6 +56,12 @@ def get_extract_title_prompt() -> str:
     return load_prompt("extract_title")
 
 
+def get_opening_prompt(formatted_analysis: str) -> str:
+    """오프닝 메시지 생성 프롬프트"""
+    template = load_prompt("opening")
+    return template.format(formatted_analysis=formatted_analysis)
+
+
 def get_system_prompt(use_rag: bool = False) -> str:
     """시스템 프롬프트 반환"""
     return get_system_rag_chat() if use_rag else get_system_general_chat()

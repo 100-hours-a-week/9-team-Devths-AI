@@ -10,6 +10,7 @@ from app.prompts.chat import (
     SYSTEM_RAG_CHAT,
     create_rag_prompt,
     get_extract_title_prompt,
+    get_opening_prompt,
     get_system_prompt,
 )
 from app.prompts.interview import (
