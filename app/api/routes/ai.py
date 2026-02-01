@@ -12,6 +12,7 @@ from app.prompts import (
     SYSTEM_INTERVIEW,
     create_interview_question_prompt,
     get_extract_title_prompt,
+    get_opening_prompt,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
@@ -480,6 +481,27 @@ async def text_extract(request: TextExtractRequest):
                 summary=chat_title,
             )
 
+            formatted_text = formatted_text or "분석 결과가 없습니다."
+
+            # 오프닝 메시지 생성 (Gemini) - 대화 시작용
+            logger.info("🤖 오프닝 메시지 생성 시작...")
+            ai_message = ""
+            try:
+                opening_prompt = get_opening_prompt(formatted_text)
+                # Gemini로 오프닝 생성
+                async for chunk in rag.llm.generate_response(
+                    user_message=opening_prompt,
+                    context=None,
+                    history=[],
+                    system_prompt="당신은 도움을 주는 친절한 취업 어시스턴트입니다.",
+                ):
+                    ai_message += chunk
+                logger.info("✅ 오프닝 메시지 생성 완료")
+            except Exception as e:
+                logger.error(f"❌ 오프닝 메시지 생성 실패: {e}")
+                # 실패 시 기본 메시지
+                ai_message = f"안녕하세요! 지원하신 {chat_title or '직무'}에 대한 분석이 완료되었습니다. 결과를 확인하시고 궁금한 점이 있다면 언제든 물어봐주세요!"
+
             task_data["result"] = TextExtractResult(
                 success=True,
                 summary=chat_title or None,
@@ -488,6 +510,7 @@ async def text_extract(request: TextExtractRequest):
                 resume_analysis=analysis_result.get("resume_analysis"),
                 posting_analysis=analysis_result.get("posting_analysis"),
                 formatted_text=formatted_text,
+                ai_message=ai_message,
             ).model_dump()
             task_store.save(task_key, task_data)
 
