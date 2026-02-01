@@ -66,3 +66,8 @@ dist/
 build/
 *.egg-info/
 .eggs/
+
+# Interview Dataset 파일 제외
+data/*.json
+data/interview_*
+
