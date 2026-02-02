@@ -41,8 +41,8 @@ class LLMService:
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
         self.model_name = "gemini-3-pro-preview"  # Changed to gemini-3-pro-preview as requestedw
-        # 분석용 안정 모델 (preview 모델이 불안정할 경우 사용)
-        self.analysis_model = "gemini-2.0-flash"
+        # 분석용 모델 (gemini-3 정책 필수)
+        self.analysis_model = "gemini-3-pro"
 
         logger.info(f"LLM Service initialized with model: {self.model_name}")
 
