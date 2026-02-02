@@ -4,27 +4,44 @@
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
-from app.core.config import settings
+# 프로젝트 루트를 Python 경로에 추가
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# .env 파일 로드
+from dotenv import load_dotenv
+
+load_dotenv(PROJECT_ROOT / ".env")
+
 from app.services.vectordb_service import VectorDBService
 
 
 async def main():
     """면접 데이터셋을 VectorDB에 저장"""
-    print("🚀 면접 데이터셋 VectorDB 임베딩 시작...")
+    print("🚀 면접 데이터셋 VectorDB 임베딩 시작...", flush=True)
 
     # VectorDB 서비스 초기화
+    print("VectorDB 서비스 초기화 중...", flush=True)
     vdb = VectorDBService()
+    print("VectorDB 서비스 초기화 완료", flush=True)
 
-    # 데이터 로드
-    data_dir = Path(settings.BASE_DIR) / "data"
-    train_file = data_dir / "interview_dataset_train.json"
+    # 데이터 로드 (valid 파일 사용 - 9.5MB, 빠른 배포용)
+    data_dir = PROJECT_ROOT / "data"
+    valid_file = data_dir / "interview_dataset_valid.json"
 
-    with open(train_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    # JSONL 형식 (한 줄에 하나의 JSON 객체)
+    print(f"데이터 파일 로드 중: {valid_file}", flush=True)
+    data = []
+    with open(valid_file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                data.append(json.loads(line))
 
-    print(f"📊 총 {len(data)}개의 면접 Q&A 로드")
+    print(f"📊 총 {len(data)}개의 면접 Q&A 로드", flush=True)
 
     # 컬렉션 이름: interview_questions
     collection_name = "interview_questions"
@@ -69,10 +86,10 @@ async def main():
         )
 
         total_added += len(batch)
-        print(f"✅ {total_added}/{len(data)} 임베딩 완료...")
+        print(f"✅ {total_added}/{len(data)} 임베딩 완료...", flush=True)
 
-    print(f"\n🎉 총 {total_added}개의 면접 Q&A가 VectorDB에 저장되었습니다!")
-    print(f"컬렉션: {collection_name}")
+    print(f"\n🎉 총 {total_added}개의 면접 Q&A가 VectorDB에 저장되었습니다!", flush=True)
+    print(f"컬렉션: {collection_name}", flush=True)
 
 
 if __name__ == "__main__":
