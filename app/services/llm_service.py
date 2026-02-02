@@ -224,9 +224,11 @@ class LLMService:
 
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
+            # JSON 모드로 응답 요청
             config = types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=2048,
+                response_mime_type="application/json",
             )
 
             response = self.client.models.generate_content(
@@ -238,13 +240,30 @@ class LLMService:
 
             result_text = response.text
 
-            # Try to find JSON in the response
-            start_idx = result_text.find("{")
-            end_idx = result_text.rfind("}") + 1
+            # JSON 모드이므로 바로 파싱 시도, 실패 시 수동 추출
+            try:
+                parsed = json.loads(result_text)
+            except json.JSONDecodeError:
+                # 코드 블록 제거 후 재시도
+                clean_text = result_text.strip()
+                if clean_text.startswith("```"):
+                    clean_text = (
+                        clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
+                    )
+                if clean_text.endswith("```"):
+                    clean_text = clean_text[:-3]
+                clean_text = clean_text.strip()
 
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = result_text[start_idx:end_idx]
-                parsed = json.loads(json_str)
+                # JSON 추출
+                start_idx = clean_text.find("{")
+                end_idx = clean_text.rfind("}") + 1
+                if start_idx != -1 and end_idx > start_idx:
+                    json_str = clean_text[start_idx:end_idx]
+                    parsed = json.loads(json_str)
+                else:
+                    raise ValueError("No valid JSON found") from None
+
+            if parsed:
                 self._langfuse_trace_and_generation(
                     trace_name="gemini_generate_analysis",
                     generation_name="gemini_analysis",
