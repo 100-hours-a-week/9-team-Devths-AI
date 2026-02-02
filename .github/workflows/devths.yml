@@ -172,7 +172,6 @@ jobs:
           cp pyproject.toml deploy-package/
           cp poetry.lock deploy-package/
           cp appspec.yml deploy-package/
-          cp .env.example deploy-package/
 
           # 브랜치 정보 및 배포 그룹을 포함한 배포 환경 파일 생성
           echo "export DEPLOY_BRANCH=\"${{ github.ref_name }}\"" > deploy-package/.deploy-env
