@@ -198,10 +198,16 @@ class LLMService:
 
         # 텍스트 길이 제한 (너무 길면 Gemini가 응답 못함)
         max_text_len = 4000
-        resume_text_trimmed = resume_text[:max_text_len] if len(resume_text) > max_text_len else resume_text
-        posting_text_trimmed = posting_text[:max_text_len] if len(posting_text) > max_text_len else posting_text
+        resume_text_trimmed = (
+            resume_text[:max_text_len] if len(resume_text) > max_text_len else resume_text
+        )
+        posting_text_trimmed = (
+            posting_text[:max_text_len] if len(posting_text) > max_text_len else posting_text
+        )
 
-        logger.info(f"[분석] 이력서 길이: {len(resume_text_trimmed)}자, 채용공고 길이: {len(posting_text_trimmed)}자")
+        logger.info(
+            f"[분석] 이력서 길이: {len(resume_text_trimmed)}자, 채용공고 길이: {len(posting_text_trimmed)}자"
+        )
 
         # 기본 설정
         config = types.GenerateContentConfig(
@@ -380,7 +386,9 @@ class LLMService:
                         result_text = response.text
 
                 if result_text:
-                    logger.info(f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)")
+                    logger.info(
+                        f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)"
+                    )
                     return result_text
 
                 # 빈 응답 - 프롬프트 피드백 확인
