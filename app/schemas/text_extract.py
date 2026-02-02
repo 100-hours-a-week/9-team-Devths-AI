@@ -130,9 +130,9 @@ class TextExtractRequest(BaseModel):
     job_posting: DocumentInput = Field(..., description="채용공고 입력")
     model: Literal["auto", "gemini", "vllm"] | None = Field(
         "auto",
-        description="OCR 모델 선택 (auto: EasyOCR Primary + Gemini Fallback 권장, "
-        "gemini: Gemini Vision API 전용, vllm: EasyOCR 전용). "
-        "02_OCR_모델_선정.md 기반으로 auto 사용 시 EasyOCR → Gemini 폴백 전략 적용",
+        description="OCR 모델 선택 (auto: CLOVA OCR 우선 + Gemini Fallback, "
+        "gemini: Gemini Vision API 전용, vllm: EasyOCR 전용, GPU 도입 후 사용). "
+        "auto 사용 시 CLOVA → Gemini 폴백 전략 적용",
     )
 
     @validator("resume", "job_posting")
