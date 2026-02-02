@@ -247,7 +247,9 @@ class LLMService:
                 # 코드 블록 제거 후 재시도
                 clean_text = result_text.strip()
                 if clean_text.startswith("```"):
-                    clean_text = clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
+                    clean_text = (
+                        clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
+                    )
                 if clean_text.endswith("```"):
                     clean_text = clean_text[:-3]
                 clean_text = clean_text.strip()
