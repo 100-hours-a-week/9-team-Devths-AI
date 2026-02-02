@@ -376,10 +376,8 @@ class LLMService:
 
                 # response.text로 fallback
                 if not result_text:
-                    try:
+                    with contextlib.suppress(Exception):
                         result_text = response.text
-                    except Exception:
-                        pass
 
                 if result_text:
                     logger.info(f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)")
