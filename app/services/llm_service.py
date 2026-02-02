@@ -185,7 +185,7 @@ class LLMService:
         user_id: str | None = None,
     ) -> dict[str, Any]:
         """
-        Generate resume and job posting analysis
+        Generate resume and job posting analysis (단계별 분할 호출)
 
         Args:
             resume_text: Resume content
@@ -194,65 +194,178 @@ class LLMService:
         Returns:
             Analysis result as dict
         """
+        import json
+
+        # 텍스트 길이 제한 (너무 길면 Gemini가 응답 못함)
+        max_text_len = 4000
+        resume_text_trimmed = resume_text[:max_text_len] if len(resume_text) > max_text_len else resume_text
+        posting_text_trimmed = posting_text[:max_text_len] if len(posting_text) > max_text_len else posting_text
+
+        logger.info(f"[분석] 이력서 길이: {len(resume_text_trimmed)}자, 채용공고 길이: {len(posting_text_trimmed)}자")
+
+        # 기본 설정
+        config = types.GenerateContentConfig(
+            temperature=0.3,
+            max_output_tokens=2048,
+        )
+
+        # 결과 저장용
+        final_result = {
+            "resume_analysis": {"strengths": [], "weaknesses": [], "suggestions": []},
+            "posting_analysis": {
+                "company": "알 수 없음",
+                "position": "알 수 없음",
+                "required_skills": [],
+                "preferred_skills": [],
+            },
+            "matching": {
+                "score": 0,
+                "grade": "F",
+                "matched_skills": [],
+                "missing_skills": [],
+            },
+        }
+
+        # ========== 1단계: 이력서 분석 ==========
         try:
-            prompt = f"""다음 이력서와 채용공고를 분석하여 JSON 형식으로 결과를 제공해주세요.
+            resume_prompt = f"""당신은 취업 컨설턴트입니다. 아래 이력서를 분석해주세요.
 
-이력서:
-{resume_text}
+[이력서]
+{resume_text_trimmed}
 
-채용공고:
-{posting_text}
+아래 JSON 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력하세요:
+{{"strengths": ["강점1", "강점2", "강점3"], "weaknesses": ["약점1", "약점2"], "suggestions": ["제안1", "제안2"]}}"""
 
-다음 JSON 형식으로 분석 결과를 제공해주세요:
-{{
-  "resume_analysis": {{
-    "strengths": ["강점1", "강점2", ...],
-    "weaknesses": ["약점1", "약점2", ...],
-    "suggestions": ["제안1", "제안2", ...]
-  }},
-  "posting_analysis": {{
-    "company": "회사명",
-    "position": "직무",
-    "required_skills": ["필수스킬1", "필수스킬2", ...],
-    "preferred_skills": ["우대스킬1", "우대스킬2", ...]
-  }},
-  "matching": {{
-    "score": 85,
-    "grade": "A",
-    "matched_skills": ["매칭된스킬1", "매칭된스킬2", ...],
-    "missing_skills": ["부족한스킬1", "부족한스킬2", ...]
-  }}
-}}"""
-
-            contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
-
-            # 응답 설정 (JSON 모드 제거 - 호환성 문제로 인해)
-            config = types.GenerateContentConfig(
-                temperature=0.3,
-                max_output_tokens=2048,
+            resume_result = await self._call_gemini_with_retry(
+                prompt=resume_prompt,
+                config=config,
+                step_name="이력서 분석",
             )
 
-            # Extract JSON from response
-            import json
+            if resume_result:
+                parsed = self._parse_json_response(resume_result)
+                if parsed:
+                    final_result["resume_analysis"] = {
+                        "strengths": parsed.get("strengths", []),
+                        "weaknesses": parsed.get("weaknesses", []),
+                        "suggestions": parsed.get("suggestions", []),
+                    }
+                    logger.info("[분석] ✅ 이력서 분석 완료")
+        except Exception as e:
+            logger.warning(f"[분석] 이력서 분석 실패: {e}")
 
-            # 재시도 로직 (최대 3회)
-            max_retries = 3
-            result_text = None
+        # ========== 2단계: 채용공고 분석 ==========
+        try:
+            posting_prompt = f"""당신은 채용 전문가입니다. 아래 채용공고를 분석해주세요.
 
-            for attempt in range(max_retries):
-                # 안정 모델 사용 (preview 모델 불안정 문제 해결)
+[채용공고]
+{posting_text_trimmed}
+
+아래 JSON 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력하세요:
+{{"company": "회사명", "position": "직무/포지션", "required_skills": ["필수역량1", "필수역량2"], "preferred_skills": ["우대사항1", "우대사항2"]}}"""
+
+            posting_result = await self._call_gemini_with_retry(
+                prompt=posting_prompt,
+                config=config,
+                step_name="채용공고 분석",
+            )
+
+            if posting_result:
+                parsed = self._parse_json_response(posting_result)
+                if parsed:
+                    final_result["posting_analysis"] = {
+                        "company": parsed.get("company", "알 수 없음"),
+                        "position": parsed.get("position", "알 수 없음"),
+                        "required_skills": parsed.get("required_skills", []),
+                        "preferred_skills": parsed.get("preferred_skills", []),
+                    }
+                    logger.info("[분석] ✅ 채용공고 분석 완료")
+        except Exception as e:
+            logger.warning(f"[분석] 채용공고 분석 실패: {e}")
+
+        # ========== 3단계: 매칭도 분석 ==========
+        try:
+            # 이력서와 채용공고 분석이 성공한 경우에만 매칭도 분석
+            resume_strengths = final_result["resume_analysis"].get("strengths", [])
+            required_skills = final_result["posting_analysis"].get("required_skills", [])
+
+            if resume_strengths and required_skills:
+                matching_prompt = f"""당신은 취업 매칭 전문가입니다. 이력서 강점과 채용공고 요구사항을 비교해주세요.
+
+[이력서 강점]
+{', '.join(resume_strengths[:5])}
+
+[이력서 약점]
+{', '.join(final_result["resume_analysis"].get("weaknesses", [])[:5])}
+
+[채용공고 필수 역량]
+{', '.join(required_skills[:5])}
+
+[채용공고 우대 사항]
+{', '.join(final_result["posting_analysis"].get("preferred_skills", [])[:5])}
+
+매칭도를 0~100점으로 평가하고, 아래 JSON 형식으로만 응답하세요:
+{{"score": 75, "grade": "B", "matched_skills": ["매칭되는역량1", "매칭되는역량2"], "missing_skills": ["부족한역량1", "부족한역량2"]}}"""
+
+                matching_result = await self._call_gemini_with_retry(
+                    prompt=matching_prompt,
+                    config=config,
+                    step_name="매칭도 분석",
+                )
+
+                if matching_result:
+                    parsed = self._parse_json_response(matching_result)
+                    if parsed:
+                        final_result["matching"] = {
+                            "score": parsed.get("score", 0),
+                            "grade": parsed.get("grade", "F"),
+                            "matched_skills": parsed.get("matched_skills", []),
+                            "missing_skills": parsed.get("missing_skills", []),
+                        }
+                        logger.info("[분석] ✅ 매칭도 분석 완료")
+        except Exception as e:
+            logger.warning(f"[분석] 매칭도 분석 실패: {e}")
+
+        # Langfuse 기록
+        self._langfuse_trace_and_generation(
+            trace_name="gemini_generate_analysis",
+            generation_name="gemini_analysis_multi_step",
+            input_text=f"이력서: {len(resume_text_trimmed)}자, 채용공고: {len(posting_text_trimmed)}자",
+            output_text=json.dumps(final_result, ensure_ascii=False),
+            user_id=user_id,
+            metadata={"temperature": 0.3, "type": "analysis", "multi_step": True},
+        )
+
+        return final_result
+
+    async def _call_gemini_with_retry(
+        self,
+        prompt: str,
+        config: types.GenerateContentConfig,
+        step_name: str,
+        max_retries: int = 3,
+    ) -> str | None:
+        """Gemini API 호출 (재시도 로직 포함)"""
+        contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+
+        for attempt in range(max_retries):
+            try:
                 response = self.client.models.generate_content(
                     model=self.analysis_model, contents=contents, config=config
                 )
 
-                # 응답 상태 확인
+                # 응답 텍스트 추출
+                result_text = None
+
+                # candidates에서 추출 시도
                 if hasattr(response, "candidates") and response.candidates:
                     candidate = response.candidates[0]
+
                     # finish_reason 확인
                     if hasattr(candidate, "finish_reason"):
-                        logger.info(f"[분석] 응답 finish_reason: {candidate.finish_reason}")
+                        logger.debug(f"[{step_name}] finish_reason: {candidate.finish_reason}")
 
-                    # 텍스트 추출 시도
+                    # content.parts에서 텍스트 추출
                     if (
                         hasattr(candidate, "content")
                         and candidate.content
@@ -260,119 +373,65 @@ class LLMService:
                         and candidate.content.parts
                     ):
                         result_text = candidate.content.parts[0].text
-                        if result_text:
-                            logger.info(f"[분석] 응답 길이: {len(result_text)}자")
-                            break
 
-                # response.text 시도 (fallback)
+                # response.text로 fallback
                 if not result_text:
                     try:
                         result_text = response.text
-                        if result_text:
-                            break
-                    except Exception as e:
-                        logger.warning(f"[분석] response.text 접근 실패: {e}")
+                    except Exception:
+                        pass
 
-                # 실패 시 로깅
-                logger.warning(f"[분석] 시도 {attempt + 1}/{max_retries} 실패 - 빈 응답")
+                if result_text:
+                    logger.info(f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)")
+                    return result_text
 
-                # 프롬프트 피드백 확인
+                # 빈 응답 - 프롬프트 피드백 확인
                 if hasattr(response, "prompt_feedback"):
-                    logger.warning(f"[분석] prompt_feedback: {response.prompt_feedback}")
+                    logger.warning(f"[{step_name}] prompt_feedback: {response.prompt_feedback}")
 
-            # 최종 None 체크
-            if not result_text:
-                logger.error("[분석] 3회 재시도 후에도 빈 응답")
-                fallback = {
-                    "resume_analysis": {
-                        "strengths": [
-                            "분석 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요."
-                        ],
-                        "weaknesses": [],
-                        "suggestions": [],
-                    },
-                    "posting_analysis": {
-                        "company": "알 수 없음",
-                        "position": "알 수 없음",
-                        "required_skills": [],
-                        "preferred_skills": [],
-                    },
-                    "matching": {
-                        "score": 0,
-                        "grade": "F",
-                        "matched_skills": [],
-                        "missing_skills": [],
-                    },
-                }
-                return fallback
+                logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 실패 - 빈 응답")
 
-            # JSON 모드이므로 바로 파싱 시도, 실패 시 수동 추출
+            except Exception as e:
+                logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 예외: {e}")
+
+        logger.error(f"[{step_name}] {max_retries}회 재시도 후에도 실패")
+        return None
+
+    def _parse_json_response(self, text: str) -> dict | None:
+        """JSON 응답 파싱 (코드블록 처리 포함)"""
+        import json
+
+        if not text:
+            return None
+
+        try:
+            # 먼저 바로 파싱 시도
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # 코드 블록 제거
+        clean_text = text.strip()
+        if clean_text.startswith("```"):
+            # ```json 또는 ``` 제거
+            clean_text = clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
+        if clean_text.endswith("```"):
+            clean_text = clean_text[:-3]
+        clean_text = clean_text.strip()
+
+        # JSON 추출
+        start_idx = clean_text.find("{")
+        end_idx = clean_text.rfind("}") + 1
+
+        if start_idx != -1 and end_idx > start_idx:
+            json_str = clean_text[start_idx:end_idx]
             try:
-                parsed = json.loads(result_text)
-            except json.JSONDecodeError:
-                # 코드 블록 제거 후 재시도
-                clean_text = result_text.strip()
-                if clean_text.startswith("```"):
-                    clean_text = (
-                        clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
-                    )
-                if clean_text.endswith("```"):
-                    clean_text = clean_text[:-3]
-                clean_text = clean_text.strip()
+                return json.loads(json_str)
+            except json.JSONDecodeError as e:
+                logger.warning(f"JSON 파싱 실패: {e}")
+                return None
 
-                # JSON 추출
-                start_idx = clean_text.find("{")
-                end_idx = clean_text.rfind("}") + 1
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = clean_text[start_idx:end_idx]
-                    parsed = json.loads(json_str)
-                else:
-                    raise ValueError("No valid JSON found") from None
-
-            if parsed:
-                self._langfuse_trace_and_generation(
-                    trace_name="gemini_generate_analysis",
-                    generation_name="gemini_analysis",
-                    input_text=prompt,
-                    output_text=result_text,
-                    user_id=user_id,
-                    metadata={"temperature": 0.3, "type": "analysis"},
-                )
-                return parsed
-            else:
-                logger.error("No JSON found in analysis response")
-                fallback = {
-                    "resume_analysis": {
-                        "strengths": ["분석 결과를 파싱할 수 없습니다"],
-                        "weaknesses": [],
-                        "suggestions": [],
-                    },
-                    "posting_analysis": {
-                        "company": "알 수 없음",
-                        "position": "알 수 없음",
-                        "required_skills": [],
-                        "preferred_skills": [],
-                    },
-                    "matching": {
-                        "score": 0,
-                        "grade": "F",
-                        "matched_skills": [],
-                        "missing_skills": [],
-                    },
-                }
-                self._langfuse_trace_and_generation(
-                    trace_name="gemini_generate_analysis",
-                    generation_name="gemini_analysis",
-                    input_text=prompt,
-                    output_text=result_text,
-                    user_id=user_id,
-                    metadata={"temperature": 0.3, "type": "analysis", "parsed": False},
-                )
-                return fallback
-
-        except Exception as e:
-            logger.error(f"Error generating analysis: {e}")
-            raise
+        return None
 
     async def generate_interview_question(
         self,
