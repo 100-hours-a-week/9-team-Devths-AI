@@ -41,6 +41,8 @@ class LLMService:
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
         self.model_name = "gemini-3-pro-preview"  # Changed to gemini-3-pro-preview as requestedw
+        # 분석용 모델 (gemini-3 정책 필수)
+        self.analysis_model = "gemini-3-pro"
 
         logger.info(f"LLM Service initialized with model: {self.model_name}")
 
@@ -230,21 +232,62 @@ class LLMService:
                 max_output_tokens=2048,
             )
 
-            response = self.client.models.generate_content(
-                model=self.model_name, contents=contents, config=config
-            )
-
             # Extract JSON from response
             import json
 
-            result_text = response.text
+            # 재시도 로직 (최대 3회)
+            max_retries = 3
+            result_text = None
 
-            # None 체크 - Gemini가 빈 응답을 반환한 경우
+            for attempt in range(max_retries):
+                # 안정 모델 사용 (preview 모델 불안정 문제 해결)
+                response = self.client.models.generate_content(
+                    model=self.analysis_model, contents=contents, config=config
+                )
+
+                # 응답 상태 확인
+                if hasattr(response, "candidates") and response.candidates:
+                    candidate = response.candidates[0]
+                    # finish_reason 확인
+                    if hasattr(candidate, "finish_reason"):
+                        logger.info(f"[분석] 응답 finish_reason: {candidate.finish_reason}")
+
+                    # 텍스트 추출 시도
+                    if (
+                        hasattr(candidate, "content")
+                        and candidate.content
+                        and hasattr(candidate.content, "parts")
+                        and candidate.content.parts
+                    ):
+                        result_text = candidate.content.parts[0].text
+                        if result_text:
+                            logger.info(f"[분석] 응답 길이: {len(result_text)}자")
+                            break
+
+                # response.text 시도 (fallback)
+                if not result_text:
+                    try:
+                        result_text = response.text
+                        if result_text:
+                            break
+                    except Exception as e:
+                        logger.warning(f"[분석] response.text 접근 실패: {e}")
+
+                # 실패 시 로깅
+                logger.warning(f"[분석] 시도 {attempt + 1}/{max_retries} 실패 - 빈 응답")
+
+                # 프롬프트 피드백 확인
+                if hasattr(response, "prompt_feedback"):
+                    logger.warning(f"[분석] prompt_feedback: {response.prompt_feedback}")
+
+            # 최종 None 체크
             if not result_text:
-                logger.error("Gemini returned empty response for analysis")
+                logger.error("[분석] 3회 재시도 후에도 빈 응답")
                 fallback = {
                     "resume_analysis": {
-                        "strengths": ["Gemini 응답이 비어있습니다. 다시 시도해주세요."],
+                        "strengths": [
+                            "분석 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도해주세요."
+                        ],
                         "weaknesses": [],
                         "suggestions": [],
                     },
