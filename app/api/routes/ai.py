@@ -1039,16 +1039,21 @@ async def generate_chat_stream(request: ChatRequest):
             )
 
             # 면접 질문 생성 프롬프트 (prompts 모듈 사용)
-            # context에서 resume_ocr, job_posting_ocr 사용
+            # context에서 resume_ocr, job_posting_ocr, asked_questions(반복 방지) 사용
             resume_ocr = request.context.resume_ocr if request.context else None
             job_posting_ocr = request.context.job_posting_ocr if request.context else None
+            raw_asked = (
+                getattr(request.context, "asked_questions", None) if request.context else None
+            )
+            asked_questions = list(raw_asked) if raw_asked else None
 
             if resume_ocr or job_posting_ocr or context:
-                # 컨텍스트가 있으면 맞춤형 질문 생성
+                # 컨텍스트가 있으면 맞춤형 질문 생성 (이미 한 질문 목록 전달로 반복 방지)
                 question_prompt = create_interview_question_prompt(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
                     interview_type=interview_type,
+                    asked_questions=asked_questions,
                 )
             else:
                 question_prompt = f"일반적인 {interview_type_kr} 면접 질문 1개를 짧게 생성해주세요:"
