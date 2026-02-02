@@ -63,13 +63,25 @@ def create_analysis_prompt(resume_text: str, job_posting_text: str) -> str:
 
 
 def create_interview_question_prompt(
-    resume_text: str, job_posting_text: str, interview_type: str = "technical"
+    resume_text: str,
+    job_posting_text: str,
+    interview_type: str = "technical",
+    asked_questions: list[str] | None = None,
 ) -> str:
-    """면접 질문 생성 프롬프트"""
+    """면접 질문 생성 프롬프트 (asked_questions: 이미 한 질문 목록, 반복 방지용)"""
     interview_type_kr = "기술" if interview_type == "technical" else "인성"
+    if asked_questions:
+        asked_questions_section = "\n## 이미 한 질문 목록 (아래와 겹치지 않는 새 질문만 생성)\n" + "\n".join(
+            f"- {q}" for q in asked_questions
+        )
+    else:
+        asked_questions_section = ""
     template = load_prompt("interview_question")
     return template.format(
-        resume_text=resume_text, job_posting_text=job_posting_text, interview_type=interview_type_kr
+        resume_text=resume_text,
+        job_posting_text=job_posting_text,
+        interview_type=interview_type_kr,
+        asked_questions_section=asked_questions_section,
     )
 
 

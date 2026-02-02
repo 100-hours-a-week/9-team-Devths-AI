@@ -64,6 +64,9 @@ class ChatContext(BaseModel):
     # 면접 모드
     interview_type: str | None = Field(None, description="면접 유형 (behavior/tech)")
     question_count: int | None = Field(None, description="현재까지 생성된 질문 수")
+    asked_questions: list[str] | None = Field(
+        None, description="이미 했던 질문 목록 (반복 방지, 새 질문 생성 시 전달)"
+    )
 
     # 리포트 모드
     qa_list: list[dict] | None = Field(None, description="Q&A 목록 (리포트 생성 시)")
@@ -154,6 +157,7 @@ class ChatRequest(BaseModel):
                             "job_posting_ocr": "채용공고 OCR 텍스트",
                             "interview_type": "behavior",
                             "question_count": 3,
+                            "asked_questions": ["자기소개 해주세요", "프로젝트 경험을 말씀해주세요"],
                         },
                     },
                 },
