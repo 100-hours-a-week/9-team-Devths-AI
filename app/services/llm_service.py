@@ -259,7 +259,7 @@ class LLMService:
                     json_str = clean_text[start_idx:end_idx]
                     parsed = json.loads(json_str)
                 else:
-                    raise ValueError("No valid JSON found")
+                    raise ValueError("No valid JSON found") from None
 
             if parsed:
                 self._langfuse_trace_and_generation(
