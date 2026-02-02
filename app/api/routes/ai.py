@@ -344,7 +344,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
             logger.info(f"{'='*80}")
             logger.info(
-                f"📌 OCR 전략: {'EasyOCR Primary + Gemini Fallback' if model == 'auto' else model.upper()}"
+                f"📌 OCR 전략: {'GEMINI (V1 Temporary)' if model == 'auto' else model.upper()}"
             )
             logger.info(f"📌 사용자 ID: {request.user_id}")
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
@@ -365,16 +365,15 @@ async def text_extract(request: TextExtractRequest):
                     safe_s3_key = sanitize_log_input(doc_input.s3_key)
                     logger.info("   → S3 키: %s", safe_s3_key)
 
-                    # OCRService 사용 (EasyOCR Primary + Gemini Fallback)
-                    # 02_OCR_모델_선정.md 기반: EasyOCR(무료/빠름) → Gemini(고정확도) 폴백
-                    logger.info("   🔍 [OCRService] EasyOCR Primary + Gemini Fallback 시작")
+                    # OCRService: CLOVA OCR 우선 → Gemini Fallback (EasyOCR는 GPU 인스턴스 없음으로 미사용)
+                    logger.info("   🔍 [OCRService] CLOVA OCR 우선 → Gemini Fallback 시작")
                     ocr_result = await rag.ocr.extract_text(
                         file_url=str(doc_input.s3_key),
                         file_type=file_type,
                         user_id=str(request.user_id),
                         fallback_enabled=True,
                     )
-                    ocr_engine = ocr_result.get("ocr_engine", "unknown")
+                    ocr_engine = ocr_result.get("ocr_engine") or "gemini"
                     fallback_reason = ocr_result.get("fallback_reason")
                     extracted_text = ocr_result.get("extracted_text", "")
                     pages = [PageText(**page) for page in ocr_result.get("pages", [])]
