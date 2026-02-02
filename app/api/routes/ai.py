@@ -422,6 +422,7 @@ async def text_extract(request: TextExtractRequest):
             # 분석 리포트 생성 (명세서 요구사항)
             logger.info("")
             logger.info("📊 분석 리포트 생성 시작...")
+            analysis_failed = False
             try:
                 analysis_result = await rag.llm.generate_analysis(
                     resume_text=resume_result.extracted_text,
@@ -430,7 +431,12 @@ async def text_extract(request: TextExtractRequest):
                 )
                 logger.info("✅ 분석 리포트 생성 완료")
             except Exception as e:
-                logger.warning(f"⚠️ 분석 리포트 생성 실패: {e} (OCR 텍스트만 반환)")
+                analysis_failed = True
+                logger.warning(
+                    "⚠️ 분석 리포트 생성 실패 (오프닝 메시지에 분석 내용이 비어 보일 수 있음): %s",
+                    e,
+                    exc_info=True,
+                )
                 analysis_result = {
                     "resume_analysis": {"strengths": [], "weaknesses": [], "suggestions": []},
                     "posting_analysis": {
@@ -438,6 +444,12 @@ async def text_extract(request: TextExtractRequest):
                         "position": "알 수 없음",
                         "required_skills": [],
                         "preferred_skills": [],
+                    },
+                    "matching": {
+                        "score": 0,
+                        "grade": "F",
+                        "matched_skills": [],
+                        "missing_skills": [],
                     },
                 }
 
@@ -479,8 +491,12 @@ async def text_extract(request: TextExtractRequest):
                 posting_analysis=analysis_result.get("posting_analysis"),
                 summary=chat_title,
             )
-
             formatted_text = formatted_text or "분석 결과가 없습니다."
+            if analysis_failed:
+                formatted_text += (
+                    "\n\n(상세 분석이 일시적으로 반영되지 않았습니다. "
+                    "이력서·채용공고 텍스트는 저장되었으니, 궁금한 점을 질문해 주세요.)"
+                )
 
             # 오프닝 메시지 생성 (Gemini) - 대화 시작용
             logger.info("🤖 오프닝 메시지 생성 시작...")
