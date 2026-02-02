@@ -62,6 +62,14 @@ def create_analysis_prompt(resume_text: str, job_posting_text: str) -> str:
     return template.format(resume_text=resume_text, job_posting_text=job_posting_text)
 
 
+def load_question_examples(interview_type: str) -> str:
+    """면접 유형에 맞는 질문 예시 로드"""
+    if interview_type == "technical":
+        return load_prompt("technical_questions")
+    else:
+        return load_prompt("personality_questions")
+
+
 def create_interview_question_prompt(
     resume_text: str,
     job_posting_text: str,
@@ -78,11 +86,13 @@ def create_interview_question_prompt(
     else:
         asked_questions_section = ""
     template = load_prompt("interview_question")
+    question_examples = load_question_examples(interview_type)
     return template.format(
         resume_text=resume_text,
         job_posting_text=job_posting_text,
         interview_type=interview_type_kr,
         asked_questions_section=asked_questions_section,
+        question_examples=question_examples,
     )
 
 
