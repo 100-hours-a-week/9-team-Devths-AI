@@ -224,11 +224,10 @@ class LLMService:
 
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
-            # JSON 모드로 응답 요청
+            # 응답 설정 (JSON 모드 제거 - 호환성 문제로 인해)
             config = types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=2048,
-                response_mime_type="application/json",
             )
 
             response = self.client.models.generate_content(
