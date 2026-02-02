@@ -71,8 +71,9 @@ def create_interview_question_prompt(
     """면접 질문 생성 프롬프트 (asked_questions: 이미 한 질문 목록, 반복 방지용)"""
     interview_type_kr = "기술" if interview_type == "technical" else "인성"
     if asked_questions:
-        asked_questions_section = "\n## 이미 한 질문 목록 (아래와 겹치지 않는 새 질문만 생성)\n" + "\n".join(
-            f"- {q}" for q in asked_questions
+        asked_questions_section = (
+            "\n## 이미 한 질문 목록 (아래와 겹치지 않는 새 질문만 생성)\n"
+            + "\n".join(f"- {q}" for q in asked_questions)
         )
     else:
         asked_questions_section = ""

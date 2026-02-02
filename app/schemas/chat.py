@@ -157,7 +157,10 @@ class ChatRequest(BaseModel):
                             "job_posting_ocr": "채용공고 OCR 텍스트",
                             "interview_type": "behavior",
                             "question_count": 3,
-                            "asked_questions": ["자기소개 해주세요", "프로젝트 경험을 말씀해주세요"],
+                            "asked_questions": [
+                                "자기소개 해주세요",
+                                "프로젝트 경험을 말씀해주세요",
+                            ],
                         },
                     },
                 },

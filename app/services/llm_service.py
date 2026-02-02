@@ -40,7 +40,7 @@ class LLMService:
 
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-3-flash-preview"  # Fixed: use gemini-3-flash-preview
+        self.model_name = "gemini-3-pro-preview"  # Changed to gemini-3-pro-preview as requestedw
 
         logger.info(f"LLM Service initialized with model: {self.model_name}")
 
