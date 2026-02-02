@@ -240,6 +240,30 @@ class LLMService:
 
             result_text = response.text
 
+            # None 체크 - Gemini가 빈 응답을 반환한 경우
+            if not result_text:
+                logger.error("Gemini returned empty response for analysis")
+                fallback = {
+                    "resume_analysis": {
+                        "strengths": ["Gemini 응답이 비어있습니다. 다시 시도해주세요."],
+                        "weaknesses": [],
+                        "suggestions": [],
+                    },
+                    "posting_analysis": {
+                        "company": "알 수 없음",
+                        "position": "알 수 없음",
+                        "required_skills": [],
+                        "preferred_skills": [],
+                    },
+                    "matching": {
+                        "score": 0,
+                        "grade": "F",
+                        "matched_skills": [],
+                        "missing_skills": [],
+                    },
+                }
+                return fallback
+
             # JSON 모드이므로 바로 파싱 시도, 실패 시 수동 추출
             try:
                 parsed = json.loads(result_text)
