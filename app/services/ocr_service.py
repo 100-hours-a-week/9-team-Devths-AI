@@ -230,7 +230,7 @@ class OCRService:
                 "pages": [],
             }
 
-    def _image_to_bytes(self, image: Image.Image, name: str) -> tuple[bytes, str]:
+    def _image_to_bytes(self, image: Image.Image, _name: str) -> tuple[bytes, str]:
         """PIL Image를 JPEG/PNG bytes와 format 문자열로 반환 (CLOVA: jpg | png)"""
         buf = io.BytesIO()
         if image.mode in ("RGBA", "P"):
