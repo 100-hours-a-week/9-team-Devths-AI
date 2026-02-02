@@ -192,143 +192,98 @@ class LLMService:
         Returns:
             Analysis result as dict
         """
-        import json
-
         try:
-            # 이력서/채용공고 텍스트 길이 제한 (토큰 오버플로우 방지)
-            max_text_len = 4000
-            resume_text_truncated = resume_text[:max_text_len] if resume_text else ""
-            posting_text_truncated = posting_text[:max_text_len] if posting_text else ""
+            prompt = f"""다음 이력서와 채용공고를 분석하여 JSON 형식으로 결과를 제공해주세요.
 
-            prompt = f"""당신은 이력서와 채용공고를 분석하는 전문가입니다.
-아래 이력서와 채용공고를 분석하여 반드시 JSON 형식으로만 응답해주세요.
+이력서:
+{resume_text}
 
-## 이력서
-{resume_text_truncated}
+채용공고:
+{posting_text}
 
-## 채용공고
-{posting_text_truncated}
-
-## 응답 형식 (반드시 이 JSON 구조로 응답)
+다음 JSON 형식으로 분석 결과를 제공해주세요:
 {{
   "resume_analysis": {{
-    "strengths": ["강점1", "강점2", "강점3", "강점4", "강점5"],
-    "weaknesses": ["약점1", "약점2", "약점3", "약점4", "약점5"],
-    "suggestions": ["제안1", "제안2", "제안3"]
+    "strengths": ["강점1", "강점2", ...],
+    "weaknesses": ["약점1", "약점2", ...],
+    "suggestions": ["제안1", "제안2", ...]
   }},
   "posting_analysis": {{
     "company": "회사명",
-    "position": "직무명",
-    "required_skills": ["필수스킬1", "필수스킬2", "필수스킬3"],
-    "preferred_skills": ["우대스킬1", "우대스킬2", "우대스킬3"]
+    "position": "직무",
+    "required_skills": ["필수스킬1", "필수스킬2", ...],
+    "preferred_skills": ["우대스킬1", "우대스킬2", ...]
   }},
   "matching": {{
-    "score": 75,
-    "grade": "B",
-    "matched_skills": ["매칭스킬1", "매칭스킬2", "매칭스킬3"],
-    "missing_skills": ["부족스킬1", "부족스킬2", "부족스킬3"]
+    "score": 85,
+    "grade": "A",
+    "matched_skills": ["매칭된스킬1", "매칭된스킬2", ...],
+    "missing_skills": ["부족한스킬1", "부족한스킬2", ...]
   }}
-}}
-
-중요:
-- 반드시 위 JSON 형식으로만 응답하세요
-- JSON 외의 텍스트는 절대 포함하지 마세요
-- 마크다운 코드 블록(```)을 사용하지 마세요
-- 각 배열은 최소 3개, 최대 5개 항목을 포함하세요"""
+}}"""
 
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
-            # Gemini JSON 모드 사용 - 응답이 항상 유효한 JSON임을 보장
             config = types.GenerateContentConfig(
                 temperature=0.3,
                 max_output_tokens=2048,
-                response_mime_type="application/json",  # JSON 모드 활성화
             )
 
             response = self.client.models.generate_content(
                 model=self.model_name, contents=contents, config=config
             )
 
+            # Extract JSON from response
+            import json
+
             result_text = response.text
-            logger.info(f"Analysis response length: {len(result_text)} chars")
 
-            # JSON 모드를 사용하면 응답이 항상 JSON이지만, 방어적 파싱 수행
-            try:
-                # JSON 모드 응답은 직접 파싱 가능
-                parsed = json.loads(result_text)
-                logger.info("Analysis JSON parsed successfully (JSON mode)")
-            except json.JSONDecodeError:
-                # Fallback: JSON을 텍스트에서 추출 시도
-                logger.warning("Direct JSON parse failed, trying extraction...")
-                start_idx = result_text.find("{")
-                end_idx = result_text.rfind("}") + 1
+            # Try to find JSON in the response
+            start_idx = result_text.find("{")
+            end_idx = result_text.rfind("}") + 1
 
-                if start_idx != -1 and end_idx > start_idx:
-                    json_str = result_text[start_idx:end_idx]
-                    parsed = json.loads(json_str)
-                    logger.info("Analysis JSON extracted and parsed successfully")
-                else:
-                    raise ValueError("No valid JSON found in response") from None
-
-            # 필수 필드 검증 및 기본값 설정
-            if "resume_analysis" not in parsed:
-                parsed["resume_analysis"] = {"strengths": [], "weaknesses": [], "suggestions": []}
-            if "posting_analysis" not in parsed:
-                parsed["posting_analysis"] = {
-                    "company": "알 수 없음",
-                    "position": "알 수 없음",
-                    "required_skills": [],
-                    "preferred_skills": [],
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = result_text[start_idx:end_idx]
+                parsed = json.loads(json_str)
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_analysis",
+                    generation_name="gemini_analysis",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={"temperature": 0.3, "type": "analysis"},
+                )
+                return parsed
+            else:
+                logger.error("No JSON found in analysis response")
+                fallback = {
+                    "resume_analysis": {
+                        "strengths": ["분석 결과를 파싱할 수 없습니다"],
+                        "weaknesses": [],
+                        "suggestions": [],
+                    },
+                    "posting_analysis": {
+                        "company": "알 수 없음",
+                        "position": "알 수 없음",
+                        "required_skills": [],
+                        "preferred_skills": [],
+                    },
+                    "matching": {
+                        "score": 0,
+                        "grade": "F",
+                        "matched_skills": [],
+                        "missing_skills": [],
+                    },
                 }
-            if "matching" not in parsed:
-                parsed["matching"] = {
-                    "score": 0,
-                    "grade": "N/A",
-                    "matched_skills": [],
-                    "missing_skills": [],
-                }
-
-            self._langfuse_trace_and_generation(
-                trace_name="gemini_generate_analysis",
-                generation_name="gemini_analysis",
-                input_text=prompt,
-                output_text=result_text,
-                user_id=user_id,
-                metadata={"temperature": 0.3, "type": "analysis", "parsed": True},
-            )
-            return parsed
-
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing error in analysis: {e}")
-            logger.error(f"Raw response: {result_text[:500]}...")
-            fallback = {
-                "resume_analysis": {
-                    "strengths": ["분석 결과를 파싱할 수 없습니다"],
-                    "weaknesses": [],
-                    "suggestions": [],
-                },
-                "posting_analysis": {
-                    "company": "알 수 없음",
-                    "position": "알 수 없음",
-                    "required_skills": [],
-                    "preferred_skills": [],
-                },
-                "matching": {
-                    "score": 0,
-                    "grade": "F",
-                    "matched_skills": [],
-                    "missing_skills": [],
-                },
-            }
-            self._langfuse_trace_and_generation(
-                trace_name="gemini_generate_analysis",
-                generation_name="gemini_analysis",
-                input_text=prompt if "prompt" in dir() else "prompt not available",
-                output_text=result_text if "result_text" in dir() else "response not available",
-                user_id=user_id,
-                metadata={"temperature": 0.3, "type": "analysis", "parsed": False, "error": str(e)},
-            )
-            return fallback
+                self._langfuse_trace_and_generation(
+                    trace_name="gemini_generate_analysis",
+                    generation_name="gemini_analysis",
+                    input_text=prompt,
+                    output_text=result_text,
+                    user_id=user_id,
+                    metadata={"temperature": 0.3, "type": "analysis", "parsed": False},
+                )
+                return fallback
 
         except Exception as e:
             logger.error(f"Error generating analysis: {e}")
