@@ -1158,7 +1158,7 @@ async def generate_chat_stream(request: ChatRequest):
                             greeting = f"안녕하세요! {interview_type_kr} 면접을 시작하겠습니다. 총 5개의 주제에 대해 질문드릴 예정입니다.{newline}{newline}"
                             yield f"data: {json.dumps({'chunk': greeting}, ensure_ascii=False)}{sse_end}"
 
-                            question_text = f"첫 번째 질문입니다. [{first_q.category_name}]{newline}{first_q.question}"
+                            question_text = f"[{first_q.category_name}]{newline}{first_q.question}"
                             yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
 
                             # 세션 상태 전달 (메타데이터로)
