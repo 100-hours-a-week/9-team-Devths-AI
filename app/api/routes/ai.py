@@ -1158,7 +1158,9 @@ async def generate_chat_stream(request: ChatRequest):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.error(f"질문 세트 파싱 실패: {e}")
                     # 폴백: 기존 방식으로 단일 질문 생성
-                    fallback_msg = "면접 질문 세트 생성 중 오류가 발생했습니다. 기본 질문으로 시작합니다."
+                    fallback_msg = (
+                        "면접 질문 세트 생성 중 오류가 발생했습니다. 기본 질문으로 시작합니다."
+                    )
                     yield f"data: {json.dumps({'chunk': fallback_msg}, ensure_ascii=False)}{sse_end}"
 
                 yield f"data: [DONE]{sse_end}"
@@ -1168,9 +1170,7 @@ async def generate_chat_stream(request: ChatRequest):
             # ===================================================================
             elif session.phase in ["questioning", "followup"]:
                 current_q_id = session.current_question_id
-                current_q = next(
-                    (q for q in session.questions if q.id == current_q_id), None
-                )
+                current_q = next((q for q in session.questions if q.id == current_q_id), None)
 
                 if not current_q:
                     yield f"data: {json.dumps({'chunk': '세션 오류: 현재 질문을 찾을 수 없습니다.'}, ensure_ascii=False)}{sse_end}"
@@ -1178,10 +1178,12 @@ async def generate_chat_stream(request: ChatRequest):
                     return
 
                 # 지원자 답변을 대화 이력에 추가
-                current_q.conversation.append({
-                    "role": "candidate",
-                    "content": user_message,
-                })
+                current_q.conversation.append(
+                    {
+                        "role": "candidate",
+                        "content": user_message,
+                    }
+                )
                 current_q.current_depth += 1
 
                 # 꼬리질문 생성 여부 판단 (최대 3 depths)
@@ -1224,13 +1226,17 @@ async def generate_chat_stream(request: ChatRequest):
                         if json_start != -1 and json_end > json_start:
                             followup_data = json.loads(full_response[json_start:json_end])
 
-                            if followup_data.get("should_continue", True) and followup_data.get("followup"):
+                            if followup_data.get("should_continue", True) and followup_data.get(
+                                "followup"
+                            ):
                                 # 꼬리질문 출력
                                 followup_q = followup_data["followup"]["question"]
-                                current_q.conversation.append({
-                                    "role": "interviewer",
-                                    "content": followup_q,
-                                })
+                                current_q.conversation.append(
+                                    {
+                                        "role": "interviewer",
+                                        "content": followup_q,
+                                    }
+                                )
                                 session.phase = "followup"
 
                                 yield f"data: {json.dumps({'chunk': followup_q}, ensure_ascii=False)}{sse_end}"
@@ -1249,9 +1255,7 @@ async def generate_chat_stream(request: ChatRequest):
                 if current_q.is_completed:
                     next_q_id = current_q_id + 1
                     if next_q_id <= session.total_questions:
-                        next_q = next(
-                            (q for q in session.questions if q.id == next_q_id), None
-                        )
+                        next_q = next((q for q in session.questions if q.id == next_q_id), None)
                         if next_q:
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
@@ -1262,10 +1266,12 @@ async def generate_chat_stream(request: ChatRequest):
                             question_text = f"[{next_q.category_name}]{newline}{next_q.question}"
                             yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
 
-                            next_q.conversation.append({
-                                "role": "interviewer",
-                                "content": next_q.question,
-                            })
+                            next_q.conversation.append(
+                                {
+                                    "role": "interviewer",
+                                    "content": next_q.question,
+                                }
+                            )
                     else:
                         # 모든 질문 완료
                         session.phase = "completed"

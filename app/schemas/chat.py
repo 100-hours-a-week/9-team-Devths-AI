@@ -110,9 +110,7 @@ class InterviewSession(BaseModel):
     interview_type: str = Field(default="tech", description="면접 유형 (tech/behavior)")
 
     # 5개 질문 세트
-    questions: list[InterviewQuestionState] = Field(
-        default=[], description="5개 질문 세트"
-    )
+    questions: list[InterviewQuestionState] = Field(default=[], description="5개 질문 세트")
 
     # 현재 진행 상태
     current_question_id: int = Field(default=1, description="현재 진행 중인 질문 ID (1-5)")
