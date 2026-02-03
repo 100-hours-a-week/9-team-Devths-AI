@@ -9,24 +9,20 @@ from fastapi import APIRouter, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.prompts import (
-    SYSTEM_INTERVIEW,
-    create_interview_question_prompt,
+    create_tech_followup_prompt,
+    create_tech_interview_init_prompt,
+    format_conversation_history,
     get_extract_title_prompt,
     get_opening_prompt,
     # 기술 면접 5단계 프롬프트
     get_system_tech_interview,
-    create_tech_interview_init_prompt,
-    create_tech_followup_prompt,
-    create_tech_next_question_prompt,
-    format_conversation_history,
-    format_completed_questions,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
-    InterviewSession,
     InterviewQuestionState,
+    InterviewSession,
 )
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
 from app.schemas.text_extract import (
@@ -684,22 +680,8 @@ async def get_task_status(task_id: str):
 
 
 # ============================================================================
-# 면접 헬퍼 함수
+# API 2: 채팅 (통합: 대화/분석/면접) (스트리밍)
 # ============================================================================
-
-
-async def _move_to_next_question(
-    session: InterviewSession,
-    current_q_id: int,
-    rag,
-    model_choice: str,
-    user_id: int,
-    newline: str,
-):
-    """다음 질문으로 이동하는 헬퍼 함수 (내부 사용)"""
-    # 이 함수는 현재 generator 내에서 직접 처리하므로 사용하지 않음
-    # 추후 복잡한 로직이 필요할 때 확장 가능
-    pass
 
 
 # ============================================================================
@@ -1255,9 +1237,6 @@ async def generate_chat_stream(request: ChatRequest):
                             else:
                                 # 다음 주제로 이동
                                 current_q.is_completed = True
-                                await _move_to_next_question(
-                                    session, current_q_id, rag, model_choice, request.user_id, newline
-                                )
                     except json.JSONDecodeError:
                         # 파싱 실패 시 다음 질문으로 이동
                         current_q.is_completed = True
@@ -1276,12 +1255,6 @@ async def generate_chat_stream(request: ChatRequest):
                         if next_q:
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
-
-                            # 완료된 질문들 정리
-                            completed = [
-                                {"id": q.id, "category_name": q.category_name, "question": q.question}
-                                for q in session.questions if q.is_completed
-                            ]
 
                             transition = f"{newline}{newline}네, 잘 알겠습니다. 다음 질문으로 넘어가겠습니다.{newline}{newline}"
                             yield f"data: {json.dumps({'chunk': transition}, ensure_ascii=False)}{sse_end}"
