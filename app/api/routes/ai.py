@@ -1111,11 +1111,24 @@ async def generate_chat_stream(request: ChatRequest):
 
                 # JSON 파싱하여 세션 생성
                 try:
-                    # JSON 부분만 추출
-                    json_start = full_response.find("{")
-                    json_end = full_response.rfind("}") + 1
+                    # 마크다운 코드블록 제거 및 JSON 추출
+                    import re
+
+                    # ```json ... ``` 형식 제거
+                    json_content = re.sub(r"```json\s*", "", full_response)
+                    json_content = re.sub(r"```\s*$", "", json_content)
+                    json_content = json_content.strip()
+
+                    # JSON 부분만 추출 (중괄호 기준)
+                    json_start = json_content.find("{")
+                    json_end = json_content.rfind("}") + 1
+
                     if json_start != -1 and json_end > json_start:
-                        json_str = full_response[json_start:json_end]
+                        json_str = json_content[json_start:json_end]
+
+                        # 디버깅용 로그 (실제 JSON 문자열 일부 출력)
+                        logger.info(f"JSON 파싱 시도 (첫 200자): {json_str[:200]}")
+
                         questions_data = json.loads(json_str)
 
                         # 세션 생성
@@ -1137,6 +1150,8 @@ async def generate_chat_stream(request: ChatRequest):
                             phase="questioning",
                         )
 
+                        logger.info(f"✅ 면접 질문 세트 생성 완료: {len(new_session.questions)}개")
+
                         # 첫 번째 질문 출력
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
@@ -1153,10 +1168,11 @@ async def generate_chat_stream(request: ChatRequest):
                             }
                             yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
                     else:
-                        raise ValueError("JSON 파싱 실패")
+                        raise ValueError("JSON 형식을 찾을 수 없습니다")
 
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.error(f"질문 세트 파싱 실패: {e}")
+                    logger.error(f"원본 응답 (첫 500자): {full_response[:500]}")
                     # 폴백: 기존 방식으로 단일 질문 생성
                     fallback_msg = (
                         "면접 질문 세트 생성 중 오류가 발생했습니다. 기본 질문으로 시작합니다."
