@@ -1161,7 +1161,6 @@ async def generate_chat_stream(request: ChatRequest):
                             question_text = f"[{first_q.category_name}]{newline}{first_q.question}"
                             yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
 
-
                             # 세션 상태 전달 (메타데이터로)
                             session_meta = {
                                 "type": "session_state",
