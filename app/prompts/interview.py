@@ -62,14 +62,37 @@ def create_analysis_prompt(resume_text: str, job_posting_text: str) -> str:
     return template.format(resume_text=resume_text, job_posting_text=job_posting_text)
 
 
+def load_question_examples(interview_type: str) -> str:
+    """면접 유형에 맞는 질문 예시 로드"""
+    if interview_type == "technical":
+        return load_prompt("technical_questions")
+    else:
+        return load_prompt("personality_questions")
+
+
 def create_interview_question_prompt(
-    resume_text: str, job_posting_text: str, interview_type: str = "technical"
+    resume_text: str,
+    job_posting_text: str,
+    interview_type: str = "technical",
+    asked_questions: list[str] | None = None,
 ) -> str:
-    """면접 질문 생성 프롬프트"""
+    """면접 질문 생성 프롬프트 (asked_questions: 이미 한 질문 목록, 반복 방지용)"""
     interview_type_kr = "기술" if interview_type == "technical" else "인성"
+    if asked_questions:
+        asked_questions_section = (
+            "\n## 이미 한 질문 목록 (아래와 겹치지 않는 새 질문만 생성)\n"
+            + "\n".join(f"- {q}" for q in asked_questions)
+        )
+    else:
+        asked_questions_section = ""
     template = load_prompt("interview_question")
+    question_examples = load_question_examples(interview_type)
     return template.format(
-        resume_text=resume_text, job_posting_text=job_posting_text, interview_type=interview_type_kr
+        resume_text=resume_text,
+        job_posting_text=job_posting_text,
+        interview_type=interview_type_kr,
+        asked_questions_section=asked_questions_section,
+        question_examples=question_examples,
     )
 
 
@@ -106,6 +129,116 @@ def create_interview_report_prompt(
         resume_text=resume_text or "(이력서 정보 없음)",
         job_posting_text=job_posting_text or "(채용공고 정보 없음)",
     )
+
+
+# ============================================================================
+# 기술 면접 5단계 프롬프트 (신규)
+# ============================================================================
+
+
+def get_system_tech_interview() -> str:
+    """기술 면접관 시스템 프롬프트"""
+    return load_prompt("system_tech_interview")
+
+
+def create_tech_interview_init_prompt(
+    resume_text: str,
+    job_posting_text: str,
+    portfolio_text: str = "",
+) -> str:
+    """
+    기술 면접 초기 질문 세트 생성 프롬프트
+    - 5개 카테고리별 질문 생성
+    - JSON 형식으로 반환
+    """
+    template = load_prompt("tech_interview_init")
+    return template.format(
+        resume_text=resume_text or "(이력서 정보 없음)",
+        job_posting_text=job_posting_text or "(채용공고 정보 없음)",
+        portfolio_text=portfolio_text or "(포트폴리오 정보 없음)",
+    )
+
+
+def create_tech_followup_prompt(
+    question_id: int,
+    category_name: str,
+    original_question: str,
+    conversation_history: str,
+    last_answer: str,
+    current_depth: int,
+) -> str:
+    """
+    기술 면접 꼬리질문 생성 프롬프트
+    - 현재 깊이에 따른 질문 전략 적용
+    - 최대 3 depths
+    """
+    template = load_prompt("tech_followup")
+    remaining_followups = 3 - current_depth
+    return template.format(
+        question_id=question_id,
+        category_name=category_name,
+        original_question=original_question,
+        conversation_history=conversation_history,
+        last_answer=last_answer,
+        current_depth=current_depth,
+        remaining_followups=remaining_followups,
+    )
+
+
+def create_tech_next_question_prompt(
+    completed_questions: str,
+    next_question_id: int,
+    next_category_name: str,
+    next_question: str,
+) -> str:
+    """
+    다음 주제 질문으로 전환 프롬프트
+    - 자연스러운 전환 멘트 생성
+    """
+    template = load_prompt("tech_next_question")
+    return template.format(
+        completed_questions=completed_questions,
+        next_question_id=next_question_id,
+        next_category_name=next_category_name,
+        next_question=next_question,
+    )
+
+
+def format_conversation_history(qa_pairs: list[dict]) -> str:
+    """
+    대화 이력을 프롬프트용 문자열로 포맷팅
+    qa_pairs: [{"role": "interviewer|candidate", "content": "..."}, ...]
+    """
+    if not qa_pairs:
+        return "(이전 대화 없음)"
+
+    formatted = []
+    for item in qa_pairs:
+        role = item.get("role", "unknown")
+        content = item.get("content", "")
+        if role == "interviewer":
+            formatted.append(f"면접관: {content}")
+        elif role == "candidate":
+            formatted.append(f"지원자: {content}")
+
+    return "\n".join(formatted)
+
+
+def format_completed_questions(questions: list[dict]) -> str:
+    """
+    완료된 질문들을 프롬프트용 문자열로 포맷팅
+    questions: [{"id": 1, "category_name": "...", "question": "...", "summary": "..."}, ...]
+    """
+    if not questions:
+        return "(완료된 질문 없음)"
+
+    formatted = []
+    for q in questions:
+        formatted.append(
+            f"- [{q.get('id', '?')}] {q.get('category_name', '')}: {q.get('question', '')}"
+        )
+
+    return "\n".join(formatted)
 
 
 # ============================================================================

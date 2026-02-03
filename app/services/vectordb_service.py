@@ -44,6 +44,7 @@ class VectorDBService:
         self.RESUME_COLLECTION = "resumes"
         self.POSTING_COLLECTION = "job_postings"
         self.PORTFOLIO_COLLECTION = "portfolios"
+        self.INTERVIEW_COLLECTION = "interview_questions"
 
         # Create or get collections
         self.resume_collection = self.chroma_client.get_or_create_collection(
@@ -54,6 +55,10 @@ class VectorDBService:
         )
         self.portfolio_collection = self.chroma_client.get_or_create_collection(
             name=self.PORTFOLIO_COLLECTION, metadata={"description": "Portfolio embeddings"}
+        )
+        self.interview_collection = self.chroma_client.get_or_create_collection(
+            name=self.INTERVIEW_COLLECTION,
+            metadata={"description": "Interview Q&A embeddings for RAG"},
         )
 
         logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
@@ -67,6 +72,8 @@ class VectorDBService:
             return self.posting_collection
         elif collection_type in ("portfolio", "portfolios"):
             return self.portfolio_collection
+        elif collection_type in ("interview", "interview_questions"):
+            return self.interview_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
 
@@ -349,7 +356,7 @@ class VectorDBService:
         Get number of documents in collection
 
         Args:
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", or "interview_questions"
 
         Returns:
             Number of documents
@@ -360,3 +367,56 @@ class VectorDBService:
         except Exception as e:
             logger.error(f"Error getting collection count: {e}")
             return 0
+
+    async def add_texts(
+        self,
+        texts: list[str],
+        metadatas: list[dict[str, Any]],
+        ids: list[str],
+        user_id: int | str,
+        collection_name: str,
+    ) -> list[str]:
+        """
+        Add multiple texts to VectorDB (for interview dataset embedding)
+
+        Args:
+            texts: List of texts to embed
+            metadatas: List of metadata dicts
+            ids: List of unique IDs
+            user_id: User ID (0 for public data)
+            collection_name: Collection name (e.g., "interview_questions")
+
+        Returns:
+            List of added IDs
+        """
+        try:
+            collection = self._get_collection(collection_name)
+
+            embeddings = []
+            filtered_metadatas = []
+
+            for i, text in enumerate(texts):
+                # Create embedding
+                embedding = await self.create_embedding(text)
+                embeddings.append(embedding)
+
+                # Prepare metadata (filter None values)
+                meta = metadatas[i].copy() if i < len(metadatas) else {}
+                meta["user_id"] = str(user_id)
+                meta = {k: v for k, v in meta.items() if v is not None}
+                filtered_metadatas.append(meta)
+
+            # Add batch to collection
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=filtered_metadatas,
+            )
+
+            logger.info(f"Added {len(ids)} texts to {collection_name} collection")
+            return ids
+
+        except Exception as e:
+            logger.error(f"Error adding texts to VectorDB: {e}")
+            raise

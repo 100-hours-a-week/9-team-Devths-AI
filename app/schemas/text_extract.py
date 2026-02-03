@@ -128,8 +128,11 @@ class TextExtractRequest(BaseModel):
     user_id: int = Field(..., description="사용자 ID", example=12)
     resume: DocumentInput = Field(..., description="이력서/포트폴리오 입력")
     job_posting: DocumentInput = Field(..., description="채용공고 입력")
-    model: Literal["gemini", "vllm"] | None = Field(
-        "gemini", description="사용할 모델 (gemini: Gemini Vision API OCR, vllm: EasyOCR + Llama)"
+    model: Literal["auto", "gemini", "vllm"] | None = Field(
+        "auto",
+        description="OCR 모델 선택 (auto: CLOVA OCR 우선 + Gemini Fallback, "
+        "gemini: Gemini Vision API 전용, vllm: EasyOCR 전용, GPU 도입 후 사용). "
+        "auto 사용 시 CLOVA → Gemini 폴백 전략 적용",
     )
 
     @validator("resume", "job_posting")
@@ -146,7 +149,7 @@ class TextExtractRequest(BaseModel):
                     "name": "파일 업로드 방식 (S3 key)",
                     "value": {
                         "task_id": 1,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
@@ -167,7 +170,7 @@ class TextExtractRequest(BaseModel):
                     "name": "텍스트 직접 입력 방식",
                     "value": {
                         "task_id": 2,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
@@ -188,7 +191,7 @@ class TextExtractRequest(BaseModel):
                     "name": "혼합 방식 (S3 key + 텍스트)",
                     "value": {
                         "task_id": 3,
-                        "model": "gemini",
+                        "model": "auto",
                         "room_id": 23,
                         "user_id": 12,
                         "resume": {
@@ -249,6 +252,7 @@ class TextExtractResult(BaseModel):
         None,
         description="포맷팅된 분석 결과 텍스트 (백엔드에서 바로 표시용, 마크다운 없음)",
     )
+    ai_message: str | None = Field(None, description="AI의 첫 인사말 및 요약 (대화 시작용)")
 
     class Config:
         json_schema_extra = {
@@ -269,5 +273,6 @@ class TextExtractResult(BaseModel):
                     "preferred_skills": ["Docker", "Kubernetes"],
                 },
                 "formatted_text": "지원 회사 및 직무 : 카카오 | 백엔드 개발자\n\n이력서 분석\n\n장점\n1. React 숙련도\n2. 프로젝트 경험\n\n단점\n1. 백엔드 경험 부족\n\n채용 공고 분석\n\n기업 / 포지션\n카카오 / 백엔드 개발자\n\n필수 역량\n- Java\n- Spring\n- MySQL\n\n우대 사항\n- Docker\n- Kubernetes",
+                "ai_message": "안녕하세요! 카카오 백엔드 개발자 직무에 지원하시는군요. React 숙련도와 프로젝트 경험은 큰 장점이지만, 백엔드 관련 경험 보완이 필요해 보입니다. 면접 준비나 자소서 첨삭을 도와드릴까요?",
             }
         }

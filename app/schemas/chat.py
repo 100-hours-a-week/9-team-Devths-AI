@@ -60,16 +60,73 @@ class ChatContext(BaseModel):
     # 문서 정보 (OCR 텍스트)
     resume_ocr: str | None = Field(None, description="이력서 OCR 텍스트 (면접 모드 시)")
     job_posting_ocr: str | None = Field(None, description="채용공고 OCR 텍스트 (면접 모드 시)")
+    portfolio_text: str | None = Field(None, description="포트폴리오 텍스트 (면접 모드 시)")
 
     # 면접 모드
     interview_type: str | None = Field(None, description="면접 유형 (behavior/tech)")
     question_count: int | None = Field(None, description="현재까지 생성된 질문 수")
+    asked_questions: list[str] | None = Field(
+        None, description="이미 했던 질문 목록 (반복 방지, 새 질문 생성 시 전달)"
+    )
+
+    # 기술 면접 세션 상태 (5개 질문 × 최대 3 depths 꼬리질문)
+    interview_session: "InterviewSession | None" = Field(
+        None, description="기술 면접 세션 상태 (질문 세트, 현재 진행 상황)"
+    )
 
     # 리포트 모드
     qa_list: list[dict] | None = Field(None, description="Q&A 목록 (리포트 생성 시)")
 
     class Config:
         extra = "allow"  # 추가 필드 허용
+
+
+class InterviewQuestionState(BaseModel):
+    """개별 면접 질문 상태"""
+
+    id: int = Field(..., description="질문 ID (1-5)")
+    category: str = Field(..., description="카테고리 코드 (cs_network_os, cs_db_algo, ...)")
+    category_name: str = Field(..., description="카테고리 이름 (기본 CS, 프로젝트 기술 등)")
+    question: str = Field(..., description="질문 내용")
+    intent: str = Field(default="", description="질문 의도")
+    keywords: list[str] = Field(default=[], description="관련 키워드")
+
+    # 진행 상태
+    is_completed: bool = Field(default=False, description="질문 완료 여부")
+    current_depth: int = Field(default=0, description="현재 꼬리질문 깊이 (0-3)")
+    max_depth: int = Field(default=3, description="최대 꼬리질문 깊이")
+
+    # 대화 이력 (해당 질문에 대한)
+    conversation: list[dict] = Field(
+        default=[],
+        description="대화 이력 [{'role': 'interviewer|candidate', 'content': '...'}]",
+    )
+
+
+class InterviewSession(BaseModel):
+    """기술 면접 세션 전체 상태"""
+
+    session_id: str = Field(..., description="면접 세션 고유 ID")
+    interview_type: str = Field(default="tech", description="면접 유형 (tech/behavior)")
+
+    # 5개 질문 세트
+    questions: list[InterviewQuestionState] = Field(default=[], description="5개 질문 세트")
+
+    # 현재 진행 상태
+    current_question_id: int = Field(default=1, description="현재 진행 중인 질문 ID (1-5)")
+    total_questions: int = Field(default=5, description="총 질문 수")
+
+    # 면접 진행 단계
+    phase: str = Field(
+        default="init",
+        description="진행 단계 (init: 초기화, questioning: 질문 중, followup: 꼬리질문 중, completed: 완료)",
+    )
+
+    # 전체 대화 이력 (모든 질문 통합)
+    full_conversation: list[dict] = Field(
+        default=[],
+        description="전체 대화 이력",
+    )
 
 
 class QAItem(BaseModel):
@@ -154,6 +211,10 @@ class ChatRequest(BaseModel):
                             "job_posting_ocr": "채용공고 OCR 텍스트",
                             "interview_type": "behavior",
                             "question_count": 3,
+                            "asked_questions": [
+                                "자기소개 해주세요",
+                                "프로젝트 경험을 말씀해주세요",
+                            ],
                         },
                     },
                 },
