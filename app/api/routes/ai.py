@@ -13,11 +13,20 @@ from app.prompts import (
     create_interview_question_prompt,
     get_extract_title_prompt,
     get_opening_prompt,
+    # 기술 면접 5단계 프롬프트
+    get_system_tech_interview,
+    create_tech_interview_init_prompt,
+    create_tech_followup_prompt,
+    create_tech_next_question_prompt,
+    format_conversation_history,
+    format_completed_questions,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
+    InterviewSession,
+    InterviewQuestionState,
 )
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
 from app.schemas.text_extract import (
@@ -675,6 +684,25 @@ async def get_task_status(task_id: str):
 
 
 # ============================================================================
+# 면접 헬퍼 함수
+# ============================================================================
+
+
+async def _move_to_next_question(
+    session: InterviewSession,
+    current_q_id: int,
+    rag,
+    model_choice: str,
+    user_id: int,
+    newline: str,
+):
+    """다음 질문으로 이동하는 헬퍼 함수 (내부 사용)"""
+    # 이 함수는 현재 generator 내에서 직접 처리하므로 사용하지 않음
+    # 추후 복잡한 로직이 필요할 때 확장 가능
+    pass
+
+
+# ============================================================================
 # API 2: 채팅 (통합: 대화/분석/면접) (스트리밍)
 # ============================================================================
 
@@ -1038,82 +1066,259 @@ async def generate_chat_stream(request: ChatRequest):
 
         yield f"data: [DONE]{sse_end}"
 
-    # 2. 면접 모드 - 맞춤형 질문 생성 및 대화
+    # 2. 면접 모드 - 5개 질문 × 최대 3 depths 꼬리질문
     elif mode == ChatMode.INTERVIEW:
         try:
-            # 면접 타입에 따라 프롬프트 조정 (behavior: 인성, tech: 기술)
             interview_type = request.context.interview_type or "tech"
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
-            # RAG를 사용하여 사용자 맞춤 면접 질문 생성
-            # resume, portfolio, job_posting 컬렉션에서 컨텍스트 검색
-            context = await rag.retrieve_context(
-                query=f"{interview_type_kr} 면접 질문을 위한 사용자 정보",
-                user_id=request.user_id,
-                context_types=["resume", "portfolio", "job_posting"],
-                n_results=1,  # 속도 개선을 위해 1개만 검색
-            )
-
-            # 면접 질문 생성 프롬프트 (prompts 모듈 사용)
-            # context에서 resume_ocr, job_posting_ocr, asked_questions(반복 방지) 사용
-            resume_ocr = request.context.resume_ocr if request.context else None
-            job_posting_ocr = request.context.job_posting_ocr if request.context else None
-            raw_asked = (
-                getattr(request.context, "asked_questions", None) if request.context else None
-            )
-            asked_questions = list(raw_asked) if raw_asked else None
-
-            if resume_ocr or job_posting_ocr or context:
-                # 컨텍스트가 있으면 맞춤형 질문 생성 (이미 한 질문 목록 전달로 반복 방지)
-                question_prompt = create_interview_question_prompt(
-                    resume_text=resume_ocr or context or "정보 없음",
-                    job_posting_text=job_posting_ocr or "정보 없음",
-                    interview_type=interview_type,
-                    asked_questions=asked_questions,
-                )
-            else:
-                question_prompt = f"일반적인 {interview_type_kr} 면접 질문 1개를 짧게 생성해주세요:"
-
-            full_question = ""
+            # 세션 상태 확인
+            session = request.context.interview_session
+            user_message = request.message or ""
 
             # vLLM 또는 Gemini 선택
             model_choice = (
                 request.model.value if hasattr(request.model, "value") else str(request.model)
             )
 
-            if model_choice == "vllm" and rag.vllm:
-                logger.info("💬 [vLLM] 면접 질문 생성 시작")
-                async for chunk in rag.vllm.generate_response(
-                    user_message=question_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt=SYSTEM_INTERVIEW,
-                ):
-                    full_question += chunk
-                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
-            else:
-                logger.info("💬 [Gemini] 면접 질문 생성 시작")
-                async for chunk in rag.llm.generate_response(
-                    user_message=question_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt=SYSTEM_INTERVIEW,
-                    user_id=request.user_id,
-                ):
-                    full_question += chunk
-                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
+            # ===================================================================
+            # PHASE 1: 세션 초기화 (첫 요청 시 5개 질문 세트 생성)
+            # ===================================================================
+            if session is None or session.phase == "init":
+                logger.info("🎯 [면접] 세션 초기화 - 5개 질문 세트 생성 시작")
 
-            {
-                "success": True,
-                "mode": "interview_question",
-                "response": full_question.strip(),
-                "interview_type": interview_type,
-            }
-            yield f"data: [DONE]{sse_end}"
+                # RAG로 사용자 정보 검색
+                context = await rag.retrieve_context(
+                    query=f"{interview_type_kr} 면접 질문을 위한 사용자 정보",
+                    user_id=request.user_id,
+                    context_types=["resume", "portfolio", "job_posting"],
+                    n_results=3,
+                )
+
+                resume_ocr = request.context.resume_ocr if request.context else None
+                job_posting_ocr = request.context.job_posting_ocr if request.context else None
+                portfolio_text = request.context.portfolio_text if request.context else None
+
+                # 5개 질문 세트 생성 프롬프트
+                init_prompt = create_tech_interview_init_prompt(
+                    resume_text=resume_ocr or context or "정보 없음",
+                    job_posting_text=job_posting_ocr or "정보 없음",
+                    portfolio_text=portfolio_text or context or "정보 없음",
+                )
+
+                full_response = ""
+                system_prompt = get_system_tech_interview()
+
+                if model_choice == "vllm" and rag.vllm:
+                    async for chunk in rag.vllm.generate_response(
+                        user_message=init_prompt,
+                        context=None,
+                        history=[],
+                        system_prompt=system_prompt,
+                    ):
+                        full_response += chunk
+                else:
+                    async for chunk in rag.llm.generate_response(
+                        user_message=init_prompt,
+                        context=None,
+                        history=[],
+                        system_prompt=system_prompt,
+                        user_id=request.user_id,
+                    ):
+                        full_response += chunk
+
+                # JSON 파싱하여 세션 생성
+                try:
+                    # JSON 부분만 추출
+                    json_start = full_response.find("{")
+                    json_end = full_response.rfind("}") + 1
+                    if json_start != -1 and json_end > json_start:
+                        json_str = full_response[json_start:json_end]
+                        questions_data = json.loads(json_str)
+
+                        # 세션 생성
+                        new_session = InterviewSession(
+                            session_id=str(uuid.uuid4()),
+                            interview_type=interview_type,
+                            questions=[
+                                InterviewQuestionState(
+                                    id=q["id"],
+                                    category=q["category"],
+                                    category_name=q["category_name"],
+                                    question=q["question"],
+                                    intent=q.get("intent", ""),
+                                    keywords=q.get("keywords", []),
+                                )
+                                for q in questions_data.get("questions", [])
+                            ],
+                            current_question_id=1,
+                            phase="questioning",
+                        )
+
+                        # 첫 번째 질문 출력
+                        first_q = new_session.questions[0] if new_session.questions else None
+                        if first_q:
+                            greeting = f"안녕하세요! {interview_type_kr} 면접을 시작하겠습니다. 총 5개의 주제에 대해 질문드릴 예정입니다.{newline}{newline}"
+                            yield f"data: {json.dumps({'chunk': greeting}, ensure_ascii=False)}{sse_end}"
+
+                            question_text = f"첫 번째 질문입니다. [{first_q.category_name}]{newline}{first_q.question}"
+                            yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
+
+                            # 세션 상태 전달 (메타데이터로)
+                            session_meta = {
+                                "type": "session_state",
+                                "session": new_session.model_dump(),
+                            }
+                            yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
+                    else:
+                        raise ValueError("JSON 파싱 실패")
+
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(f"질문 세트 파싱 실패: {e}")
+                    # 폴백: 기존 방식으로 단일 질문 생성
+                    fallback_msg = "면접 질문 세트 생성 중 오류가 발생했습니다. 기본 질문으로 시작합니다."
+                    yield f"data: {json.dumps({'chunk': fallback_msg}, ensure_ascii=False)}{sse_end}"
+
+                yield f"data: [DONE]{sse_end}"
+
+            # ===================================================================
+            # PHASE 2: 꼬리질문 또는 다음 질문 생성 (답변 수신 후)
+            # ===================================================================
+            elif session.phase in ["questioning", "followup"]:
+                current_q_id = session.current_question_id
+                current_q = next(
+                    (q for q in session.questions if q.id == current_q_id), None
+                )
+
+                if not current_q:
+                    yield f"data: {json.dumps({'chunk': '세션 오류: 현재 질문을 찾을 수 없습니다.'}, ensure_ascii=False)}{sse_end}"
+                    yield f"data: [DONE]{sse_end}"
+                    return
+
+                # 지원자 답변을 대화 이력에 추가
+                current_q.conversation.append({
+                    "role": "candidate",
+                    "content": user_message,
+                })
+                current_q.current_depth += 1
+
+                # 꼬리질문 생성 여부 판단 (최대 3 depths)
+                if current_q.current_depth < current_q.max_depth:
+                    # 꼬리질문 생성
+                    followup_prompt = create_tech_followup_prompt(
+                        question_id=current_q.id,
+                        category_name=current_q.category_name,
+                        original_question=current_q.question,
+                        conversation_history=format_conversation_history(current_q.conversation),
+                        last_answer=user_message,
+                        current_depth=current_q.current_depth,
+                    )
+
+                    full_response = ""
+                    system_prompt = get_system_tech_interview()
+
+                    if model_choice == "vllm" and rag.vllm:
+                        async for chunk in rag.vllm.generate_response(
+                            user_message=followup_prompt,
+                            context=None,
+                            history=[],
+                            system_prompt=system_prompt,
+                        ):
+                            full_response += chunk
+                    else:
+                        async for chunk in rag.llm.generate_response(
+                            user_message=followup_prompt,
+                            context=None,
+                            history=[],
+                            system_prompt=system_prompt,
+                            user_id=request.user_id,
+                        ):
+                            full_response += chunk
+
+                    # 꼬리질문 응답 파싱
+                    try:
+                        json_start = full_response.find("{")
+                        json_end = full_response.rfind("}") + 1
+                        if json_start != -1 and json_end > json_start:
+                            followup_data = json.loads(full_response[json_start:json_end])
+
+                            if followup_data.get("should_continue", True) and followup_data.get("followup"):
+                                # 꼬리질문 출력
+                                followup_q = followup_data["followup"]["question"]
+                                current_q.conversation.append({
+                                    "role": "interviewer",
+                                    "content": followup_q,
+                                })
+                                session.phase = "followup"
+
+                                yield f"data: {json.dumps({'chunk': followup_q}, ensure_ascii=False)}{sse_end}"
+                            else:
+                                # 다음 주제로 이동
+                                current_q.is_completed = True
+                                await _move_to_next_question(
+                                    session, current_q_id, rag, model_choice, request.user_id, newline
+                                )
+                    except json.JSONDecodeError:
+                        # 파싱 실패 시 다음 질문으로 이동
+                        current_q.is_completed = True
+
+                else:
+                    # 최대 깊이 도달 - 다음 주제로 이동
+                    current_q.is_completed = True
+
+                # 다음 질문으로 이동해야 하는 경우
+                if current_q.is_completed:
+                    next_q_id = current_q_id + 1
+                    if next_q_id <= session.total_questions:
+                        next_q = next(
+                            (q for q in session.questions if q.id == next_q_id), None
+                        )
+                        if next_q:
+                            session.current_question_id = next_q_id
+                            session.phase = "questioning"
+
+                            # 완료된 질문들 정리
+                            completed = [
+                                {"id": q.id, "category_name": q.category_name, "question": q.question}
+                                for q in session.questions if q.is_completed
+                            ]
+
+                            transition = f"{newline}{newline}네, 잘 알겠습니다. 다음 질문으로 넘어가겠습니다.{newline}{newline}"
+                            yield f"data: {json.dumps({'chunk': transition}, ensure_ascii=False)}{sse_end}"
+
+                            question_text = f"[{next_q.category_name}]{newline}{next_q.question}"
+                            yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
+
+                            next_q.conversation.append({
+                                "role": "interviewer",
+                                "content": next_q.question,
+                            })
+                    else:
+                        # 모든 질문 완료
+                        session.phase = "completed"
+                        complete_msg = f"{newline}{newline}수고하셨습니다! 모든 면접 질문이 완료되었습니다. 면접 결과 리포트를 생성하시려면 리포트 모드를 선택해주세요."
+                        yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
+
+                # 업데이트된 세션 상태 전달
+                session_meta = {
+                    "type": "session_state",
+                    "session": session.model_dump(),
+                }
+                yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
+                yield f"data: [DONE]{sse_end}"
+
+            # ===================================================================
+            # PHASE 3: 면접 완료
+            # ===================================================================
+            elif session.phase == "completed":
+                complete_msg = "면접이 이미 완료되었습니다. 리포트 모드에서 결과를 확인하세요."
+                yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
+                yield f"data: [DONE]{sse_end}"
 
         except Exception as e:
-            logger.error(f"Interview question generation error: {e}")
-            {"success": False, "mode": "interview", "error": str(e)}
+            logger.error(f"Interview error: {e}", exc_info=True)
+            error_msg = f"면접 진행 중 오류가 발생했습니다: {str(e)}"
+            yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
             yield f"data: [DONE]{sse_end}"
 
     # 3. 리포트 모드 - 면접 평가 리포트 생성

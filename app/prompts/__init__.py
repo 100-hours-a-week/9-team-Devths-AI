@@ -29,6 +29,13 @@ from app.prompts.interview import (
     create_followup_prompt,
     create_interview_question_prompt,
     create_interview_report_prompt,
+    # 기술 면접 5단계 프롬프트 (신규)
+    get_system_tech_interview,
+    create_tech_interview_init_prompt,
+    create_tech_followup_prompt,
+    create_tech_next_question_prompt,
+    format_conversation_history,
+    format_completed_questions,
 )
 
 __all__ = [
@@ -45,6 +52,13 @@ __all__ = [
     "create_interview_question_prompt",
     "create_followup_prompt",
     "create_interview_report_prompt",
+    # 기술 면접 5단계 프롬프트 (신규)
+    "get_system_tech_interview",
+    "create_tech_interview_init_prompt",
+    "create_tech_followup_prompt",
+    "create_tech_next_question_prompt",
+    "format_conversation_history",
+    "format_completed_questions",
     # Chat prompts
     "SYSTEM_GENERAL_CHAT",
     "SYSTEM_RAG_CHAT",
