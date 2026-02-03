@@ -53,36 +53,36 @@
 반드시 아래 JSON 형식으로 출력하세요:
 
 ```json
-{
-  "analysis": {
+{{
+  "analysis": {{
     "answer_quality": "excellent|good|fair|poor",
     "covered_aspects": ["답변에서 다룬 내용들"],
     "missing_aspects": ["답변에서 빠진 내용들"],
     "technical_accuracy": "정확|부분정확|부정확"
-  },
+  }},
   "should_continue": true,
-  "followup": {
+  "followup": {{
     "type": "clarification|experience|deep_dive|application",
     "question": "꼬리질문 내용",
     "intent": "이 꼬리질문의 의도",
     "expected_keywords": ["기대되는", "답변", "키워드"]
-  }
-}
+  }}
+}}
 ```
 
 **should_continue가 false인 경우:**
 ```json
-{
-  "analysis": {
+{{
+  "analysis": {{
     "answer_quality": "excellent",
     "covered_aspects": ["모든 핵심 내용"],
     "missing_aspects": [],
     "technical_accuracy": "정확"
-  },
+  }},
   "should_continue": false,
   "followup": null,
   "completion_reason": "충분히 깊이 있는 답변 완료"
-}
+}}
 ```
 
 ## 질문 작성 시 주의사항
