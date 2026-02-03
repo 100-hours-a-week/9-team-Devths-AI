@@ -46,50 +46,50 @@
 반드시 아래 JSON 형식으로 출력하세요:
 
 ```json
-{
+{{
   "questions": [
-    {
+    {{
       "id": 1,
       "category": "cs_network_os",
       "category_name": "기본 CS (네트워크/운영체제)",
       "question": "질문 내용",
       "intent": "이 질문을 통해 확인하려는 역량",
       "keywords": ["관련", "키워드"]
-    },
-    {
+    }},
+    {{
       "id": 2,
       "category": "cs_db_algo",
       "category_name": "기본 CS (데이터베이스/자료구조)",
       "question": "질문 내용",
       "intent": "이 질문을 통해 확인하려는 역량",
       "keywords": ["관련", "키워드"]
-    },
-    {
+    }},
+    {{
       "id": 3,
       "category": "project_tech_1",
       "category_name": "프로젝트 기술 심화",
       "question": "질문 내용",
       "intent": "이 질문을 통해 확인하려는 역량",
       "keywords": ["관련", "키워드"]
-    },
-    {
+    }},
+    {{
       "id": 4,
       "category": "project_tech_2",
       "category_name": "프로젝트 문제해결",
       "question": "질문 내용",
       "intent": "이 질문을 통해 확인하려는 역량",
       "keywords": ["관련", "키워드"]
-    },
-    {
+    }},
+    {{
       "id": 5,
       "category": "tech_attitude",
       "category_name": "기술적 태도/성장",
       "question": "질문 내용",
       "intent": "이 질문을 통해 확인하려는 역량",
       "keywords": ["관련", "키워드"]
-    }
+    }}
   ]
-}
+}}
 ```
 
 ## 질문 작성 규칙
