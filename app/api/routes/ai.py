@@ -1162,7 +1162,8 @@ async def generate_chat_stream(request: ChatRequest):
 
                         # 세션 캐시에 저장
                         interview_sessions[session_key] = new_session
-                        logger.info(f"💾 [면접] 세션 캐시 저장: {session_key}")
+                        safe_session_key = sanitize_log_input(session_key)
+                        logger.info(f"💾 [면접] 세션 캐시 저장: {safe_session_key}")
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
