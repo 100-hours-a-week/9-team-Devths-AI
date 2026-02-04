@@ -1062,7 +1062,7 @@ async def generate_chat_stream(request: ChatRequest):
                 session = interview_sessions.get(session_key)
                 if session:
                     logger.info(
-                        f"📦 [면접] 캐시에서 세션 복원: {session_key}, phase={session.phase}, Q{session.current_question_id}/5"
+                        f"📦 [면접] 캐시에서 세션 복원: {sanitize_log_input(session_key)}, phase={session.phase}, Q{session.current_question_id}/5"
                     )
 
             # vLLM 또는 Gemini 선택
