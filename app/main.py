@@ -122,10 +122,12 @@ app.include_router(masking.router)
 
 app.add_middleware(CloudWatchMiddleware)
 
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("🔧 Initializing CloudWatch Service...")
     CloudWatchService.get_instance()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

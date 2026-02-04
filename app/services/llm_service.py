@@ -99,18 +99,24 @@ class LLMService:
                 dims = {"Model": model_name, "Type": "Input"}
                 prompt_tokens = usage.prompt_token_count or 0
                 if prompt_tokens > 0:
-                    asyncio.create_task(cw.put_metric("LLM_Token_Usage", prompt_tokens, "Count", dims))
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", prompt_tokens, "Count", dims)
+                    )
 
                 dims["Type"] = "Output"
                 candidate_tokens = usage.candidates_token_count or 0
                 if candidate_tokens > 0:
-                    asyncio.create_task(cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims))
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims)
+                    )
 
                 # Total은 합산해서 기록
                 dims["Type"] = "Total"
                 total_tokens = usage.total_token_count or (prompt_tokens + candidate_tokens)
                 if total_tokens > 0:
-                     asyncio.create_task(cw.put_metric("LLM_Token_Usage", total_tokens, "Count", dims))
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", total_tokens, "Count", dims)
+                    )
 
         except Exception as e:
             logger.warning(f"Failed to record token usage: {e}")
@@ -212,7 +218,7 @@ class LLMService:
 
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
-            self._record_error(e, self.model_name) # 에러 메트릭 기록
+            self._record_error(e, self.model_name)  # 에러 메트릭 기록
 
             if trace is not None:
                 with contextlib.suppress(Exception):
@@ -283,7 +289,7 @@ class LLMService:
                 model=self.model_name, contents=contents, config=config
             )
 
-            self._record_token_usage(response, self.model_name) # 토큰 사용량 기록
+            self._record_token_usage(response, self.model_name)  # 토큰 사용량 기록
 
             result_text = response.text if hasattr(response, "text") else ""
 
@@ -302,7 +308,7 @@ class LLMService:
 
         except Exception as e:
             logger.error(f"Error generating LLM response (non-stream): {e}")
-            self._record_error(e, self.model_name) # 에러 메트릭 기록
+            self._record_error(e, self.model_name)  # 에러 메트릭 기록
 
             if trace is not None:
                 with contextlib.suppress(Exception):
@@ -525,7 +531,7 @@ class LLMService:
                     logger.info(
                         f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)"
                     )
-                    self._record_token_usage(response, self.analysis_model) # 토큰 사용량 기록
+                    self._record_token_usage(response, self.analysis_model)  # 토큰 사용량 기록
                     return result_text
 
                 # 빈 응답 - 프롬프트 피드백 확인
@@ -536,7 +542,7 @@ class LLMService:
 
             except Exception as e:
                 logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 예외: {e}")
-                self._record_error(e, self.analysis_model) # 에러 메트릭 기록
+                self._record_error(e, self.analysis_model)  # 에러 메트릭 기록
 
         logger.error(f"[{step_name}] {max_retries}회 재시도 후에도 실패")
         return None

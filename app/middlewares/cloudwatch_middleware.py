@@ -24,25 +24,25 @@ class CloudWatchMiddleware(BaseHTTPMiddleware):
             status_code = 500
             raise e
         finally:
-            process_time = (time.time() - start_time) * 1000 # ms 단위
+            process_time = (time.time() - start_time) * 1000  # ms 단위
 
             # API 경로 그룹화 (Cardinality 제어)
             path = request.url.path
 
             # 메트릭 차원(Dimensions)
-            dimensions = {
-                "Method": request.method,
-                "Path": path,
-                "Status": str(status_code)
-            }
+            dimensions = {"Method": request.method, "Path": path, "Status": str(status_code)}
 
             try:
                 # 1. Latency (ms)
                 # await 대신 create_task로 변경하여 메트릭 전송이 응답 시간을 지연시키지 않도록 함 (Fire-and-forget)
-                asyncio.create_task(self.cw_service.put_metric("Latency", process_time, "Milliseconds", dimensions))
+                asyncio.create_task(
+                    self.cw_service.put_metric("Latency", process_time, "Milliseconds", dimensions)
+                )
 
                 # 2. Request Count
-                asyncio.create_task(self.cw_service.put_metric("RequestCount", 1, "Count", dimensions))
+                asyncio.create_task(
+                    self.cw_service.put_metric("RequestCount", 1, "Count", dimensions)
+                )
             except Exception as e:
                 # 메트릭 전송 실패가 API 응답에 영향을 주면 안 됨
                 print(f"⚠️ Failed to queue metrics: {e}")

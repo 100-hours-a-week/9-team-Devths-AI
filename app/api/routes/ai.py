@@ -730,11 +730,7 @@ async def generate_chat_stream(request: ChatRequest):
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
 
     # 메트릭 차원 정의
-    dims = {
-        "Model": model,
-        "Mode": str(mode)
-    }
-
+    dims = {"Model": model, "Mode": str(mode)}
 
     logger.info("")
     logger.info(f"{'='*80}")
@@ -1479,11 +1475,11 @@ async def generate_chat_stream(request: ChatRequest):
 
     # Latency 측정 종료 및 전송
     try:
-         duration = (time.time() - start_time) * 1000
-         cw = CloudWatchService.get_instance()
-         asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+        duration = (time.time() - start_time) * 1000
+        cw = CloudWatchService.get_instance()
+        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
     except Exception as e:
-         logger.error(f"Failed to record latency metric: {e}")
+        logger.error(f"Failed to record latency metric: {e}")
 
 
 @router.post(

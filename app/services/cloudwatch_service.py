@@ -14,7 +14,7 @@ class CloudWatchService:
     _namespace = os.getenv("CW_NAMESPACE", "Devths/AI")
     _enabled = os.getenv("CW_ENABLED", "false").lower() == "true"
     _region = os.getenv("AWS_REGION", "ap-northeast-2")
-    _environment = os.getenv("DEPLOYMENT_ENV", "dev") # dev, stg, prod
+    _environment = os.getenv("DEPLOYMENT_ENV", "dev")  # dev, stg, prod
 
     _executor = None
 
@@ -23,8 +23,11 @@ class CloudWatchService:
             try:
                 self.client = boto3.client("cloudwatch", region_name=self._region)
                 import concurrent.futures
+
                 self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
-                print(f"✅ CloudWatchService initialized (Namespace: {self._namespace}, Env: {self._environment})")
+                print(
+                    f"✅ CloudWatchService initialized (Namespace: {self._namespace}, Env: {self._environment})"
+                )
             except (BotoCoreError, ClientError) as e:
                 print(f"❌ Failed to initialize CloudWatch client: {e}")
                 self._enabled = False
@@ -37,7 +40,9 @@ class CloudWatchService:
             cls._instance = CloudWatchService()
         return cls._instance
 
-    async def put_metric(self, name: str, value: float, unit: str = "Count", dimensions: dict[str, str] = None):
+    async def put_metric(
+        self, name: str, value: float, unit: str = "Count", dimensions: dict[str, str] = None
+    ):
         """
         메트릭을 버퍼에 추가하고, 배치 크기가 되면 비동기(Thread Pool) 전송
         """
@@ -58,7 +63,7 @@ class CloudWatchService:
             "Timestamp": time.time(),
             "Value": value,
             "Unit": unit,
-            "StorageResolution": 60 # 1분 단위 (Standard Resolution)
+            "StorageResolution": 60,  # 1분 단위 (Standard Resolution)
         }
 
         self._buffer.append(metric_data)
@@ -91,11 +96,8 @@ class CloudWatchService:
         try:
             # CloudWatch put_metric_data는 최대 20개까지 한 번에 전송 가능
             for i in range(0, len(metrics), 20):
-                batch = metrics[i:i+20]
-                self.client.put_metric_data(
-                    Namespace=self._namespace,
-                    MetricData=batch
-                )
+                batch = metrics[i : i + 20]
+                self.client.put_metric_data(Namespace=self._namespace, MetricData=batch)
             # print(f"🚀 Sent {len(metrics)} metrics to CloudWatch")
         except (BotoCoreError, ClientError) as e:
             print(f"❌ Failed to send metrics to CloudWatch: {e}")
