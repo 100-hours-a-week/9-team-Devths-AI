@@ -1174,14 +1174,14 @@ async def generate_chat_stream(request: ChatRequest):
                     logger.error(f"질문 세트 파싱 실패: {e}")
                     logger.error(f"원본 응답 (첫 500자): {full_response[:500]}")
 
-                    # SSE 에러 이벤트 전송 (500 PARSE_FAILED)
+                    # SSE 에러 이벤트 전송 (HTTP 200 유지, payload에 status=500)
                     error_response = {
                         "type": "error",
                         "error": {
                             "code": "PARSE_FAILED",
-                            "message": "면접 질문 생성 중 AI 응답 파싱에 실패했습니다. 다시 시도해주세요.",
                             "status": 500,
                         },
+                        "fallback": "면접 질문 세트 생성 중 오류가 발생했습니다. 다시 시도해주세요.",
                     }
                     yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
 
@@ -1272,9 +1272,9 @@ async def generate_chat_stream(request: ChatRequest):
                             "type": "error",
                             "error": {
                                 "code": "PARSE_FAILED",
-                                "message": "꼬리질문 생성 중 파싱 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
                                 "status": 500,
                             },
+                            "fallback": "꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
                         }
                         yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
                         current_q.is_completed = True
