@@ -364,7 +364,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info(
                 f"📌 OCR 전략: {'GEMINI (V1 Temporary)' if model == 'auto' else model.upper()}"
             )
-            logger.info(f"📌 사용자 ID: {request.user_id}")
+            logger.info("📌 사용자 ID: %s", sanitize_log_input(request.user_id))
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -718,10 +718,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    logger.info(f"📌 요청 모델: {model.upper()}")
-    logger.info(f"📌 채팅 모드: {mode}")
-    logger.info(f"📌 사용자 ID: {request.user_id}")
-    logger.info(f"📌 채팅방 ID: {request.room_id}")
+    logger.info("📌 요청 모델: %s", model.upper())
+    logger.info("📌 채팅 모드: %s", sanitize_log_input(mode))
+    logger.info("📌 사용자 ID: %s", sanitize_log_input(request.user_id))
+    logger.info("📌 채팅방 ID: %s", sanitize_log_input(request.room_id))
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -1061,9 +1061,11 @@ async def generate_chat_stream(request: ChatRequest):
             if session is None:
                 session = interview_sessions.get(session_key)
                 if session:
-                    safe_session_key = sanitize_log_input(session_key)
                     logger.info(
-                        f"📦 [면접] 캐시에서 세션 복원: {safe_session_key}, phase={session.phase}, Q{session.current_question_id}/5"
+                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
+                        sanitize_log_input(session_key),
+                        sanitize_log_input(session.phase),
+                        session.current_question_id,
                     )
 
             # vLLM 또는 Gemini 선택
@@ -1159,13 +1161,11 @@ async def generate_chat_stream(request: ChatRequest):
                             phase="questioning",
                         )
 
-                        safe_question_count = sanitize_log_input(str(len(new_session.questions)))
-                        logger.info(f"✅ 면접 질문 세트 생성 완료: {safe_question_count}개")
+                        logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
                         # 세션 캐시에 저장
                         interview_sessions[session_key] = new_session
-                        safe_session_key = sanitize_log_input(session_key)
-                        logger.info("💾 [면접] 세션 캐시 저장: %s", safe_session_key)
+                        logger.info("💾 [면접] 세션 캐시 저장: %s", sanitize_log_input(session_key))
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
@@ -1339,17 +1339,17 @@ async def generate_chat_stream(request: ChatRequest):
 
                 # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
                 interview_sessions[session_key] = session
-                safe_session_key = sanitize_log_input(str(session_key))
-                safe_phase = sanitize_log_input(str(session.phase))
                 logger.info(
-                    f"💾 [면접] 세션 캐시 업데이트: {safe_session_key}, phase={safe_phase}, Q{session.current_question_id}/5"
+                    "💾 [면접] 세션 캐시 업데이트: %s, phase=%s, Q%d/5",
+                    sanitize_log_input(session_key),
+                    sanitize_log_input(session.phase),
+                    session.current_question_id,
                 )
 
                 # 면접 완료 시 세션 정리
                 if session.phase == "completed":
                     interview_sessions.pop(session_key, None)
-                    safe_session_key_for_delete = sanitize_log_input(str(session_key))
-                    logger.info(f"🗑️ [면접] 완료된 세션 삭제: {safe_session_key_for_delete}")
+                    logger.info("🗑️ [면접] 완료된 세션 삭제: %s", sanitize_log_input(session_key))
 
                 # 업데이트된 세션 상태 전달
                 session_meta = {
