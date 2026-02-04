@@ -718,7 +718,7 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    logger.info("📌 요청 모델: %s", model.upper())
+    logger.info("📌 요청 모델: %s", sanitize_log_input(model.upper()))
     logger.info("📌 채팅 모드: %s", sanitize_log_input(mode))
     logger.info("📌 사용자 ID: %s", sanitize_log_input(request.user_id))
     logger.info("📌 채팅방 ID: %s", sanitize_log_input(request.room_id))
