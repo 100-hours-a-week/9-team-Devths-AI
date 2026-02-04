@@ -808,6 +808,8 @@ async def generate_chat_stream(request: ChatRequest):
 
 {full_context}
 
+[중요] 전체 응답은 반드시 1500자 이내로 간결하게 작성하세요.
+
 아래 형식 그대로 출력하세요:
 
 지원 회사 및 직무 : [회사명] | [직무명]
@@ -818,52 +820,35 @@ async def generate_chat_stream(request: ChatRequest):
 1. [구체적인 장점 1]
 2. [구체적인 장점 2]
 3. [구체적인 장점 3]
-4. [구체적인 장점 4]
-5. [구체적인 장점 5]
 
 단점
 1. [구체적인 단점 또는 보완점 1]
 2. [구체적인 단점 또는 보완점 2]
 3. [구체적인 단점 또는 보완점 3]
-4. [구체적인 단점 또는 보완점 4]
-5. [구체적인 단점 또는 보완점 5]
 
 채용 공고 분석
-
-기업 / 포지션
-[회사명] / [포지션명]
 
 필수 역량
 - [필수 역량 1]
 - [필수 역량 2]
 - [필수 역량 3]
 
-우대 사항
-- [우대 사항 1]
-- [우대 사항 2]
-- [우대 사항 3]
-
 매칭도
 
-나와 지원 직무에 맞는 점
-- [매칭되는 역량/경험 1]
-- [매칭되는 역량/경험 2]
-- [매칭되는 역량/경험 3]
+맞는 점
+- [매칭되는 역량 1]
+- [매칭되는 역량 2]
 
-나와 지원 직무에 맞지 않는 점
-- [부족하거나 보완이 필요한 역량 1]
-- [부족하거나 보완이 필요한 역량 2]
-- [부족하거나 보완이 필요한 역량 3]
-
-위 형식 그대로 출력하세요.
+보완할 점
+- [부족한 역량 1]
+- [부족한 역량 2]
 
 절대 금지:
 - # ## ### 제목 기호 사용 금지
 - ** __ 볼드/이탤릭 기호 사용 금지
-- ``` 코드 블록 사용 금지
-- JSON 형식 사용 금지
+- 1500자 초과 금지
 
-그냥 일반 텍스트로 작성하세요."""
+간결하게 작성하세요."""
 
                         async for chunk in rag.vllm.generate_response(
                             user_message=analysis_prompt,
@@ -1152,13 +1137,12 @@ async def generate_chat_stream(request: ChatRequest):
 
                         logger.info(f"✅ 면접 질문 세트 생성 완료: {len(new_session.questions)}개")
 
-                        # 첫 번째 질문 출력
+                        # 첫 번째 질문 출력 (헤더: [기술면접 1/5])
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
-                            greeting = f"안녕하세요! {interview_type_kr} 면접을 시작하겠습니다. 총 5개의 주제에 대해 질문드릴 예정입니다.{newline}{newline}"
-                            yield f"data: {json.dumps({'chunk': greeting}, ensure_ascii=False)}{sse_end}"
-
-                            question_text = f"[{first_q.category_name}]{newline}{first_q.question}"
+                            question_text = (
+                                f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
+                            )
                             yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
 
                             # 세션 상태 전달 (메타데이터로)
@@ -1251,7 +1235,7 @@ async def generate_chat_stream(request: ChatRequest):
                             if followup_data.get("should_continue", True) and followup_data.get(
                                 "followup"
                             ):
-                                # 꼬리질문 출력
+                                # 꼬리질문 출력 (헤더: [기술면접 2-1/5] 형식)
                                 followup_q = followup_data["followup"]["question"]
                                 current_q.conversation.append(
                                     {
@@ -1261,7 +1245,10 @@ async def generate_chat_stream(request: ChatRequest):
                                 )
                                 session.phase = "followup"
 
-                                yield f"data: {json.dumps({'chunk': followup_q}, ensure_ascii=False)}{sse_end}"
+                                # 꼬리질문 헤더: [기술면접 {질문번호}-{꼬리질문번호}/5]
+                                followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
+                                followup_text = f"{followup_header}{newline}{followup_q}"
+                                yield f"data: {json.dumps({'chunk': followup_text}, ensure_ascii=False)}{sse_end}"
                             else:
                                 # 다음 주제로 이동
                                 current_q.is_completed = True
@@ -1292,10 +1279,9 @@ async def generate_chat_stream(request: ChatRequest):
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            transition = f"{newline}{newline}네, 잘 알겠습니다. 다음 질문으로 넘어가겠습니다.{newline}{newline}"
-                            yield f"data: {json.dumps({'chunk': transition}, ensure_ascii=False)}{sse_end}"
-
-                            question_text = f"[{next_q.category_name}]{newline}{next_q.question}"
+                            # 다음 질문 출력 (헤더: [기술면접 2/5] 형식)
+                            question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
+                            question_text = f"{question_header}{newline}{next_q.question}"
                             yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
 
                             next_q.conversation.append(
