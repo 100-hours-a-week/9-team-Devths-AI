@@ -111,5 +111,11 @@ else
     echo "⚠️  Import validation failed, but continuing..."
 fi
 
+# 9. 캐시 정리 (Disk Space Optimization)
+echo "🧹 Cleaning up caches to free up disk space..."
+rm -rf /home/ubuntu/.cache/pypoetry/cache
+rm -rf /home/ubuntu/.cache/pypoetry/artifacts
+echo "✅ Cache cleanup completed"
+
 echo "✅ After-install steps completed"
 exit 0
