@@ -1061,8 +1061,9 @@ async def generate_chat_stream(request: ChatRequest):
             if session is None:
                 session = interview_sessions.get(session_key)
                 if session:
+                    safe_session_key = sanitize_log_input(session_key)
                     logger.info(
-                        f"📦 [면접] 캐시에서 세션 복원: {sanitize_log_input(session_key)}, phase={session.phase}, Q{session.current_question_id}/5"
+                        f"📦 [면접] 캐시에서 세션 복원: {safe_session_key}, phase={session.phase}, Q{session.current_question_id}/5"
                     )
 
             # vLLM 또는 Gemini 선택
@@ -1335,15 +1336,16 @@ async def generate_chat_stream(request: ChatRequest):
                             yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                             await asyncio.sleep(0.015)
 
+                safe_session_key = sanitize_log_input(session_key)
                 # 세션 캐시 업데이트
                 interview_sessions[session_key] = session
-                logger.info(
+                    f"💾 [면접] 세션 캐시 업데이트: {safe_session_key}, phase={session.phase}, Q{session.current_question_id}/5"
                     f"💾 [면접] 세션 캐시 업데이트: {session_key}, phase={session.phase}, Q{session.current_question_id}/5"
                 )
 
                 # 면접 완료 시 세션 정리
                 if session.phase == "completed":
-                    interview_sessions.pop(session_key, None)
+                    logger.info(f"🗑️ [면접] 완료된 세션 삭제: {safe_session_key}")
                     logger.info(f"🗑️ [면접] 완료된 세션 삭제: {session_key}")
 
                 # 업데이트된 세션 상태 전달
