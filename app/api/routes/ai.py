@@ -36,7 +36,7 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.log_sanitizer import safe_info, sanitize_log_input
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -364,7 +364,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info(
                 f"📌 OCR 전략: {'GEMINI (V1 Temporary)' if model == 'auto' else model.upper()}"
             )
-            logger.info("📌 사용자 ID: %s", sanitize_log_input(request.user_id))
+            safe_info(logger, "📌 사용자 ID: %s", request.user_id)
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -718,10 +718,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    logger.info("📌 요청 모델: %s", sanitize_log_input(model.upper()))
-    logger.info("📌 채팅 모드: %s", sanitize_log_input(mode))
-    logger.info("📌 사용자 ID: %s", sanitize_log_input(request.user_id))
-    logger.info("📌 채팅방 ID: %s", sanitize_log_input(request.room_id))
+    safe_info(logger, "📌 요청 모델: %s", model.upper())
+    safe_info(logger, "📌 채팅 모드: %s", mode)
+    safe_info(logger, "📌 사용자 ID: %s", request.user_id)
+    safe_info(logger, "📌 채팅방 ID: %s", request.room_id)
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -1061,10 +1061,11 @@ async def generate_chat_stream(request: ChatRequest):
             if session is None:
                 session = interview_sessions.get(session_key)
                 if session:
-                    logger.info(
+                    safe_info(
+                        logger,
                         "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
-                        sanitize_log_input(session_key),
-                        sanitize_log_input(session.phase),
+                        session_key,
+                        session.phase,
                         session.current_question_id,
                     )
 
@@ -1165,7 +1166,7 @@ async def generate_chat_stream(request: ChatRequest):
 
                         # 세션 캐시에 저장
                         interview_sessions[session_key] = new_session
-                        logger.info("💾 [면접] 세션 캐시 저장: %s", sanitize_log_input(session_key))
+                        safe_info(logger, "💾 [면접] 세션 캐시 저장: %s", session_key)
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
@@ -1339,17 +1340,18 @@ async def generate_chat_stream(request: ChatRequest):
 
                 # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
                 interview_sessions[session_key] = session
-                logger.info(
+                safe_info(
+                    logger,
                     "💾 [면접] 세션 캐시 업데이트: %s, phase=%s, Q%d/5",
-                    sanitize_log_input(session_key),
-                    sanitize_log_input(session.phase),
+                    session_key,
+                    session.phase,
                     session.current_question_id,
                 )
 
                 # 면접 완료 시 세션 정리
                 if session.phase == "completed":
                     interview_sessions.pop(session_key, None)
-                    logger.info("🗑️ [면접] 완료된 세션 삭제: %s", sanitize_log_input(session_key))
+                    safe_info(logger, "🗑️ [면접] 완료된 세션 삭제: %s", session_key)
 
                 # 업데이트된 세션 상태 전달
                 session_meta = {
