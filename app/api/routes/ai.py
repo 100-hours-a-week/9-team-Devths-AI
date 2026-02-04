@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 
@@ -32,14 +33,13 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
+from app.services.cloudwatch_service import CloudWatchService
 from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
 from app.utils.log_sanitizer import safe_info, sanitize_log_input
 from app.utils.task_store import get_task_store
-from app.services.cloudwatch_service import CloudWatchService
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -721,14 +721,14 @@ async def generate_chat_stream(request: ChatRequest):
     rag = get_services()
     newline = "\n"
     sse_end = "\n\n"
-    
+
     # 모니터링 시작
     start_time = time.time()
     cw = CloudWatchService.get_instance()
-    
+
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
-    
+
     # 메트릭 차원 정의
     dims = {
         "Model": model,
@@ -1478,13 +1478,12 @@ async def generate_chat_stream(request: ChatRequest):
             yield f"data: [DONE]{sse_end}"
 
     # Latency 측정 종료 및 전송
-    finally:
-        try:
-             duration = (time.time() - start_time) * 1000
-             cw = CloudWatchService.get_instance()
-             asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
-        except Exception as e:
-             logger.error(f"Failed to record latency metric: {e}")
+    try:
+         duration = (time.time() - start_time) * 1000
+         cw = CloudWatchService.get_instance()
+         asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+    except Exception as e:
+         logger.error(f"Failed to record latency metric: {e}")
 
 
 @router.post(

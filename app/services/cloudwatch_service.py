@@ -1,13 +1,15 @@
 import asyncio
 import os
 import time
-from typing import List, Dict, Any
+from typing import Any
+
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+
 class CloudWatchService:
     _instance = None
-    _buffer: List[Dict[str, Any]] = []
+    _buffer: list[dict[str, Any]] = []
     _batch_size = 20
     _namespace = os.getenv("CW_NAMESPACE", "Devths/AI")
     _enabled = os.getenv("CW_ENABLED", "false").lower() == "true"
@@ -35,7 +37,7 @@ class CloudWatchService:
             cls._instance = CloudWatchService()
         return cls._instance
 
-    async def put_metric(self, name: str, value: float, unit: str = "Count", dimensions: Dict[str, str] = None):
+    async def put_metric(self, name: str, value: float, unit: str = "Count", dimensions: dict[str, str] = None):
         """
         메트릭을 버퍼에 추가하고, 배치 크기가 되면 비동기(Thread Pool) 전송
         """
@@ -44,10 +46,10 @@ class CloudWatchService:
 
         if dimensions is None:
             dimensions = {}
-        
+
         # 기본 Dimension 추가
         dimensions["Environment"] = self._environment
-        
+
         dims_list = [{"Name": k, "Value": v} for k, v in dimensions.items()]
 
         metric_data = {
@@ -82,7 +84,7 @@ class CloudWatchService:
             except Exception as e:
                 print(f"❌ Failed to run metric flush in executor: {e}")
 
-    def _send_batch_sync(self, metrics: List[Dict[str, Any]]):
+    def _send_batch_sync(self, metrics: list[dict[str, Any]]):
         """
         실제 AWS API 호출을 수행하는 동기 함수 (스레드 풀에서 실행됨)
         """

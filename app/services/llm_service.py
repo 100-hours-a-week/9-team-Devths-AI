@@ -4,6 +4,7 @@ LLM Service using Gemini Flash API
 Provides chat functionality and OCR using Google's Gemini 1.5 Flash model.
 """
 
+import asyncio
 import contextlib
 import io
 import logging
@@ -18,9 +19,8 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-import asyncio
-from app.utils.langfuse_client import create_generation, trace_llm_call
 from app.services.cloudwatch_service import CloudWatchService
+from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class LLMService:
             usage = None
             if hasattr(response, "usage_metadata"):
                 usage = response.usage_metadata
-            
+
             if usage:
                 cw = CloudWatchService.get_instance()
                 dims = {"Model": model_name, "Type": "Input"}
@@ -105,7 +105,7 @@ class LLMService:
                 candidate_tokens = usage.candidates_token_count or 0
                 if candidate_tokens > 0:
                     asyncio.create_task(cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims))
-                
+
                 # Total은 합산해서 기록
                 dims["Type"] = "Total"
                 total_tokens = usage.total_token_count or (prompt_tokens + candidate_tokens)

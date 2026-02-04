@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import ai, masking
+from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
+from app.services.cloudwatch_service import CloudWatchService
 
 # .env 파일 로드
 load_dotenv()
@@ -53,6 +55,7 @@ def setup_logging():
 
 # 로깅 초기화
 setup_logging()
+
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
 logger.info("🚀 AI Server logging initialized")
@@ -116,9 +119,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(ai.router)
 app.include_router(masking.router)
 
-# CloudWatch 미들웨어 등록
-from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
-from app.services.cloudwatch_service import CloudWatchService
 
 app.add_middleware(CloudWatchMiddleware)
 
