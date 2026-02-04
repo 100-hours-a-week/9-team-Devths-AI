@@ -1,0 +1,41 @@
+# ============================================
+# FastAPI Serving Dependencies (서빙 전용 - 경량)
+# EC2 서버에서 최소 메모리로 API 서버만 띄울 때 사용
+# ============================================
+
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Data validation
+pydantic>=2.12.0
+pydantic[email]>=2.12.0
+
+# File handling
+python-multipart==0.0.6
+
+# HTTP client
+httpx==0.26.0
+
+# Image processing
+Pillow==10.2.0
+
+# PDF processing
+pdf2image==1.17.0
+pdfplumber==0.11.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Numpy (lightweight)
+numpy>=1.24.0,<2.0.0
+
+# Google Gemini API (서빙에 필수)
+google-genai
+
+# LLM Observability (서빙에 필수)
+langfuse>=3.12.0
+openai>=2.15.0
+
+# RAG and VectorDB (서빙에 필수)
+chromadb==0.4.24

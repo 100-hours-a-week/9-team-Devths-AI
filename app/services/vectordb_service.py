@@ -4,12 +4,13 @@ VectorDB Service using ChromaDB
 Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
 """
 
-import os
 import logging
-from typing import List, Dict, Any, Optional
+import os
+from typing import Any
+
 import chromadb
-from chromadb.config import Settings
 import google.genai as genai
+from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class VectorDBService:
     """VectorDB Service for storing and retrieving embeddings"""
 
-    def __init__(self, api_key: Optional[str] = None, persist_directory: str = "./chroma_db"):
+    def __init__(self, api_key: str | None = None, persist_directory: str = "./chroma_db"):
         """
         Initialize VectorDB Service
 
@@ -35,28 +36,29 @@ class VectorDBService:
 
         # Initialize ChromaDB
         # ChromaDB 0.4.24 uses Client with Settings
-        self.chroma_client = chromadb.Client(Settings(
-            persist_directory=persist_directory,
-            anonymized_telemetry=False
-        ))
+        self.chroma_client = chromadb.Client(
+            Settings(persist_directory=persist_directory, anonymized_telemetry=False)
+        )
 
         # Collection names
         self.RESUME_COLLECTION = "resumes"
         self.POSTING_COLLECTION = "job_postings"
         self.PORTFOLIO_COLLECTION = "portfolios"
+        self.INTERVIEW_COLLECTION = "interview_questions"
 
         # Create or get collections
         self.resume_collection = self.chroma_client.get_or_create_collection(
-            name=self.RESUME_COLLECTION,
-            metadata={"description": "Resume embeddings"}
+            name=self.RESUME_COLLECTION, metadata={"description": "Resume embeddings"}
         )
         self.posting_collection = self.chroma_client.get_or_create_collection(
-            name=self.POSTING_COLLECTION,
-            metadata={"description": "Job posting embeddings"}
+            name=self.POSTING_COLLECTION, metadata={"description": "Job posting embeddings"}
         )
         self.portfolio_collection = self.chroma_client.get_or_create_collection(
-            name=self.PORTFOLIO_COLLECTION,
-            metadata={"description": "Portfolio embeddings"}
+            name=self.PORTFOLIO_COLLECTION, metadata={"description": "Portfolio embeddings"}
+        )
+        self.interview_collection = self.chroma_client.get_or_create_collection(
+            name=self.INTERVIEW_COLLECTION,
+            metadata={"description": "Interview Q&A embeddings for RAG"},
         )
 
         logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
@@ -70,10 +72,12 @@ class VectorDBService:
             return self.posting_collection
         elif collection_type in ("portfolio", "portfolios"):
             return self.portfolio_collection
+        elif collection_type in ("interview", "interview_questions"):
+            return self.interview_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
 
-    async def create_embedding(self, text: str) -> List[float]:
+    async def create_embedding(self, text: str) -> list[float]:
         """
         Create embedding using gemini-embedding-001
 
@@ -85,12 +89,11 @@ class VectorDBService:
         """
         try:
             result = self.genai_client.models.embed_content(
-                model="gemini-embedding-001",
-                contents=text
+                model="gemini-embedding-001", contents=text
             )
             # Extract embedding from EmbedContentResponse
             # result.embeddings is a list of Embedding objects
-            if hasattr(result, 'embeddings') and len(result.embeddings) > 0:
+            if hasattr(result, "embeddings") and len(result.embeddings) > 0:
                 return result.embeddings[0].values
             else:
                 raise ValueError(f"Unexpected embedding result format: {type(result)}")
@@ -103,7 +106,7 @@ class VectorDBService:
         document_id: str,
         text: str,
         collection_type: str,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Add document to VectorDB
@@ -128,12 +131,15 @@ class VectorDBService:
             doc_metadata["document_id"] = document_id
             doc_metadata["collection_type"] = collection_type
 
+            # ChromaDB는 None 값을 허용하지 않음 - 필터링
+            doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
+
             # Add to collection
             collection.add(
                 ids=[document_id],
                 embeddings=[embedding],
                 documents=[text],
-                metadatas=[doc_metadata]
+                metadatas=[doc_metadata],
             )
 
             logger.info(f"Added document {document_id} to {collection_type} collection")
@@ -144,10 +150,8 @@ class VectorDBService:
             raise
 
     async def add_documents_batch(
-        self,
-        documents: List[Dict[str, Any]],
-        collection_type: str
-    ) -> List[str]:
+        self, documents: list[dict[str, Any]], collection_type: str
+    ) -> list[str]:
         """
         Add multiple documents to VectorDB (for chunked documents)
 
@@ -182,18 +186,16 @@ class VectorDBService:
                 metadata["document_id"] = doc_id
                 metadata["collection_type"] = collection_type
 
+                # ChromaDB는 None 값을 허용하지 않음 - 필터링
+                metadata = {k: v for k, v in metadata.items() if v is not None}
+
                 ids.append(doc_id)
                 embeddings.append(embedding)
                 texts.append(text)
                 metadatas.append(metadata)
 
             # Add batch to collection
-            collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                documents=texts,
-                metadatas=metadatas
-            )
+            collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
             return ids
@@ -207,8 +209,8 @@ class VectorDBService:
         query_text: str,
         collection_type: str,
         n_results: int = 5,
-        where: Optional[Dict[str, Any]] = None
-    ) -> List[Dict[str, Any]]:
+        where: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Query VectorDB for similar documents
 
@@ -232,19 +234,21 @@ class VectorDBService:
                 query_embeddings=[query_embedding],
                 n_results=n_results,
                 where=where,
-                include=["documents", "metadatas", "distances"]
+                include=["documents", "metadatas", "distances"],
             )
 
             # Format results
             formatted_results = []
-            if results and results['ids'] and len(results['ids']) > 0:
-                for i in range(len(results['ids'][0])):
-                    formatted_results.append({
-                        "id": results['ids'][0][i],
-                        "text": results['documents'][0][i],
-                        "metadata": results['metadatas'][0][i],
-                        "distance": results['distances'][0][i]
-                    })
+            if results and results["ids"] and len(results["ids"]) > 0:
+                for i in range(len(results["ids"][0])):
+                    formatted_results.append(
+                        {
+                            "id": results["ids"][0][i],
+                            "text": results["documents"][0][i],
+                            "metadata": results["metadatas"][0][i],
+                            "distance": results["distances"][0][i],
+                        }
+                    )
 
             logger.info(f"Query returned {len(formatted_results)} results from {collection_type}")
             return formatted_results
@@ -254,10 +258,8 @@ class VectorDBService:
             raise
 
     async def get_all_documents_by_user(
-        self,
-        user_id: str,
-        collection_type: str
-    ) -> List[Dict[str, Any]]:
+        self, user_id: str, collection_type: str
+    ) -> list[dict[str, Any]]:
         """
         Get all documents for a specific user
 
@@ -272,32 +274,31 @@ class VectorDBService:
             collection = self._get_collection(collection_type)
 
             # Get all documents with matching user_id
-            result = collection.get(
-                where={"user_id": user_id},
-                include=["documents", "metadatas"]
-            )
+            result = collection.get(where={"user_id": user_id}, include=["documents", "metadatas"])
 
             formatted_results = []
-            if result and result['ids'] and len(result['ids']) > 0:
-                for i in range(len(result['ids'])):
-                    formatted_results.append({
-                        "id": result['ids'][i],
-                        "text": result['documents'][i],
-                        "metadata": result['metadatas'][i]
-                    })
+            if result and result["ids"] and len(result["ids"]) > 0:
+                for i in range(len(result["ids"])):
+                    formatted_results.append(
+                        {
+                            "id": result["ids"][i],
+                            "text": result["documents"][i],
+                            "metadata": result["metadatas"][i],
+                        }
+                    )
 
-            logger.info(f"Retrieved {len(formatted_results)} documents for user {user_id} from {collection_type}")
+            from app.utils.log_sanitizer import sanitize_log_input
+
+            logger.info(
+                f"Retrieved {len(formatted_results)} documents for user {sanitize_log_input(user_id)} from {collection_type}"
+            )
             return formatted_results
 
         except Exception as e:
             logger.error(f"Error retrieving documents for user: {e}")
             return []
 
-    async def get_document(
-        self,
-        document_id: str,
-        collection_type: str
-    ) -> Optional[Dict[str, Any]]:
+    async def get_document(self, document_id: str, collection_type: str) -> dict[str, Any] | None:
         """
         Get document by ID
 
@@ -312,16 +313,15 @@ class VectorDBService:
             collection = self._get_collection(collection_type)
 
             result = collection.get(
-                ids=[document_id],
-                include=["documents", "metadatas", "embeddings"]
+                ids=[document_id], include=["documents", "metadatas", "embeddings"]
             )
 
-            if result and result['ids'] and len(result['ids']) > 0:
+            if result and result["ids"] and len(result["ids"]) > 0:
                 return {
-                    "id": result['ids'][0],
-                    "text": result['documents'][0],
-                    "metadata": result['metadatas'][0],
-                    "embedding": result['embeddings'][0] if result.get('embeddings') else None
+                    "id": result["ids"][0],
+                    "text": result["documents"][0],
+                    "metadata": result["metadatas"][0],
+                    "embedding": result["embeddings"][0] if result.get("embeddings") else None,
                 }
 
             return None
@@ -330,11 +330,7 @@ class VectorDBService:
             logger.error(f"Error getting document from VectorDB: {e}")
             return None
 
-    async def delete_document(
-        self,
-        document_id: str,
-        collection_type: str
-    ) -> bool:
+    async def delete_document(self, document_id: str, collection_type: str) -> bool:
         """
         Delete document from VectorDB
 
@@ -360,7 +356,7 @@ class VectorDBService:
         Get number of documents in collection
 
         Args:
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", or "interview_questions"
 
         Returns:
             Number of documents
@@ -371,3 +367,56 @@ class VectorDBService:
         except Exception as e:
             logger.error(f"Error getting collection count: {e}")
             return 0
+
+    async def add_texts(
+        self,
+        texts: list[str],
+        metadatas: list[dict[str, Any]],
+        ids: list[str],
+        user_id: int | str,
+        collection_name: str,
+    ) -> list[str]:
+        """
+        Add multiple texts to VectorDB (for interview dataset embedding)
+
+        Args:
+            texts: List of texts to embed
+            metadatas: List of metadata dicts
+            ids: List of unique IDs
+            user_id: User ID (0 for public data)
+            collection_name: Collection name (e.g., "interview_questions")
+
+        Returns:
+            List of added IDs
+        """
+        try:
+            collection = self._get_collection(collection_name)
+
+            embeddings = []
+            filtered_metadatas = []
+
+            for i, text in enumerate(texts):
+                # Create embedding
+                embedding = await self.create_embedding(text)
+                embeddings.append(embedding)
+
+                # Prepare metadata (filter None values)
+                meta = metadatas[i].copy() if i < len(metadatas) else {}
+                meta["user_id"] = str(user_id)
+                meta = {k: v for k, v in meta.items() if v is not None}
+                filtered_metadatas.append(meta)
+
+            # Add batch to collection
+            collection.add(
+                ids=ids,
+                embeddings=embeddings,
+                documents=texts,
+                metadatas=filtered_metadatas,
+            )
+
+            logger.info(f"Added {len(ids)} texts to {collection_name} collection")
+            return ids
+
+        except Exception as e:
+            logger.error(f"Error adding texts to VectorDB: {e}")
+            raise

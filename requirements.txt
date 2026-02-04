@@ -3,8 +3,8 @@ fastapi==0.109.0
 uvicorn[standard]==0.27.0
 
 # Data validation
-pydantic==2.5.3
-pydantic[email]==2.5.3
+pydantic>=2.12.0
+pydantic[email]>=2.12.0
 
 # File handling
 python-multipart==0.0.6
@@ -20,9 +20,8 @@ pdf2image==1.17.0
 pdfplumber==0.11.0
 poppler-utils  # Required for pdf2image (system dependency)
 
-# OCR
+# OCR (EasyOCR만 사용 - 02_OCR_모델_선정.md 참고)
 easyocr==1.7.0
-pytesseract==0.3.10
 
 # HuggingFace Gradio Client (optional, for fallback)
 # gradio-client==0.10.1
@@ -57,4 +56,8 @@ datasets>=2.14.0
 # paddleocr==2.7.0  # Advanced OCR
 
 # Environment variables
-python-dotenv==1.0.0
+python-dotenv>=1.1.1
+
+# Langfuse for LLM observability
+langfuse>=3.12.0
+openai>=2.15.0
