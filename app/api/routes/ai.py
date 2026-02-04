@@ -1336,20 +1336,20 @@ async def generate_chat_stream(request: ChatRequest):
                             yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                             await asyncio.sleep(0.015)
 
+                # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
+                interview_sessions[session_key] = session
                 safe_session_key = sanitize_log_input(str(session_key))
                 safe_phase = sanitize_log_input(str(session.phase))
-                safe_session_key = sanitize_log_input(session_key)
+                logger.info(
                     f"💾 [면접] 세션 캐시 업데이트: {safe_session_key}, phase={safe_phase}, Q{session.current_question_id}/5"
-                interview_sessions[session_key] = session
-                    f"💾 [면접] 세션 캐시 업데이트: {safe_session_key}, phase={session.phase}, Q{session.current_question_id}/5"
-                    f"💾 [면접] 세션 캐시 업데이트: {session_key}, phase={session.phase}, Q{session.current_question_id}/5"
                 )
 
+                # 면접 완료 시 세션 정리
+                if session.phase == "completed":
+                    interview_sessions.pop(session_key, None)
                     safe_session_key_for_delete = sanitize_log_input(str(session_key))
                     logger.info(f"🗑️ [면접] 완료된 세션 삭제: {safe_session_key_for_delete}")
-                if session.phase == "completed":
-                    logger.info(f"🗑️ [면접] 완료된 세션 삭제: {safe_session_key}")
-                    logger.info(f"🗑️ [면접] 완료된 세션 삭제: {session_key}")
+
 
                 # 업데이트된 세션 상태 전달
                 session_meta = {
