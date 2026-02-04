@@ -48,6 +48,9 @@ openai = "^2.15.0"
 # RAG and VectorDB (서빙에 필수)
 chromadb = "^0.4.24"
 
+# CloudWatch Monitoring
+boto3 = "^1.34.0"
+
 # OCR (EasyOCR - Primary OCR, 02_OCR_모델_선정.md 참고)
 easyocr = "^1.7.0"
 

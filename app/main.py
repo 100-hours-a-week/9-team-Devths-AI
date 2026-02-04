@@ -116,6 +116,23 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(ai.router)
 app.include_router(masking.router)
 
+# CloudWatch 미들웨어 등록
+from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
+from app.services.cloudwatch_service import CloudWatchService
+
+app.add_middleware(CloudWatchMiddleware)
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🔧 Initializing CloudWatch Service...")
+    CloudWatchService.get_instance()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("🛑 Flushing CloudWatch metrics...")
+    cw_service = CloudWatchService.get_instance()
+    await cw_service.flush()
+
 
 @app.get("/", tags=["Root"])
 async def root():
