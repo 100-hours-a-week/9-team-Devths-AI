@@ -130,7 +130,7 @@ class VLLMService:
                 "messages": messages,
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "max_tokens": 1024,
+                "max_tokens": 2048,  # 1024 → 2048 (응답 끊김 방지)
                 "stream": True,
             }
 
