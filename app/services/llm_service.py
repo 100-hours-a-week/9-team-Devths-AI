@@ -178,6 +178,92 @@ class LLMService:
                     )
             yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
 
+    async def generate_response_non_stream(
+        self,
+        user_message: str,
+        context: str | None = None,
+        system_prompt: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        """
+        Generate non-streaming response from LLM (JSON 응답 등에 적합)
+
+        Args:
+            user_message: User's message
+            context: RAG context from VectorDB (optional)
+            system_prompt: System instructions (optional)
+            user_id: User ID for tracing
+
+        Returns:
+            Complete response text
+        """
+        trace = trace_llm_call(
+            name="gemini_generate_response_non_stream",
+            user_id=user_id,
+            metadata={
+                "model": self.model_name,
+                "has_context": bool(context),
+                "streaming": False,
+            },
+        )
+
+        try:
+            # Build final user message with context
+            final_message = user_message
+            if context:
+                final_message = f"""관련 정보:
+{context}
+
+질문: {user_message}
+
+위 관련 정보를 참고하여 질문에 답변해주세요."""
+
+            # Create contents using types.Content
+            contents = [
+                types.Content(role="user", parts=[types.Part.from_text(text=final_message)])
+            ]
+
+            # Create config
+            config = types.GenerateContentConfig(
+                temperature=0.7,
+                top_p=0.9,
+                top_k=40,
+                max_output_tokens=2048,
+                system_instruction=system_prompt if system_prompt else None,
+            )
+
+            # Generate non-streaming response
+            response = self.client.models.generate_content(
+                model=self.model_name, contents=contents, config=config
+            )
+
+            result_text = response.text if hasattr(response, "text") else ""
+
+            # Langfuse generation 기록
+            if trace is not None:
+                create_generation(
+                    trace=trace,
+                    name="gemini_non_stream",
+                    model=self.model_name,
+                    input_text=final_message,
+                    output_text=result_text,
+                    metadata={"streaming": False},
+                )
+
+            return result_text
+
+        except Exception as e:
+            logger.error(f"Error generating LLM response (non-stream): {e}")
+            if trace is not None:
+                with contextlib.suppress(Exception):
+                    trace["client"].create_event(
+                        trace_context={"trace_id": trace["trace_id"]},
+                        name="error",
+                        level="ERROR",
+                        metadata={"error": str(e)},
+                    )
+            raise
+
     async def generate_analysis(
         self,
         resume_text: str,

@@ -36,7 +36,7 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.log_sanitizer import safe_info, sanitize_log_input
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,19 @@ router = APIRouter(
 # 통합 작업 저장소 (파일 기반, 서버 재시작 시에도 유지)
 # 백엔드에서 전달받은 task_id를 키로 사용
 task_store = get_task_store()
+
+
+# ============================================================================
+# 면접 세션 캐시 (메모리 기반)
+# - Spring 백엔드가 세션 상태를 전달하지 않는 문제의 임시 해결책
+# - 운영 환경에서는 Redis 권장
+# ============================================================================
+interview_sessions: dict[str, InterviewSession] = {}
+
+
+def get_session_key(user_id: int, interview_id: int | None) -> str:
+    """면접 세션 캐시 키 생성"""
+    return f"interview:{user_id}:{interview_id or 'default'}"
 
 
 # Initialize services
@@ -351,7 +364,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info(
                 f"📌 OCR 전략: {'GEMINI (V1 Temporary)' if model == 'auto' else model.upper()}"
             )
-            logger.info(f"📌 사용자 ID: {request.user_id}")
+            safe_info(logger, "📌 사용자 ID: %s", request.user_id)
             logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
             logger.info("")
 
@@ -705,10 +718,10 @@ async def generate_chat_stream(request: ChatRequest):
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
     logger.info(f"{'='*80}")
-    logger.info(f"📌 요청 모델: {model.upper()}")
-    logger.info(f"📌 채팅 모드: {mode}")
-    logger.info(f"📌 사용자 ID: {request.user_id}")
-    logger.info(f"📌 채팅방 ID: {request.room_id}")
+    safe_info(logger, "📌 요청 모델: %s", model.upper())
+    safe_info(logger, "📌 채팅 모드: %s", mode)
+    safe_info(logger, "📌 사용자 ID: %s", request.user_id)
+    safe_info(logger, "📌 채팅방 ID: %s", request.room_id)
     logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
     logger.info("")
 
@@ -1039,9 +1052,22 @@ async def generate_chat_stream(request: ChatRequest):
             interview_type = request.context.interview_type or "tech"
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
-            # 세션 상태 확인
-            session = request.context.interview_session
+            # 세션 캐시 키 생성
+            session_key = get_session_key(request.user_id, request.interview_id)
             user_message = request.message or ""
+
+            # 세션 상태 확인 (요청에 없으면 캐시에서 조회)
+            session = request.context.interview_session
+            if session is None:
+                session = interview_sessions.get(session_key)
+                if session:
+                    safe_info(
+                        logger,
+                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
+                        session_key,
+                        session.phase,
+                        session.current_question_id,
+                    )
 
             # vLLM 또는 Gemini 선택
             model_choice = (
@@ -1073,10 +1099,12 @@ async def generate_chat_stream(request: ChatRequest):
                     portfolio_text=portfolio_text or context or "정보 없음",
                 )
 
-                full_response = ""
+                # 방안 2: 비스트리밍으로 JSON 생성 (빠름) → 질문을 스트리밍으로 출력 (타이핑 효과)
                 system_prompt = get_system_tech_interview()
 
                 if model_choice == "vllm" and rag.vllm:
+                    # vLLM은 기존 스트리밍 방식 유지 (비스트리밍 미지원)
+                    full_response = ""
                     async for chunk in rag.vllm.generate_response(
                         user_message=init_prompt,
                         context=None,
@@ -1085,14 +1113,13 @@ async def generate_chat_stream(request: ChatRequest):
                     ):
                         full_response += chunk
                 else:
-                    async for chunk in rag.llm.generate_response(
+                    # Gemini: 비스트리밍으로 JSON 빠르게 생성
+                    full_response = await rag.llm.generate_response_non_stream(
                         user_message=init_prompt,
                         context=None,
-                        history=[],
                         system_prompt=system_prompt,
                         user_id=request.user_id,
-                    ):
-                        full_response += chunk
+                    )
 
                 # JSON 파싱하여 세션 생성
                 try:
@@ -1135,15 +1162,22 @@ async def generate_chat_stream(request: ChatRequest):
                             phase="questioning",
                         )
 
-                        logger.info(f"✅ 면접 질문 세트 생성 완료: {len(new_session.questions)}개")
+                        logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
-                        # 첫 번째 질문 출력 (헤더: [기술면접 1/5])
+                        # 세션 캐시에 저장
+                        interview_sessions[session_key] = new_session
+                        safe_info(logger, "💾 [면접] 세션 캐시 저장: %s", session_key)
+
+                        # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
                                 f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
                             )
-                            yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
+                            # 방안 2: 질문을 한 글자씩 스트리밍 출력 (타이핑 효과)
+                            for char in question_text:
+                                yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+                                await asyncio.sleep(0.015)  # 15ms 딜레이로 타이핑 효과
 
                             # 세션 상태 전달 (메타데이터로)
                             session_meta = {
@@ -1245,10 +1279,13 @@ async def generate_chat_stream(request: ChatRequest):
                                 )
                                 session.phase = "followup"
 
-                                # 꼬리질문 헤더: [기술면접 {질문번호}-{꼬리질문번호}/5]
+                                # 꼬리질문 헤더: [기술면접 {질문번호}-{꼬리질문번호}/5] - 타이핑 효과
                                 followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
                                 followup_text = f"{followup_header}{newline}{followup_q}"
-                                yield f"data: {json.dumps({'chunk': followup_text}, ensure_ascii=False)}{sse_end}"
+                                # 한 글자씩 스트리밍 출력 (타이핑 효과)
+                                for char in followup_text:
+                                    yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+                                    await asyncio.sleep(0.015)
                             else:
                                 # 다음 주제로 이동
                                 current_q.is_completed = True
@@ -1279,10 +1316,13 @@ async def generate_chat_stream(request: ChatRequest):
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            # 다음 질문 출력 (헤더: [기술면접 2/5] 형식)
+                            # 다음 질문 출력 (헤더: [기술면접 2/5] 형식) - 타이핑 효과
                             question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
                             question_text = f"{question_header}{newline}{next_q.question}"
-                            yield f"data: {json.dumps({'chunk': question_text}, ensure_ascii=False)}{sse_end}"
+                            # 한 글자씩 스트리밍 출력 (타이핑 효과)
+                            for char in question_text:
+                                yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+                                await asyncio.sleep(0.015)
 
                             next_q.conversation.append(
                                 {
@@ -1291,10 +1331,27 @@ async def generate_chat_stream(request: ChatRequest):
                                 }
                             )
                     else:
-                        # 모든 질문 완료
+                        # 모든 질문 완료 - 타이핑 효과
                         session.phase = "completed"
                         complete_msg = f"{newline}{newline}수고하셨습니다! 모든 면접 질문이 완료되었습니다. 면접 결과 리포트를 생성하시려면 리포트 모드를 선택해주세요."
-                        yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
+                        for char in complete_msg:
+                            yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+                            await asyncio.sleep(0.015)
+
+                # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
+                interview_sessions[session_key] = session
+                safe_info(
+                    logger,
+                    "💾 [면접] 세션 캐시 업데이트: %s, phase=%s, Q%d/5",
+                    session_key,
+                    session.phase,
+                    session.current_question_id,
+                )
+
+                # 면접 완료 시 세션 정리
+                if session.phase == "completed":
+                    interview_sessions.pop(session_key, None)
+                    safe_info(logger, "🗑️ [면접] 완료된 세션 삭제: %s", session_key)
 
                 # 업데이트된 세션 상태 전달
                 session_meta = {
@@ -1308,6 +1365,8 @@ async def generate_chat_stream(request: ChatRequest):
             # PHASE 3: 면접 완료
             # ===================================================================
             elif session.phase == "completed":
+                # 이미 완료된 세션 - 캐시에서 삭제
+                interview_sessions.pop(session_key, None)
                 complete_msg = "면접이 이미 완료되었습니다. 리포트 모드에서 결과를 확인하세요."
                 yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
                 yield f"data: [DONE]{sse_end}"
