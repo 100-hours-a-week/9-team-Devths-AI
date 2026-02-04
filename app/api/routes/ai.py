@@ -1159,12 +1159,13 @@ async def generate_chat_stream(request: ChatRequest):
                             phase="questioning",
                         )
 
-                        logger.info(f"✅ 면접 질문 세트 생성 완료: {len(new_session.questions)}개")
+                        safe_question_count = sanitize_log_input(str(len(new_session.questions)))
+                        logger.info(f"✅ 면접 질문 세트 생성 완료: {safe_question_count}개")
 
                         # 세션 캐시에 저장
                         interview_sessions[session_key] = new_session
                         safe_session_key = sanitize_log_input(session_key)
-                        logger.info(f"💾 [면접] 세션 캐시 저장: {safe_session_key}")
+                        logger.info("💾 [면접] 세션 캐시 저장: %s", safe_session_key)
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
@@ -1349,7 +1350,6 @@ async def generate_chat_stream(request: ChatRequest):
                     interview_sessions.pop(session_key, None)
                     safe_session_key_for_delete = sanitize_log_input(str(session_key))
                     logger.info(f"🗑️ [면접] 완료된 세션 삭제: {safe_session_key_for_delete}")
-
 
                 # 업데이트된 세션 상태 전달
                 session_meta = {
