@@ -1,4 +1,5 @@
 import time
+import asyncio
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.services.cloudwatch_service import CloudWatchService
@@ -33,10 +34,11 @@ class CloudWatchMiddleware(BaseHTTPMiddleware):
             
             try:
                 # 1. Latency (ms)
-                await self.cw_service.put_metric("Latency", process_time, "Milliseconds", dimensions)
+                # await 대신 create_task로 변경하여 메트릭 전송이 응답 시간을 지연시키지 않도록 함 (Fire-and-forget)
+                asyncio.create_task(self.cw_service.put_metric("Latency", process_time, "Milliseconds", dimensions))
                 
                 # 2. Request Count
-                await self.cw_service.put_metric("RequestCount", 1, "Count", dimensions)
+                asyncio.create_task(self.cw_service.put_metric("RequestCount", 1, "Count", dimensions))
             except Exception as e:
                 # 메트릭 전송 실패가 API 응답에 영향을 주면 안 됨
                 print(f"⚠️ Failed to queue metrics: {e}")
