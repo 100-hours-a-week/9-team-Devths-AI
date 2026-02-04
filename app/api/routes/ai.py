@@ -1173,11 +1173,17 @@ async def generate_chat_stream(request: ChatRequest):
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.error(f"질문 세트 파싱 실패: {e}")
                     logger.error(f"원본 응답 (첫 500자): {full_response[:500]}")
-                    # 폴백: 기존 방식으로 단일 질문 생성
-                    fallback_msg = (
-                        "면접 질문 세트 생성 중 오류가 발생했습니다. 기본 질문으로 시작합니다."
-                    )
-                    yield f"data: {json.dumps({'chunk': fallback_msg}, ensure_ascii=False)}{sse_end}"
+
+                    # SSE 에러 이벤트 전송 (500 PARSE_FAILED)
+                    error_response = {
+                        "type": "error",
+                        "error": {
+                            "code": "PARSE_FAILED",
+                            "message": "면접 질문 생성 중 AI 응답 파싱에 실패했습니다. 다시 시도해주세요.",
+                            "status": 500,
+                        },
+                    }
+                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
 
                 yield f"data: [DONE]{sse_end}"
 
@@ -1259,8 +1265,18 @@ async def generate_chat_stream(request: ChatRequest):
                             else:
                                 # 다음 주제로 이동
                                 current_q.is_completed = True
-                    except json.JSONDecodeError:
-                        # 파싱 실패 시 다음 질문으로 이동
+                    except json.JSONDecodeError as e:
+                        # 꼬리질문 파싱 실패 - SSE 에러 전송 후 다음 질문으로 이동
+                        logger.error(f"꼬리질문 파싱 실패: {e}")
+                        error_response = {
+                            "type": "error",
+                            "error": {
+                                "code": "PARSE_FAILED",
+                                "message": "꼬리질문 생성 중 파싱 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
+                                "status": 500,
+                            },
+                        }
+                        yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
                         current_q.is_completed = True
 
                 else:
