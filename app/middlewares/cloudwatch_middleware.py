@@ -11,6 +11,7 @@ class CloudWatchMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
+        status_code = 500
         
         try:
             response = await call_next(request)

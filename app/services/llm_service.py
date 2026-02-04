@@ -122,8 +122,9 @@ class LLMService:
             error_type = type(error).__name__
             dims = {"Model": model_name, "ErrorType": error_type}
             asyncio.create_task(cw.put_metric("LLM_Error_Count", 1, "Count", dims))
-        except Exception:
-            pass
+        except Exception as e:
+            # CloudWatch 메트릭 기록 실패 시 본 서비스 동작에는 영향을 주지 않되, 원인 파악을 위해 로깅만 수행
+            logger.warning(f"Failed to record LLM error metric to CloudWatch: {e}")
 
     async def generate_response(
         self,
