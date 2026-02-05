@@ -753,7 +753,7 @@ async def generate_chat_stream(request: ChatRequest):
 
     # 모니터링 시작
     start_time = time.time()
-    cw = CloudWatchService.get_instance()
+
 
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
