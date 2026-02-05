@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.prompts import (
@@ -40,7 +40,12 @@ from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
 from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
-from app.utils.task_store import get_task_store
+
+# ============================================================================
+# Phase 5 마이그레이션: DI 기반 인프라
+# ============================================================================
+from app.config.dependencies import get_legacy_task_storage, get_session_store
+from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +55,7 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# 통합 작업 저장소 (파일 기반, 서버 재시작 시에도 유지)
-# 백엔드에서 전달받은 task_id를 키로 사용
-task_store = get_task_store()
-
-
-# ============================================================================
-# 면접 세션 캐시 (메모리 기반)
-# - Spring 백엔드가 세션 상태를 전달하지 않는 문제의 임시 해결책
-# - 운영 환경에서는 Redis 권장
-# ============================================================================
-interview_sessions: dict[str, InterviewSession] = {}
+# 면접 세션: get_session_store() DI로 주입 (ai.py 내 interview_sessions 제거)
 
 
 def get_session_key(user_id: int, interview_id: int | None) -> str:
@@ -76,16 +71,17 @@ rag_service = None
 
 
 def get_services():
-    """Get or initialize AI services"""
+    """Get or initialize AI services (설정은 config/settings 사용)"""
     global llm_service, vllm_service, vectordb_service, rag_service
 
     if llm_service is None:
-        api_key = os.getenv("GOOGLE_API_KEY")
+        settings = get_settings()
+        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
         llm_service = LLMService(api_key=api_key)
         vectordb_service = VectorDBService(api_key=api_key)
 
         # Initialize vLLM service (GCP GPU server)
-        gcp_vllm_url = os.getenv("GCP_VLLM_BASE_URL")
+        gcp_vllm_url = settings.gcp_vllm_base_url or os.getenv("GCP_VLLM_BASE_URL")
 
         try:
             if gcp_vllm_url:
@@ -336,7 +332,10 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
         },
     },
 )
-async def text_extract(request: TextExtractRequest):
+async def text_extract(
+    request: TextExtractRequest,
+    task_storage=Depends(get_legacy_task_storage),
+):
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
 
@@ -348,9 +347,9 @@ async def text_extract(request: TextExtractRequest):
     except Exception:
         pass
 
-    # 비동기 작업 시작 (통합 task_store 사용)
+    # 비동기 작업 시작 (DI: task_storage)
     task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
-    task_store.save(
+    task_storage.save(
         task_key,
         {
             "type": "text_extract",
@@ -362,7 +361,7 @@ async def text_extract(request: TextExtractRequest):
     )
 
     # 백그라운드에서 처리
-    async def process_text_extract():
+    async def process_text_extract(store):
         try:
             rag = get_services()
 
@@ -511,7 +510,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("")
 
             # 결과 저장 (명세서에 따른 응답 구조)
-            task_data = task_store.get(task_key) or {}
+            task_data = store.get(task_key) or {}
             task_data["status"] = TaskStatus.COMPLETED
 
             # formatted_text 생성 (백엔드에서 바로 표시용)
@@ -556,7 +555,7 @@ async def text_extract(request: TextExtractRequest):
                 formatted_text=formatted_text,
                 ai_message=ai_message,
             ).model_dump()
-            task_store.save(task_key, task_data)
+            store.save(task_key, task_data)
 
             logger.info("")
             logger.info("✅ 텍스트 추출 + 분석 완료!")
@@ -565,12 +564,12 @@ async def text_extract(request: TextExtractRequest):
 
         except Exception as e:
             logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
-            task_data = task_store.get(task_key) or {}
+            task_data = store.get(task_key) or {}
             task_data["status"] = TaskStatus.FAILED
             task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
-            task_store.save(task_key, task_data)
+            store.save(task_key, task_data)
 
-    asyncio.create_task(process_text_extract())
+    asyncio.create_task(process_text_extract(task_storage))
 
     return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)
 
@@ -674,10 +673,13 @@ async def text_extract(request: TextExtractRequest):
         },
     },
 )
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    task_storage=Depends(get_legacy_task_storage),
+):
     """통합 비동기 작업 상태 조회 (text_extract, masking 등)"""
     task_key = str(task_id)  # 문자열 키로 통일
-    task = task_store.get(task_key)
+    task = task_storage.get(task_key)
 
     if task is None:
         raise HTTPException(
@@ -713,8 +715,11 @@ async def get_task_status(task_id: str):
 # ============================================================================
 
 
-async def generate_chat_stream(request: ChatRequest):
-    """채팅 응답 스트리밍 생성"""
+async def generate_chat_stream(
+    request: ChatRequest,
+    session_store,
+):
+    """채팅 응답 스트리밍 생성 (session_store: DI from get_session_store)"""
 
     # =========================================================================
     # 프롬프트 인젝션 검사 (API 호출 전 사전 필터링)
@@ -1102,10 +1107,11 @@ async def generate_chat_stream(request: ChatRequest):
             session_key = get_session_key(request.user_id, request.interview_id)
             user_message = request.message or ""
 
-            # 세션 상태 확인 (요청에 없으면 캐시에서 조회)
+            # 세션 상태 확인 (요청에 없으면 세션 스토어에서 조회)
             session = request.context.interview_session
             if session is None:
-                session = interview_sessions.get(session_key)
+                session_data = await session_store.get(session_key)
+                session = InterviewSession.model_validate(session_data) if session_data else None
                 if session:
                     safe_info(
                         logger,
@@ -1210,9 +1216,9 @@ async def generate_chat_stream(request: ChatRequest):
 
                         logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
-                        # 세션 캐시에 저장
-                        interview_sessions[session_key] = new_session
-                        safe_info(logger, "💾 [면접] 세션 캐시 저장: %s", session_key)
+                        # 세션 스토어에 저장
+                        await session_store.set(session_key, new_session.model_dump())
+                        safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
@@ -1384,11 +1390,11 @@ async def generate_chat_stream(request: ChatRequest):
                             yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                             await asyncio.sleep(0.015)
 
-                # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
-                interview_sessions[session_key] = session
+                # 세션 스토어 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
+                await session_store.set(session_key, session.model_dump())
                 safe_info(
                     logger,
-                    "💾 [면접] 세션 캐시 업데이트: %s, phase=%s, Q%d/5",
+                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%d/5",
                     session_key,
                     session.phase,
                     session.current_question_id,
@@ -1396,7 +1402,7 @@ async def generate_chat_stream(request: ChatRequest):
 
                 # 면접 완료 시 세션 정리
                 if session.phase == "completed":
-                    interview_sessions.pop(session_key, None)
+                    await session_store.delete(session_key)
                     safe_info(logger, "🗑️ [면접] 완료된 세션 삭제: %s", session_key)
 
                 # 업데이트된 세션 상태 전달
@@ -1411,8 +1417,8 @@ async def generate_chat_stream(request: ChatRequest):
             # PHASE 3: 면접 완료
             # ===================================================================
             elif session.phase == "completed":
-                # 이미 완료된 세션 - 캐시에서 삭제
-                interview_sessions.pop(session_key, None)
+                # 이미 완료된 세션 - 스토어에서 삭제
+                await session_store.delete(session_key)
                 complete_msg = "면접이 이미 완료되었습니다. 리포트 모드에서 결과를 확인하세요."
                 yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
                 yield f"data: [DONE]{sse_end}"
@@ -1628,10 +1634,13 @@ async def generate_chat_stream(request: ChatRequest):
         },
     },
 )
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    session_store=Depends(get_session_store),
+):
     """채팅 처리 (일반/면접)"""
     return StreamingResponse(
-        generate_chat_stream(request),
+        generate_chat_stream(request, session_store),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
