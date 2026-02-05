@@ -1,6 +1,6 @@
 import asyncio
 import os
-import time
+from datetime import datetime
 from typing import Any
 
 import boto3
@@ -11,6 +11,7 @@ class CloudWatchService:
     _instance = None
     _buffer: list[dict[str, Any]] = []
     _batch_size = 20
+    _flush_interval = 60  # 60초마다 강제 전송
     _namespace = os.getenv("CW_NAMESPACE", "Devths/AI")
     _enabled = os.getenv("CW_ENABLED", "false").lower() == "true"
     _region = os.getenv("AWS_REGION", "ap-northeast-2")
@@ -28,11 +29,32 @@ class CloudWatchService:
                 print(
                     f"✅ CloudWatchService initialized (Namespace: {self._namespace}, Env: {self._environment})"
                 )
+
+                # 백그라운드 주기적 플러시 시작
+                self._start_periodic_flush()
+
             except (BotoCoreError, ClientError) as e:
                 print(f"❌ Failed to initialize CloudWatch client: {e}")
                 self._enabled = False
         else:
             print("⚠️ CloudWatch monitoring is DISABLED (CW_ENABLED != true)")
+
+    def _start_periodic_flush(self):
+        """백그라운드에서 주기적으로 버퍼를 비우는 태스크 시작"""
+
+        async def periodic_loop():
+            while True:
+                await asyncio.sleep(self._flush_interval)
+                if self._buffer:
+                    # print(f"⏰ Periodic flush triggered (Buffer size: {len(self._buffer)})")
+                    await self.flush()
+
+        try:
+            # 실행 중인 루프가 있으면 태스크 등록
+            loop = asyncio.get_running_loop()
+            loop.create_task(periodic_loop())
+        except RuntimeError:
+            pass  # 루프가 아직 없으면(초기화 시점 등) 패스
 
     @classmethod
     def get_instance(cls):
@@ -60,7 +82,7 @@ class CloudWatchService:
         metric_data = {
             "MetricName": name,
             "Dimensions": dims_list,
-            "Timestamp": time.time(),
+            "Timestamp": datetime.utcnow(),
             "Value": value,
             "Unit": unit,
             "StorageResolution": 60,  # 1분 단위 (Standard Resolution)
