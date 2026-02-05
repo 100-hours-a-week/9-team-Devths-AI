@@ -38,7 +38,8 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-from app.utils.log_sanitizer import safe_info, sanitize_log_input
+from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
+from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 from app.utils.task_store import get_task_store
 
 logger = logging.getLogger(__name__)
@@ -715,6 +716,34 @@ async def get_task_status(task_id: str):
 async def generate_chat_stream(request: ChatRequest):
     """채팅 응답 스트리밍 생성"""
 
+    # =========================================================================
+    # 프롬프트 인젝션 검사 (API 호출 전 사전 필터링)
+    # =========================================================================
+    user_message_raw = request.message or ""
+    guard_result = check_prompt_injection(user_message_raw)
+
+    if guard_result.risk_level == RiskLevel.BLOCK:
+        # 차단: 안전한 응답 반환 (LLM 호출 없이)
+        safe_warning(
+            logger,
+            "🚨 프롬프트 인젝션 차단: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
+        )
+        blocked_response = guard_result.message
+        yield f"data: {json.dumps({'content': blocked_response}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    if guard_result.risk_level == RiskLevel.WARNING:
+        # 경고: 로깅만 하고 계속 진행
+        safe_warning(
+            logger,
+            "⚠️ 의심스러운 입력 감지: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
+        )
+
     # context에서 모드 결정 (normal 또는 interview)
     mode = request.context.mode if request.context else ChatMode.NORMAL
 
@@ -1351,7 +1380,7 @@ async def generate_chat_stream(request: ChatRequest):
                     else:
                         # 모든 질문 완료 - 타이핑 효과
                         session.phase = "completed"
-                        complete_msg = f"{newline}{newline}수고하셨습니다! 모든 면접 질문이 완료되었습니다. 면접 결과 리포트를 생성하시려면 리포트 모드를 선택해주세요."
+                        complete_msg = f"{newline}{newline}면접 결과 리포트를 생성 중입니다. 잠시만 기다려 주세요."
                         for char in complete_msg:
                             yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                             await asyncio.sleep(0.015)
