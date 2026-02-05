@@ -26,8 +26,9 @@ class CloudWatchMiddleware(BaseHTTPMiddleware):
         finally:
             process_time = (time.time() - start_time) * 1000  # ms 단위
 
-            # API 경로 그룹화 (Cardinality 제어)
-            path = request.url.path
+            # API 경로 그룹화 (Cardinality 제어) - 중요: ID 대신 {id} 패턴 사용
+            route_obj = request.scope.get("route")
+            path = route_obj.path if route_obj else request.url.path
 
             # 메트릭 차원(Dimensions)
             dimensions = {"Method": request.method, "Path": path, "Status": str(status_code)}
