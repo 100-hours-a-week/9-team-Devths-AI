@@ -36,7 +36,7 @@ from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-from app.utils.log_sanitizer import safe_info, sanitize_log_input
+from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 from app.utils.task_store import get_task_store
 
@@ -714,9 +714,11 @@ async def generate_chat_stream(request: ChatRequest):
 
     if guard_result.risk_level == RiskLevel.BLOCK:
         # 차단: 안전한 응답 반환 (LLM 호출 없이)
-        logger.warning(
-            f"🚨 프롬프트 인젝션 차단: user_id={request.user_id}, "
-            f"patterns={guard_result.matched_patterns}"
+        safe_warning(
+            logger,
+            "🚨 프롬프트 인젝션 차단: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
         )
         blocked_response = guard_result.message
         yield f"data: {json.dumps({'content': blocked_response}, ensure_ascii=False)}\n\n"
@@ -725,9 +727,11 @@ async def generate_chat_stream(request: ChatRequest):
 
     if guard_result.risk_level == RiskLevel.WARNING:
         # 경고: 로깅만 하고 계속 진행
-        logger.warning(
-            f"⚠️ 의심스러운 입력 감지: user_id={request.user_id}, "
-            f"patterns={guard_result.matched_patterns}"
+        safe_warning(
+            logger,
+            "⚠️ 의심스러운 입력 감지: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
         )
 
     # context에서 모드 결정 (normal 또는 interview)
