@@ -9,6 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.routes import ai, masking
+from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
+from app.services.cloudwatch_service import CloudWatchService
 
 # .env 파일 로드
 load_dotenv()
@@ -53,6 +55,7 @@ def setup_logging():
 
 # 로깅 초기화
 setup_logging()
+
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
 logger.info("🚀 AI Server logging initialized")
@@ -115,6 +118,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # 라우터 등록
 app.include_router(ai.router)
 app.include_router(masking.router)
+
+
+app.add_middleware(CloudWatchMiddleware)
+
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("🔧 Initializing CloudWatch Service...")
+    CloudWatchService.get_instance()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("🛑 Flushing CloudWatch metrics...")
+    cw_service = CloudWatchService.get_instance()
+    await cw_service.flush()
 
 
 @app.get("/", tags=["Root"])

@@ -29,12 +29,18 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
         # 더 구체적인 패턴부터 먼저 체크 (prod -> staging -> dev 순서)
         if [[ "$DEPLOYMENT_GROUP_LOWER" == *"prod"* ]]; then
             export PARAMETER_STORE_PATH="/Prod/AI/"
+            export DEPLOYMENT_ENV="prod"
+            export CW_ENABLED="true"
             echo "🚀 Environment: Production (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
         elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"stg"* ]] || [[ "$DEPLOYMENT_GROUP_LOWER" == *"staging"* ]]; then
             export PARAMETER_STORE_PATH="/Stg/AI/"
+            export DEPLOYMENT_ENV="stg"
+            export CW_ENABLED="true"
             echo "🧪 Environment: Staging (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
         elif [[ "$DEPLOYMENT_GROUP_LOWER" == *"dev"* ]]; then
             export PARAMETER_STORE_PATH="/Dev/AI/"
+            export DEPLOYMENT_ENV="dev"
+            export CW_ENABLED="true"
             echo "🛠️  Environment: Development (from deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP)"
         else
             echo "⚠️  Unknown deployment group: $CODEDEPLOY_DEPLOYMENT_GROUP"
@@ -47,14 +53,20 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
         case "$DEPLOY_BRANCH" in
             develop)
                 export PARAMETER_STORE_PATH="/Dev/AI/"
+                export DEPLOYMENT_ENV="dev"
+                export CW_ENABLED="true"
                 echo "🛠️  Environment: Development (from branch: $DEPLOY_BRANCH)"
                 ;;
             release/*)
                 export PARAMETER_STORE_PATH="/Stg/AI/"
+                export DEPLOYMENT_ENV="stg"
+                export CW_ENABLED="true"
                 echo "🧪 Environment: Staging (from branch: $DEPLOY_BRANCH)"
                 ;;
             main)
                 export PARAMETER_STORE_PATH="/Prod/AI/"
+                export DEPLOYMENT_ENV="prod"
+                export CW_ENABLED="true"
                 echo "🚀 Environment: Production (from branch: $DEPLOY_BRANCH)"
                 ;;
             *)
@@ -67,6 +79,8 @@ if [ -f "$APP_DIR/.deploy-env" ]; then
     if [ -z "$PARAMETER_STORE_PATH" ]; then
         echo "⚠️  Could not determine environment, using default /Prod/AI/"
         export PARAMETER_STORE_PATH="/Prod/AI/"
+        export DEPLOYMENT_ENV="prod"
+        export CW_ENABLED="true"
     fi
 else
     echo "⚠️  .deploy-env file not found at $APP_DIR/.deploy-env"

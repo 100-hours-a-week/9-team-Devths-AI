@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 
@@ -32,6 +33,7 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
+from app.services.cloudwatch_service import CloudWatchService
 from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
@@ -337,6 +339,14 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
 async def text_extract(request: TextExtractRequest):
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
+
+    # 모니터링 메트릭 전송
+    try:
+        cw = CloudWatchService.get_instance()
+        # fire-and-forget (await 안함, 배경 실행)
+        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
+    except Exception:
+        pass
 
     # 비동기 작업 시작 (통합 task_store 사용)
     task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
@@ -741,8 +751,15 @@ async def generate_chat_stream(request: ChatRequest):
     newline = "\n"
     sse_end = "\n\n"
 
+    # 모니터링 시작
+    start_time = time.time()
+
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
+
+    # 메트릭 차원 정의
+    dims = {"Model": model, "Mode": str(mode)}
+
     logger.info("")
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
@@ -1483,6 +1500,14 @@ async def generate_chat_stream(request: ChatRequest):
             logger.error(f"Interview report generation error: {e}")
             {"success": False, "mode": "report", "error": str(e)}
             yield f"data: [DONE]{sse_end}"
+
+    # Latency 측정 종료 및 전송
+    try:
+        duration = (time.time() - start_time) * 1000
+        cw = CloudWatchService.get_instance()
+        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+    except Exception as e:
+        logger.error(f"Failed to record latency metric: {e}")
 
 
 @router.post(

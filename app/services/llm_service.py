@@ -4,6 +4,7 @@ LLM Service using Gemini Flash API
 Provides chat functionality and OCR using Google's Gemini 1.5 Flash model.
 """
 
+import asyncio
 import contextlib
 import io
 import logging
@@ -18,6 +19,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
+from app.services.cloudwatch_service import CloudWatchService
 from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,51 @@ class LLMService:
         except Exception:
             # Langfuse 오류로 본 서비스가 죽지 않게 방어
             return
+
+    def _record_token_usage(self, response: Any, model_name: str) -> None:
+        """CloudWatch에 토큰 사용량 기록"""
+        try:
+            usage = None
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+
+            if usage:
+                cw = CloudWatchService.get_instance()
+                dims = {"Model": model_name, "Type": "Input"}
+                prompt_tokens = usage.prompt_token_count or 0
+                if prompt_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", prompt_tokens, "Count", dims)
+                    )
+
+                dims["Type"] = "Output"
+                candidate_tokens = usage.candidates_token_count or 0
+                if candidate_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims)
+                    )
+
+                # Total은 합산해서 기록
+                dims["Type"] = "Total"
+                total_tokens = usage.total_token_count or (prompt_tokens + candidate_tokens)
+                if total_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", total_tokens, "Count", dims)
+                    )
+
+        except Exception as e:
+            logger.warning(f"Failed to record token usage: {e}")
+
+    def _record_error(self, error: Exception, model_name: str) -> None:
+        """CloudWatch에 에러 기록"""
+        try:
+            cw = CloudWatchService.get_instance()
+            error_type = type(error).__name__
+            dims = {"Model": model_name, "ErrorType": error_type}
+            asyncio.create_task(cw.put_metric("LLM_Error_Count", 1, "Count", dims))
+        except Exception as e:
+            # CloudWatch 메트릭 기록 실패 시 본 서비스 동작에는 영향을 주지 않되, 원인 파악을 위해 로깅만 수행
+            logger.warning(f"Failed to record LLM error metric to CloudWatch: {e}")
 
     async def generate_response(
         self,
@@ -155,6 +202,9 @@ class LLMService:
                     full_response += chunk.text
                     yield chunk.text
 
+            # 토큰 사용량 기록 (스트리밍 완료 후 response 객체에서 확인)
+            self._record_token_usage(response, self.model_name)
+
             # Langfuse generation 기록 (스트리밍 완료 후)
             if trace is not None:
                 create_generation(
@@ -168,6 +218,8 @@ class LLMService:
 
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
+            self._record_error(e, self.model_name)  # 에러 메트릭 기록
+
             if trace is not None:
                 with contextlib.suppress(Exception):
                     trace["client"].create_event(
@@ -237,6 +289,8 @@ class LLMService:
                 model=self.model_name, contents=contents, config=config
             )
 
+            self._record_token_usage(response, self.model_name)  # 토큰 사용량 기록
+
             result_text = response.text if hasattr(response, "text") else ""
 
             # Langfuse generation 기록
@@ -254,6 +308,8 @@ class LLMService:
 
         except Exception as e:
             logger.error(f"Error generating LLM response (non-stream): {e}")
+            self._record_error(e, self.model_name)  # 에러 메트릭 기록
+
             if trace is not None:
                 with contextlib.suppress(Exception):
                     trace["client"].create_event(
@@ -475,6 +531,7 @@ class LLMService:
                     logger.info(
                         f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)"
                     )
+                    self._record_token_usage(response, self.analysis_model)  # 토큰 사용량 기록
                     return result_text
 
                 # 빈 응답 - 프롬프트 피드백 확인
@@ -485,6 +542,7 @@ class LLMService:
 
             except Exception as e:
                 logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 예외: {e}")
+                self._record_error(e, self.analysis_model)  # 에러 메트릭 기록
 
         logger.error(f"[{step_name}] {max_retries}회 재시도 후에도 실패")
         return None
