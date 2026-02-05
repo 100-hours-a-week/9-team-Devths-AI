@@ -89,9 +89,7 @@ def check_prompt_injection(user_input: str) -> GuardResult:
         GuardResult: 검사 결과 (risk_level, matched_patterns, message)
     """
     if not user_input:
-        return GuardResult(
-            risk_level=RiskLevel.SAFE, matched_patterns=[], message="입력 없음"
-        )
+        return GuardResult(risk_level=RiskLevel.SAFE, matched_patterns=[], message="입력 없음")
 
     # 소문자 변환 (대소문자 무시 검사)
     input_lower = user_input.lower()
@@ -121,9 +119,7 @@ def check_prompt_injection(user_input: str) -> GuardResult:
             message="의심스러운 패턴 감지됨 (로깅만)",
         )
 
-    return GuardResult(
-        risk_level=RiskLevel.SAFE, matched_patterns=[], message="안전한 입력"
-    )
+    return GuardResult(risk_level=RiskLevel.SAFE, matched_patterns=[], message="안전한 입력")
 
 
 def should_block_request(user_input: str) -> tuple[bool, str | None]:
