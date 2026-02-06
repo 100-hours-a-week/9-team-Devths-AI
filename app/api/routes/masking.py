@@ -22,7 +22,6 @@ from app.schemas.masking import (
 )
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
-from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +103,7 @@ async def masking_draft(
     """
     task_id = f"task_masking_{uuid.uuid4().hex[:12]}"
 
-    logger.info("=" * 80)
-    logger.info(f"[MASKING_DRAFT] Creating new task: {task_id}")
-    logger.info(f"[MASKING_DRAFT] Current tasks in store: {task_storage.list_all()}")
+    logger.info("[MASKING_DRAFT] Creating new task: %s", task_id)
 
     # 초기 상태를 즉시 저장 (DI: task_storage)
     task_data = {
@@ -119,15 +116,9 @@ async def masking_draft(
     }
     task_storage.save(task_id, task_data)
 
-    logger.info(f"[MASKING_DRAFT] Task {task_id} saved to file store")
-    logger.info(f"[MASKING_DRAFT] Task exists: {task_storage.exists(task_id)}")
-    logger.info(f"[MASKING_DRAFT] Task data: {sanitize_log_input(str(task_storage.get(task_id)))}")
-    logger.info("=" * 80)
-
     # 백그라운드에서 처리
     async def process_masking(store):
-        logger.info(f"[PROCESS_MASKING] Starting masking task {task_id}")
-        logger.info(f"[PROCESS_MASKING] Task exists in store: {store.exists(task_id)}")
+        logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
         logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:
             # 모델 선택
@@ -279,21 +270,15 @@ async def get_masking_task_status(
     Returns:
         TaskStatusResponse: 작업 상태 및 결과
     """
-    logger.info("=" * 80)
-    logger.info(f"[GET_STATUS] Looking for task: {task_id}")
-    logger.info(f"[GET_STATUS] All tasks in store: {task_storage.list_all()}")
-    logger.info(f"[GET_STATUS] Task exists: {task_storage.exists(task_id)}")
-    logger.info("=" * 80)
-
     task = task_storage.get(task_id)
     if task is None:
-        logger.error(f"[GET_STATUS] Task {task_id} NOT FOUND!")
+        logger.warning("[GET_STATUS] Task not found: %s", task_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": ErrorCode.TASK_NOT_FOUND, "message": "작업을 찾을 수 없습니다."},
         )
 
-    logger.info(f"[GET_STATUS] Task {task_id} found! Status: {task['status']}")
+    logger.info("[GET_STATUS] Task %s status: %s", task_id, task["status"])
 
     return TaskStatusResponse(
         task_id=task_id,
