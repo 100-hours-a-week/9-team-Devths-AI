@@ -7,8 +7,9 @@ Used for production environments with distributed task processing.
 
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 from .base import BaseTaskQueue, TaskData, TaskStatus
 
@@ -35,13 +36,13 @@ class CeleryTaskQueue(BaseTaskQueue):
             task_prefix: Prefix for task keys in Redis.
         """
         try:
-            from celery import Celery
             import redis.asyncio as redis
-        except ImportError:
+            from celery import Celery
+        except ImportError as err:
             raise ImportError(
                 "celery and redis packages are required. "
                 "Install with: pip install celery redis"
-            )
+            ) from err
 
         self._celery = Celery(
             "ai_tasks",
@@ -86,9 +87,9 @@ class CeleryTaskQueue(BaseTaskQueue):
         self,
         task_id: str,
         task_type: str,
-        task_func: Callable,
+        task_func: Callable,  # noqa: ARG002
         request_data: dict[str, Any],
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> str:
         """Enqueue a task for processing.
 
@@ -293,10 +294,12 @@ class CeleryTaskQueue(BaseTaskQueue):
                 task_data = TaskData.from_dict(json.loads(data))
 
                 # Only delete completed/failed tasks older than cutoff
-                if task_data.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-                    if task_data.created_at < cutoff:
-                        await self._redis.delete(key)
-                        deleted += 1
+                if (
+                    task_data.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+                    and task_data.created_at < cutoff
+                ):
+                    await self._redis.delete(key)
+                    deleted += 1
 
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old tasks")

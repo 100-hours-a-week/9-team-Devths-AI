@@ -202,7 +202,7 @@ class Settings(BaseSettings):
         return bool(self.langfuse_secret_key and self.langfuse_public_key)
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()

@@ -58,7 +58,7 @@ class VLLMProvider(BaseLLMProvider):
         *,
         temperature: float = 0.7,
         max_tokens: int | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> LLMResponse:
         """Generate a response from vLLM.
 
@@ -101,7 +101,7 @@ class VLLMProvider(BaseLLMProvider):
         *,
         temperature: float = 0.7,
         max_tokens: int | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Generate a streaming response from vLLM.
 
@@ -145,8 +145,8 @@ class VLLMProvider(BaseLLMProvider):
 
     async def create_embedding(
         self,
-        text: str,
-        **kwargs: Any,
+        text: str,  # noqa: ARG002
+        **kwargs: Any,  # noqa: ARG002
     ) -> EmbeddingResponse:
         """Create an embedding (not supported by default vLLM setup).
 

@@ -182,7 +182,7 @@ class InMemorySessionStore(BaseSessionStore):
         if pattern == "*":
             return list(self._sessions.keys())
 
-        return [k for k in self._sessions.keys() if fnmatch.fnmatch(k, pattern)]
+        return [k for k in self._sessions if fnmatch.fnmatch(k, pattern)]
 
     async def clear_all(self) -> int:
         """Clear all sessions.

@@ -8,9 +8,10 @@ Used for development and testing environments.
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .base import BaseTaskQueue, TaskData, TaskStatus
 
@@ -292,10 +293,12 @@ class FileTaskQueue(BaseTaskQueue):
                 continue
 
             # Only delete completed/failed tasks older than cutoff
-            if task_data.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-                if task_data.created_at < cutoff:
-                    await self.delete(task_id)
-                    deleted += 1
+            if (
+                task_data.status in (TaskStatus.COMPLETED, TaskStatus.FAILED)
+                and task_data.created_at < cutoff
+            ):
+                await self.delete(task_id)
+                deleted += 1
 
         if deleted > 0:
             logger.info(f"Cleaned up {deleted} old tasks")

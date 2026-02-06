@@ -9,10 +9,8 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_chroma import Chroma
-from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.runnables import RunnablePassthrough
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
 

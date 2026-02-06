@@ -117,8 +117,8 @@ class LangChainLLMGateway:
         *,
         system_prompt: str | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None,
-        **kwargs: Any,
+        max_tokens: int | None = None,  # noqa: ARG002
+        **kwargs: Any,  # noqa: ARG002
     ) -> str:
         """Generate a response using LangChain.
 
@@ -148,8 +148,8 @@ class LangChainLLMGateway:
         *,
         system_prompt: str | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None,
-        **kwargs: Any,
+        max_tokens: int | None = None,  # noqa: ARG002
+        **kwargs: Any,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Generate a streaming response using LangChain.
 
@@ -200,7 +200,7 @@ class LangChainLLMGateway:
         self,
         prompt_template: str,
         *,
-        input_variables: list[str] | None = None,
+        input_variables: list[str] | None = None,  # noqa: ARG002
         system_prompt: str | None = None,
     ):
         """Create a simple LangChain chain.

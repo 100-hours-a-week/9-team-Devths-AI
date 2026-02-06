@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # ============================================
 
 
-@lru_cache()
+@lru_cache
 def get_llm_provider(
     settings: Settings = Depends(get_settings),
 ) -> "BaseLLMProvider":
@@ -41,7 +41,7 @@ def get_llm_provider(
     )
 
 
-@lru_cache()
+@lru_cache
 def get_vllm_provider(
     settings: Settings = Depends(get_settings),
 ) -> "BaseLLMProvider | None":
@@ -60,7 +60,7 @@ def get_vllm_provider(
     )
 
 
-@lru_cache()
+@lru_cache
 def get_vectordb(
     settings: Settings = Depends(get_settings),
 ) -> "BaseVectorStore":
@@ -77,7 +77,7 @@ def get_vectordb(
     )
 
 
-@lru_cache()
+@lru_cache
 def get_ocr_provider(
     settings: Settings = Depends(get_settings),
 ) -> "BaseOCRProvider":

@@ -9,6 +9,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+# ============================================================================
+# Phase 5 마이그레이션: DI 기반 인프라
+# ============================================================================
+from app.config.dependencies import get_legacy_task_storage, get_session_store
+from app.config.settings import get_settings
 from app.prompts import (
     create_tech_followup_prompt,
     create_tech_interview_init_prompt,
@@ -40,12 +45,6 @@ from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
 from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
-
-# ============================================================================
-# Phase 5 마이그레이션: DI 기반 인프라
-# ============================================================================
-from app.config.dependencies import get_legacy_task_storage, get_session_store
-from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 

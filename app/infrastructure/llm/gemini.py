@@ -159,7 +159,7 @@ class GeminiProvider(BaseLLMProvider):
     async def create_embedding(
         self,
         text: str,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ARG002
     ) -> EmbeddingResponse:
         """Create an embedding using Gemini.
 

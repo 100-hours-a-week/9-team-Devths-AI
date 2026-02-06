@@ -35,8 +35,10 @@ class RedisSessionStore(BaseSessionStore):
         """
         try:
             import redis.asyncio as redis
-        except ImportError:
-            raise ImportError("redis package is required. Install with: pip install redis")
+        except ImportError as err:
+            raise ImportError(
+                "redis package is required. Install with: pip install redis"
+            ) from err
 
         self._redis = redis.from_url(redis_url, decode_responses=True)
         self._default_ttl = default_ttl
