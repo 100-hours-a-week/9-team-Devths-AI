@@ -22,6 +22,7 @@ from app.schemas.masking import (
 )
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -270,15 +271,16 @@ async def get_masking_task_status(
     Returns:
         TaskStatusResponse: 작업 상태 및 결과
     """
+    safe_task_id = sanitize_log_input(task_id)
     task = task_storage.get(task_id)
     if task is None:
-        logger.warning("[GET_STATUS] Task not found: %s", task_id)
+        logger.warning("[GET_STATUS] Task not found: %s", safe_task_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": ErrorCode.TASK_NOT_FOUND, "message": "작업을 찾을 수 없습니다."},
         )
 
-    logger.info("[GET_STATUS] Task %s status: %s", task_id, task["status"])
+    logger.info("[GET_STATUS] Task %s status: %s", safe_task_id, task["status"])
 
     return TaskStatusResponse(
         task_id=task_id,
