@@ -180,9 +180,7 @@ class GeminiProvider(BaseLLMProvider):
             model=self._embedding_model,
         )
 
-    def _convert_messages(
-        self, messages: list[dict[str, str]]
-    ) -> list[types.Content]:
+    def _convert_messages(self, messages: list[dict[str, str]]) -> list[types.Content]:
         """Convert messages to Gemini format.
 
         Args:

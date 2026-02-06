@@ -60,9 +60,7 @@ class TaskData:
             status=TaskStatus(data["status"]),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=(
-                datetime.fromisoformat(data["updated_at"])
-                if data.get("updated_at")
-                else None
+                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
             ),
             progress=data.get("progress", 0),
             message=data.get("message"),

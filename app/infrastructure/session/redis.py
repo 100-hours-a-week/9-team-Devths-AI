@@ -36,9 +36,7 @@ class RedisSessionStore(BaseSessionStore):
         try:
             import redis.asyncio as redis
         except ImportError as err:
-            raise ImportError(
-                "redis package is required. Install with: pip install redis"
-            ) from err
+            raise ImportError("redis package is required. Install with: pip install redis") from err
 
         self._redis = redis.from_url(redis_url, decode_responses=True)
         self._default_ttl = default_ttl
@@ -205,7 +203,7 @@ class RedisSessionStore(BaseSessionStore):
 
             async for key in self._redis.scan_iter(match=full_pattern):
                 # Remove prefix from key
-                key_without_prefix = key[len(self._key_prefix):]
+                key_without_prefix = key[len(self._key_prefix) :]
                 keys.append(key_without_prefix)
 
             return keys

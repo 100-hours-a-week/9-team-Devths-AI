@@ -63,22 +63,29 @@ class RAGChain:
         self._output_parser = StrOutputParser()
 
         # Create RAG prompt template
-        self._rag_prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_RAG_CHAT),
-            ("human", """관련 정보:
+        self._rag_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_RAG_CHAT),
+                (
+                    "human",
+                    """관련 정보:
 {context}
 
 질문: {question}
 
-위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""),
-        ])
+위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요.""",
+                ),
+            ]
+        )
 
         # Create chat prompt template (without retrieval)
-        self._chat_prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_RAG_CHAT),
-            MessagesPlaceholder(variable_name="history"),
-            ("human", "{question}"),
-        ])
+        self._chat_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_RAG_CHAT),
+                MessagesPlaceholder(variable_name="history"),
+                ("human", "{question}"),
+            ]
+        )
 
         logger.info("RAGChain initialized")
 
@@ -180,16 +187,19 @@ class RAGChain:
             # Create chain with retrieval
             chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
 
-            response = await chain.ainvoke({
-                "context": context,
-                "question": question,
-            })
+            response = await chain.ainvoke(
+                {
+                    "context": context,
+                    "question": question,
+                }
+            )
         else:
             # Create chain without retrieval
             chain = self._chat_prompt | self._llm_gateway.llm | self._output_parser
 
             # Convert history to LangChain messages
             from langchain_core.messages import AIMessage, HumanMessage
+
             lc_history = []
             if history:
                 for msg in history:
@@ -200,10 +210,12 @@ class RAGChain:
                     else:
                         lc_history.append(HumanMessage(content=content))
 
-            response = await chain.ainvoke({
-                "history": lc_history,
-                "question": question,
-            })
+            response = await chain.ainvoke(
+                {
+                    "history": lc_history,
+                    "question": question,
+                }
+            )
 
         return response
 
@@ -232,10 +244,12 @@ class RAGChain:
             # Create chain with retrieval
             chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
 
-            async for chunk in chain.astream({
-                "context": context,
-                "question": question,
-            }):
+            async for chunk in chain.astream(
+                {
+                    "context": context,
+                    "question": question,
+                }
+            ):
                 yield chunk
         else:
             # Create chain without retrieval
@@ -243,6 +257,7 @@ class RAGChain:
 
             # Convert history
             from langchain_core.messages import AIMessage, HumanMessage
+
             lc_history = []
             if history:
                 for msg in history:
@@ -253,10 +268,12 @@ class RAGChain:
                     else:
                         lc_history.append(HumanMessage(content=content))
 
-            async for chunk in chain.astream({
-                "history": lc_history,
-                "question": question,
-            }):
+            async for chunk in chain.astream(
+                {
+                    "history": lc_history,
+                    "question": question,
+                }
+            ):
                 yield chunk
 
     async def generate_followup_question(
@@ -275,26 +292,33 @@ class RAGChain:
         Returns:
             Generated follow-up question.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_FOLLOWUP),
-            ("human", """원래 질문: {original_question}
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_FOLLOWUP),
+                (
+                    "human",
+                    """원래 질문: {original_question}
 
 사용자 답변: {user_answer}
 
 {context_section}
 
-사용자의 답변을 분석하고, 더 깊은 이해를 위한 후속 질문을 하나 생성해주세요."""),
-        ])
+사용자의 답변을 분석하고, 더 깊은 이해를 위한 후속 질문을 하나 생성해주세요.""",
+                ),
+            ]
+        )
 
         chain = prompt | self._llm_gateway.llm | self._output_parser
 
         context_section = f"관련 컨텍스트:\n{context}" if context else ""
 
-        response = await chain.ainvoke({
-            "original_question": original_question,
-            "user_answer": user_answer,
-            "context_section": context_section,
-        })
+        response = await chain.ainvoke(
+            {
+                "original_question": original_question,
+                "user_answer": user_answer,
+                "context_section": context_section,
+            }
+        )
 
         return response
 
@@ -312,33 +336,44 @@ class RAGChain:
         Returns:
             Analysis result as dictionary.
         """
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """당신은 이력서와 채용공고를 분석하는 AI 전문가입니다.
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """당신은 이력서와 채용공고를 분석하는 AI 전문가입니다.
 주어진 이력서와 채용공고를 비교 분석하여 JSON 형식으로 결과를 제공하세요.
 
 다음 항목을 포함해주세요:
 - resume_analysis: 이력서 분석 (strengths, weaknesses 배열)
 - posting_analysis: 채용공고 분석 (company, position, required_skills, preferred_skills)
-- matching: 매칭 분석 (score, matches, gaps)"""),
-            ("human", """이력서:
+- matching: 매칭 분석 (score, matches, gaps)""",
+                ),
+                (
+                    "human",
+                    """이력서:
 {resume_text}
 
 채용공고:
 {posting_text}
 
-위 이력서와 채용공고를 분석하여 JSON 형식으로 결과를 제공해주세요."""),
-        ])
+위 이력서와 채용공고를 분석하여 JSON 형식으로 결과를 제공해주세요.""",
+                ),
+            ]
+        )
 
         chain = prompt | self._llm_gateway.llm | self._output_parser
 
-        response = await chain.ainvoke({
-            "resume_text": resume_text,
-            "posting_text": posting_text,
-        })
+        response = await chain.ainvoke(
+            {
+                "resume_text": resume_text,
+                "posting_text": posting_text,
+            }
+        )
 
         # Parse JSON response
         try:
             import json
+
             # Try to extract JSON from response
             start = response.find("{")
             end = response.rfind("}") + 1

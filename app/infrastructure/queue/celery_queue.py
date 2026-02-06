@@ -40,8 +40,7 @@ class CeleryTaskQueue(BaseTaskQueue):
             from celery import Celery
         except ImportError as err:
             raise ImportError(
-                "celery and redis packages are required. "
-                "Install with: pip install celery redis"
+                "celery and redis packages are required. " "Install with: pip install celery redis"
             ) from err
 
         self._celery = Celery(

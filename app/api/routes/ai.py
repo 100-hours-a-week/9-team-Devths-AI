@@ -1090,7 +1090,9 @@ async def generate_chat_stream(
                     logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
         except Exception as e:
-            error_msg = f"오류가 발생했습니다: {str(e)}"
+            # 보안: 상세 에러는 로그에만 기록, 사용자에게는 일반 메시지만 전달
+            logger.error("채팅 처리 오류: %s", str(e), exc_info=True)
+            error_msg = "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
             full_response = error_msg
 

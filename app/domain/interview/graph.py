@@ -118,8 +118,7 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
             logger.error(f"Failed to parse questions JSON: {e}")
             # Fallback: create default questions
             questions = [
-                {"id": i + 1, "category": "general", "question": f"질문 {i + 1}"}
-                for i in range(5)
+                {"id": i + 1, "category": "general", "question": f"질문 {i + 1}"} for i in range(5)
             ]
 
         # Add state fields to questions
@@ -180,10 +179,12 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
         messages.append({"role": "candidate", "content": user_answer})
 
         # Add to question conversation
-        question["conversation"].append({
-            "role": "candidate",
-            "content": user_answer,
-        })
+        question["conversation"].append(
+            {
+                "role": "candidate",
+                "content": user_answer,
+            }
+        )
 
         # Check if max depth reached
         if current_depth >= question.get("max_depth", 3):
@@ -237,10 +238,12 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
 
         # Add to question conversation
         if idx < len(questions):
-            questions[idx]["conversation"].append({
-                "role": "interviewer",
-                "content": response,
-            })
+            questions[idx]["conversation"].append(
+                {
+                    "role": "interviewer",
+                    "content": response,
+                }
+            )
             questions[idx]["current_depth"] = state.get("current_depth", 0)
 
         return {
@@ -276,10 +279,12 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
         messages = state.get("messages", [])
 
         # Format conversation
-        conversation_text = "\n".join([
-            f"{'면접관' if m['role'] == 'interviewer' else '지원자'}: {m['content']}"
-            for m in messages
-        ])
+        conversation_text = "\n".join(
+            [
+                f"{'면접관' if m['role'] == 'interviewer' else '지원자'}: {m['content']}"
+                for m in messages
+            ]
+        )
 
         prompt = INTERVIEW_REPORT_PROMPT.format(conversation=conversation_text)
 

@@ -45,11 +45,13 @@ class InterviewQuestion:
             role: Role (interviewer or candidate).
             content: Message content.
         """
-        self.conversation.append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.conversation.append(
+            {
+                "role": role,
+                "content": content,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -123,11 +125,13 @@ class InterviewSession:
             role: Role (interviewer or candidate).
             content: Message content.
         """
-        self.full_conversation.append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat(),
-        })
+        self.full_conversation.append(
+            {
+                "role": role,
+                "content": content,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
         self.updated_at = datetime.now()
 
     def to_dict(self) -> dict[str, Any]:
@@ -163,9 +167,7 @@ class InterviewSession:
             full_conversation=data.get("full_conversation", []),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=(
-                datetime.fromisoformat(data["updated_at"])
-                if data.get("updated_at")
-                else None
+                datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
             ),
         )
 

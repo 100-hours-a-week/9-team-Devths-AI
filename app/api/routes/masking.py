@@ -22,6 +22,7 @@ from app.schemas.masking import (
 )
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ async def masking_draft(
 
     logger.info(f"[MASKING_DRAFT] Task {task_id} saved to file store")
     logger.info(f"[MASKING_DRAFT] Task exists: {task_storage.exists(task_id)}")
-    logger.info(f"[MASKING_DRAFT] Task data: {task_storage.get(task_id)}")
+    logger.info(f"[MASKING_DRAFT] Task data: {sanitize_log_input(str(task_storage.get(task_id)))}")
     logger.info("=" * 80)
 
     # 백그라운드에서 처리
