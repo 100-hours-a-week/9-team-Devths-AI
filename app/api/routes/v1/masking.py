@@ -22,7 +22,7 @@ from app.schemas.masking import (
 )
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
-from app.utils.log_sanitizer import sanitize_log_input, safe_info, safe_warning
+from app.utils.log_sanitizer import safe_info, safe_warning
 
 logger = logging.getLogger(__name__)
 
