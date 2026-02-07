@@ -27,7 +27,8 @@ KTB Final Project의 FastAPI 기반 AI 모델 서비스입니다.
 │   │           ├── masking.py      # PII 마스킹 API
 │   │           ├── task.py         # 비동기 작업 상태 API
 │   │           ├── calendar.py     # 캘린더 파싱 API
-│   │           └── _helpers.py     # 공통 헬퍼 함수
+│   │           ├── _helpers.py     # 공통 헬퍼 함수
+│   │           └── _sse_errors.py  # SSE 에러 이벤트 헬퍼
 │   │
 │   ├── config/                     # 설정 관리
 │   │   ├── settings.py             # 환경변수 및 설정
@@ -142,25 +143,78 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## API 엔드포인트
 
-### v1 API (레거시)
+### v2 API (기본, `/ai/...`)
 
-- `POST /ai/v1/chat` - 챗봇 대화
-- `POST /ai/v1/text-extract` - 텍스트 추출
-- `POST /ai/v1/masking/draft` - PII 마스킹
-- `GET /ai/v1/task/{task_id}` - 작업 상태 조회
+| Method | Path | 설명 |
+|--------|------|------|
+| `POST` | `/ai/text/extract` | 텍스트 추출 + 임베딩 (비동기) |
+| `GET` | `/ai/task/{task_id}` | 비동기 작업 상태 조회 |
+| `POST` | `/ai/chat` | 채팅 스트리밍 (SSE, 일반/면접/리포트) |
+| `POST` | `/ai/calendar/parse` | 캘린더 일정 파싱 |
+| `POST` | `/ai/masking/draft` | PII 마스킹 (비동기) |
+| `GET` | `/ai/masking/task/{task_id}` | 마스킹 작업 상태 조회 |
+| `GET` | `/ai/masking/health` | 마스킹 서비스 헬스 체크 |
 
-### v2 API (모듈화)
+### v1 API (레거시, `/ai/v1/...`)
 
-- `POST /ai/v2/chat` - 채팅
-- `POST /ai/v2/chat/stream` - 스트리밍 채팅
-- `POST /ai/v2/text-extract` - 텍스트 추출
-- `POST /ai/v2/masking/draft` - PII 마스킹
-- `GET /ai/v2/task/{task_id}` - 작업 상태 조회
-- `POST /ai/v2/calendar/parse` - 캘린더 파싱
+> v2와 동일한 기능이며 하위 호환을 위해 유지됩니다.
+
+| Method | Path | 설명 |
+|--------|------|------|
+| `POST` | `/ai/v1/chat` | 챗봇 대화 (SSE 스트리밍) |
+| `POST` | `/ai/v1/text-extract` | 텍스트 추출 |
+| `GET` | `/ai/v1/task/{task_id}` | 작업 상태 조회 |
+| `POST` | `/ai/v1/calendar/parse` | 캘린더 파싱 |
+| `POST` | `/ai/v1/masking/draft` | PII 마스킹 |
+| `GET` | `/ai/v1/masking/task/{task_id}` | 마스킹 작업 상태 조회 |
+| `GET` | `/ai/v1/masking/health` | 마스킹 헬스 체크 |
 
 ### 헬스 체크
 
 - `GET /health` - 서버 상태 확인
+
+## SSE 이벤트 규약
+
+`/ai/chat` 엔드포인트는 SSE(Server-Sent Events) 스트리밍으로 응답합니다.
+
+### 이벤트 타입
+
+| type | 설명 | 페이로드 예시 |
+|------|------|--------------|
+| `chunk` | 텍스트 청크 | `{"chunk": "안녕하세요"}` |
+| `summary` | 채팅방 제목 (첫 응답 시) | `{"summary": "프로젝트 질문"}` |
+| `session_state` | 면접 세션 상태 | `{"session_state": {...}}` |
+| `error` | 에러 발생 | 아래 에러 포맷 참조 |
+| `[DONE]` | 스트림 종료 | `data: [DONE]` |
+
+### SSE 에러 포맷
+
+모든 SSE 에러는 통일된 JSON 포맷으로 전송됩니다:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "status": 500,
+    "message": "상세 에러 메시지"
+  },
+  "fallback": "사용자에게 표시할 메시지"
+}
+```
+
+### 에러 코드
+
+| code | status | 상황 |
+|------|--------|------|
+| `PROMPT_BLOCKED` | 400 | 프롬프트 인젝션 차단 |
+| `VECTORDB_ERROR` | 404 | 문서 미업로드 (벡터 DB 비어있음) |
+| `SESSION_NOT_FOUND` | 404 | 면접 세션 없음 |
+| `PARSE_FAILED` | 500 | LLM 응답 JSON 파싱 실패 |
+| `INTERNAL_ERROR` | 500 | 서버 내부 오류 |
+| `LLM_ERROR` | 500 | LLM 서비스 호출 실패 |
+
+> **Spring 백엔드 처리 가이드**: SSE 이벤트에서 `"type": "error"` 필드를 감지하면 에러로 처리하고, `fallback` 값을 사용자에게 표시하세요.
 
 ## 기술 스택
 

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.v2._helpers import get_services, get_session_key
+from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
     create_tech_followup_prompt,
@@ -57,8 +58,12 @@ async def generate_chat_stream(
             request.user_id,
             str(guard_result.matched_patterns),
         )
-        blocked_response = guard_result.message
-        yield f"data: {json.dumps({'content': blocked_response}, ensure_ascii=False)}\n\n"
+        yield sse_error_event(
+            code="PROMPT_BLOCKED",
+            status=400,
+            message="프롬프트 인젝션이 감지되어 차단되었습니다.",
+            fallback=guard_result.message,
+        )
         yield "data: [DONE]\n\n"
         return
 
@@ -158,10 +163,14 @@ async def generate_chat_stream(
                     )
 
                     if not full_context:
-                        error_msg = "❌ 업로드된 이력서 또는 채용공고를 찾을 수 없습니다.\n먼저 파일을 업로드해주세요."
                         logger.error("⚠️ VectorDB에 문서가 없습니다")
-                        yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
-                        full_response = error_msg
+                        yield sse_error_event(
+                            code="VECTORDB_ERROR",
+                            status=404,
+                            message="VectorDB에 업로드된 문서가 없습니다.",
+                            fallback="업로드된 이력서 또는 채용공고를 찾을 수 없습니다. 먼저 파일을 업로드해주세요.",
+                        )
+                        full_response = ""
                     else:
                         logger.info(f"✅ [1/3] VectorDB 조회 완료: {len(full_context)}자")
                         logger.info("")
@@ -369,9 +378,13 @@ async def generate_chat_stream(
 
         except Exception as e:
             logger.error("채팅 처리 오류: %s", str(e), exc_info=True)
-            error_msg = "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-            yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
-            full_response = error_msg
+            yield sse_error_event(
+                code="INTERNAL_ERROR",
+                status=500,
+                message=str(e),
+                fallback="일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            )
+            full_response = ""
 
         yield f"data: [DONE]{sse_end}"
 
@@ -502,15 +515,12 @@ async def generate_chat_stream(
                     logger.error(f"질문 세트 파싱 실패: {e}")
                     logger.error(f"원본 응답 (첫 500자): {full_response[:500]}")
 
-                    error_response = {
-                        "type": "error",
-                        "error": {
-                            "code": "PARSE_FAILED",
-                            "status": 500,
-                        },
-                        "fallback": "면접 질문 세트 생성 중 오류가 발생했습니다. 다시 시도해주세요.",
-                    }
-                    yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
+                    yield sse_error_event(
+                        code="PARSE_FAILED",
+                        status=500,
+                        message=f"질문 세트 JSON 파싱 실패: {e}",
+                        fallback="면접 질문 세트 생성 중 오류가 발생했습니다. 다시 시도해주세요.",
+                    )
 
                 yield f"data: [DONE]{sse_end}"
 
@@ -520,7 +530,12 @@ async def generate_chat_stream(
                 current_q = next((q for q in session.questions if q.id == current_q_id), None)
 
                 if not current_q:
-                    yield f"data: {json.dumps({'chunk': '세션 오류: 현재 질문을 찾을 수 없습니다.'}, ensure_ascii=False)}{sse_end}"
+                    yield sse_error_event(
+                        code="SESSION_NOT_FOUND",
+                        status=404,
+                        message=f"면접 세션에서 질문 ID {current_q_id}를 찾을 수 없습니다.",
+                        fallback="세션 오류: 현재 질문을 찾을 수 없습니다.",
+                    )
                     yield f"data: [DONE]{sse_end}"
                     return
 
@@ -590,15 +605,12 @@ async def generate_chat_stream(
                                 current_q.is_completed = True
                     except json.JSONDecodeError as e:
                         logger.error(f"꼬리질문 파싱 실패: {e}")
-                        error_response = {
-                            "type": "error",
-                            "error": {
-                                "code": "PARSE_FAILED",
-                                "status": 500,
-                            },
-                            "fallback": "꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
-                        }
-                        yield f"data: {json.dumps(error_response, ensure_ascii=False)}{sse_end}"
+                        yield sse_error_event(
+                            code="PARSE_FAILED",
+                            status=500,
+                            message=f"꼬리질문 JSON 파싱 실패: {e}",
+                            fallback="꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
+                        )
                         current_q.is_completed = True
 
                 else:
@@ -660,8 +672,12 @@ async def generate_chat_stream(
 
         except Exception as e:
             logger.error(f"Interview error: {e}", exc_info=True)
-            error_msg = f"면접 진행 중 오류가 발생했습니다: {str(e)}"
-            yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
+            yield sse_error_event(
+                code="INTERNAL_ERROR",
+                status=500,
+                message=str(e),
+                fallback="면접 진행 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            )
             yield f"data: [DONE]{sse_end}"
 
     # =========================================================================
@@ -730,7 +746,13 @@ async def generate_chat_stream(
             yield f"data: [DONE]{sse_end}"
 
         except Exception as e:
-            logger.error(f"Interview report generation error: {e}")
+            logger.error(f"Interview report generation error: {e}", exc_info=True)
+            yield sse_error_event(
+                code="LLM_ERROR",
+                status=500,
+                message=str(e),
+                fallback="면접 리포트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            )
             yield f"data: [DONE]{sse_end}"
 
     # Latency 측정 종료 및 전송
