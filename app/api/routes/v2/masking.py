@@ -1,7 +1,9 @@
 """
-PII Masking API Routes
+v2 PII 마스킹 API
 
-게시판 첨부파일에서 개인정보를 자동으로 감지하고 마스킹 처리하는 API
+POST /ai/masking/draft - 게시판 첨부파일 PII 마스킹
+GET /ai/masking/task/{task_id} - 마스킹 작업 상태 조회
+GET /ai/masking/health - 마스킹 서비스 헬스 체크
 """
 
 import asyncio
@@ -10,7 +12,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.dependencies import get_legacy_task_storage
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
@@ -26,25 +28,14 @@ from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/ai/masking",
-    tags=["PII Masking"],
-    responses={404: {"description": "Not found"}},
-)
+router = APIRouter()
 
 # 백그라운드 작업 추적 (가비지 컬렉션 방지)
-background_tasks_set = set()
-
-
-async def verify_api_key(x_api_key: str | None = Header(None)):
-    """API 키 검증"""
-    if x_api_key != "your-api-key-here":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
-    return x_api_key
+_background_tasks_set = set()
 
 
 @router.post(
-    "/draft",
+    "/masking/draft",
     response_model=AsyncTaskResponse,
     status_code=status.HTTP_202_ACCEPTED,
     summary="게시판 첨부파일 1차 마스킹",
@@ -71,44 +62,22 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     - 학과명 (major)
     - URL (url)
 
-    **처리 플로우:**
-    1. PDF/이미지 다운로드
-    2. AI 모델로 PII 감지
-       - Gemini: 얼굴 감지 (Vision API)
-       - Chandra: 텍스트 PII 감지 (OCR + Pattern Matching)
-    3. PII 마스킹
-    4. 마스킹된 파일 + 썸네일 생성
-    5. S3 업로드 (실제로는 별도 처리)
-    6. 결과 반환
-
     **사용 가능 모델:**
     - gemini: Google Gemini 3 Flash Preview (얼굴 감지 전용)
     - chandra: datalab-to/chandra (텍스트 PII 감지 전용)
-
-    **주의:**
-    - 사용자 수정은 프론트엔드에서 처리 (AI 불필요)
     """,
 )
 async def masking_draft(
     request: MaskingDraftRequest,
     task_storage=Depends(get_legacy_task_storage),
 ):
-    """
-    게시판 첨부파일 마스킹
-
-    Args:
-        request: 마스킹 요청 (s3_key, file_type, model)
-
-    Returns:
-        AsyncTaskResponse: task_id와 처리 상태
-    """
+    """게시판 첨부파일 마스킹"""
     task_id = f"task_masking_{uuid.uuid4().hex[:12]}"
 
     logger.info("[MASKING_DRAFT] Creating new task: %s", task_id)
 
-    # 초기 상태를 즉시 저장 (DI: task_storage)
     task_data = {
-        "type": "masking",  # 작업 타입 구분
+        "type": "masking",
         "status": TaskStatus.PROCESSING,
         "created_at": datetime.now(),
         "progress": 0,
@@ -117,27 +86,23 @@ async def masking_draft(
     }
     task_storage.save(task_id, task_data)
 
-    # 백그라운드에서 처리
     async def process_masking(store):
         logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
         logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:
-            # 모델 선택
             if request.model == MaskingModelType.CHANDRA:
                 service = get_chandra_masking_service()
                 model_name = "Chandra"
-            else:  # GEMINI
+            else:
                 service = get_gemini_masking_service()
                 model_name = "Gemini"
 
-            # 진행 상태 업데이트
             task_data = store.get(task_id)
             task_data["progress"] = 10
             task_data["message"] = "파일을 다운로드 중입니다..."
             store.save(task_id, task_data)
             logger.info(f"Task {task_id}: Downloading file")
 
-            # 파일 타입에 따라 처리
             if request.file_type == "pdf":
                 task_data = store.get(task_id)
                 task_data["progress"] = 30
@@ -152,8 +117,7 @@ async def masking_draft(
                 masked_bytes, thumbnail_bytes, detections = await service.mask_pdf(
                     file_url=str(request.file_url)
                 )
-
-            else:  # image
+            else:
                 task_data = store.get(task_id)
                 task_data["progress"] = 30
                 task_data["message"] = "이미지에서 PII를 감지 중입니다..."
@@ -173,22 +137,17 @@ async def masking_draft(
             task_data["message"] = "마스킹된 파일을 저장 중입니다..."
             store.save(task_id, task_data)
 
-            # 실제로는 S3에 업로드하고 URL 반환
-            # 여기서는 base64 data URL로 반환 (데모용)
             masked_base64 = base64.b64encode(masked_bytes).decode("utf-8")
             thumbnail_base64 = base64.b64encode(thumbnail_bytes).decode("utf-8")
 
-            # data URL 형식 (전체 base64 포함)
             file_ext = "pdf" if request.file_type == "pdf" else "png"
             mime_type = f"application/{file_ext}" if request.file_type == "pdf" else "image/png"
 
             masked_url = f"data:{mime_type};base64,{masked_base64}"
             thumbnail_url = f"data:image/png;base64,{thumbnail_base64}"
 
-            # 결과 포맷팅
             detected_pii = []
             for det in detections:
-                # PIIType enum에 없는 타입은 처리하지 않거나 unknown으로 설정
                 pii_type = det.get("type", "unknown")
                 try:
                     detected_pii.append(
@@ -199,7 +158,6 @@ async def masking_draft(
                         )
                     )
                 except ValueError:
-                    # enum에 없는 타입은 건너뛰기
                     logger.warning(f"Unknown PII type: {pii_type}")
 
             task_data = store.get(task_id)
@@ -225,14 +183,11 @@ async def masking_draft(
             task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
             store.save(task_id, task_data)
 
-    # asyncio.create_task로 작업 생성 및 추적
     task = asyncio.create_task(process_masking(task_storage))
-    background_tasks_set.add(task)
+    _background_tasks_set.add(task)
+    task.add_done_callback(lambda t: _background_tasks_set.discard(t))
 
-    # 작업 완료 시 자동으로 set에서 제거
-    task.add_done_callback(lambda t: background_tasks_set.discard(t))
-
-    logger.info(f"Created background task {task_id}, current tasks: {len(background_tasks_set)}")
+    logger.info(f"Created background task {task_id}, current tasks: {len(_background_tasks_set)}")
 
     return AsyncTaskResponse(
         task_id=task_id,
@@ -242,35 +197,20 @@ async def masking_draft(
 
 
 @router.get(
-    "/task/{task_id}",
+    "/masking/task/{task_id}",
     response_model=TaskStatusResponse,
     summary="마스킹 작업 상태 조회",
     description="""
     비동기 마스킹 작업의 상태를 조회합니다.
 
     **통합 엔드포인트:** `/ai/task/{task_id}`로도 조회 가능합니다.
-
-    **상태 종류:**
-    - processing: 처리 중
-    - completed: 완료
-    - failed: 실패
-
-    **progress:** 0-100 (진행률)
     """,
 )
 async def get_masking_task_status(
     task_id: str,
     task_storage=Depends(get_legacy_task_storage),
 ):
-    """
-    마스킹 작업 상태 조회
-
-    Args:
-        task_id: 작업 ID
-
-    Returns:
-        TaskStatusResponse: 작업 상태 및 결과
-    """
+    """마스킹 작업 상태 조회"""
     safe_task_id = sanitize_log_input(task_id)
     task = task_storage.get(task_id)
     if task is None:
@@ -293,13 +233,12 @@ async def get_masking_task_status(
 
 
 @router.get(
-    "/health", summary="PII 마스킹 서비스 헬스 체크", description="PII 마스킹 서비스 상태 확인"
+    "/masking/health", summary="PII 마스킹 서비스 헬스 체크", description="PII 마스킹 서비스 상태 확인"
 )
 async def masking_health_check():
     """PII 마스킹 서비스 헬스 체크"""
     health_status = {"status": "healthy", "service": "pii-masking", "models": {}}
 
-    # Gemini 체크
     try:
         get_gemini_masking_service()
         health_status["models"]["gemini"] = {
@@ -310,7 +249,6 @@ async def masking_health_check():
         logger.error(f"Gemini health check failed: {e}")
         health_status["models"]["gemini"] = {"status": "error", "error": str(e)}
 
-    # Chandra 체크
     try:
         get_chandra_masking_service()
         health_status["models"]["chandra"] = {
@@ -321,7 +259,6 @@ async def masking_health_check():
         logger.error(f"Chandra health check failed: {e}")
         health_status["models"]["chandra"] = {"status": "error", "error": str(e)}
 
-    # 모든 모델이 실패하면 전체 상태 error
     if all(m.get("status") == "error" for m in health_status["models"].values()):
         health_status["status"] = "error"
         health_status["message"] = "모든 마스킹 모델이 사용 불가능합니다."

@@ -49,8 +49,8 @@ from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/ai",
-    tags=["AI APIs (v3.0)"],
+    prefix="/ai/v1",
+    tags=["AI APIs v1 (Legacy)"],
     responses={404: {"description": "Not found"}},
 )
 
@@ -186,7 +186,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     "/text/extract",
     response_model=AsyncTaskResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="텍스트 추출 + 임베딩 저장 (이력서 + 채용공고)",
+    summary="[v1] 텍스트 추출 + 임베딩 저장 (이력서 + 채용공고)",
     description="""
     이력서와 채용공고에서 텍스트를 추출하고 내부에서 임베딩까지 처리합니다.
 
@@ -196,140 +196,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     - 각 문서는 파일 업로드(`s3_key` + `file_type`) 또는 텍스트 입력(`text`) 중 하나 선택
 
     **처리 방식:** 비동기 (task_id 반환 → 폴링 필요)
-
-    **내부 처리 흐름:**
-    1. 이력서 처리: 파일이면 OCR/VLM으로 텍스트 추출, 텍스트면 그대로 사용
-    2. 채용공고 처리: 파일이면 OCR/VLM으로 텍스트 추출, 텍스트면 그대로 사용
-    3. 각 텍스트 청킹 (500 tokens, 50 overlap)
-    4. Gemini Embedding 생성
-    5. VectorDB에 저장 (resume, job_posting 컬렉션)
-    6. 분석 리포트 생성 (이력서/채용공고 분석)
-    7. 추출된 텍스트 + 분석 결과 반환
     """,
-    responses={
-        400: {
-            "description": "Bad Request",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "invalid_request": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_REQUEST",
-                                    "message": "resume과 job_posting 는 필수 입력해야합니다",
-                                }
-                            }
-                        },
-                        "invalid_file_type": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_FILE_TYPE",
-                                    "message": "file_type은 pdf 또는 image만 가능합니다",
-                                    "field": "resume.file_type",
-                                }
-                            }
-                        },
-                        "invalid_document": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_DOCUMENT",
-                                    "message": "s3_key 또는 text 중 하나는 필수입니다",
-                                    "field": "resume",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "FILE_NOT_FOUND",
-                            "message": "파일을 찾을 수 없습니다: users/12/resume/abc123.pdf",
-                        }
-                    }
-                }
-            },
-        },
-        422: {
-            "description": "Unprocessable Entity",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "OCR_FAILED",
-                            "message": "이미지에서 텍스트를 추출할 수 없습니다",
-                        }
-                    }
-                }
-            },
-        },
-        429: {
-            "description": "Too Many Requests",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요",
-                        }
-                    }
-                }
-            },
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다",
-                        }
-                    }
-                }
-            },
-        },
-        503: {
-            "description": "Service Unavailable",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "llm_unavailable": {
-                            "value": {
-                                "detail": {
-                                    "code": "LLM_UNAVAILABLE",
-                                    "message": "AI 서비스에 연결할 수 없습니다",
-                                }
-                            }
-                        },
-                        "s3_unavailable": {
-                            "value": {
-                                "detail": {
-                                    "code": "S3_UNAVAILABLE",
-                                    "message": "파일 스토리지에 연결할 수 없습니다",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-    },
 )
 async def text_extract(
     request: TextExtractRequest,
@@ -581,96 +448,8 @@ async def text_extract(
 @router.get(
     "/task/{task_id}",
     response_model=TaskStatusResponse,
-    summary="비동기 작업 상태 조회",
+    summary="[v1] 비동기 작업 상태 조회",
     description="비동기 처리 작업의 상태를 조회하고 결과를 확인합니다.",
-    responses={
-        200: {
-            "description": "성공",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "processing": {
-                            "summary": "처리 중",
-                            "value": {
-                                "task_id": 32,
-                                "status": "processing",
-                                "progress": None,
-                                "message": None,
-                                "result": None,
-                                "error": None,
-                            },
-                        },
-                        "completed": {
-                            "summary": "완료 (text_extract)",
-                            "value": {
-                                "task_id": 32,
-                                "status": "completed",
-                                "progress": 100,
-                                "message": None,
-                                "result": {
-                                    "success": True,
-                                    "summary": "카카오 | 백엔드 개발자",
-                                    "resume_ocr": "이름: 홍길동\n경력: 3년...",
-                                    "job_posting_ocr": "카카오 백엔드 채용\n자격요건: Java...",
-                                    "resume_analysis": {
-                                        "strengths": ["Java/Spring 숙련도", "프로젝트 경험"],
-                                        "weaknesses": ["클라우드 경험 부족"],
-                                        "suggestions": ["AWS 학습 권장"],
-                                    },
-                                    "posting_analysis": {
-                                        "company": "카카오",
-                                        "position": "백엔드 개발자",
-                                        "required_skills": ["Java", "Spring", "MySQL"],
-                                        "preferred_skills": ["Docker", "Kubernetes"],
-                                    },
-                                    "formatted_text": "지원 회사 및 직무 : 카카오 | 백엔드 개발자\n\n이력서 분석\n\n장점\n1. Java/Spring 숙련도\n2. 프로젝트 경험\n\n단점\n1. 클라우드 경험 부족\n\n채용 공고 분석\n\n기업 / 포지션\n카카오 / 백엔드 개발자\n\n필수 역량\n- Java\n- Spring\n- MySQL\n\n우대 사항\n- Docker\n- Kubernetes",
-                                    "room_id": 23,
-                                },
-                                "error": None,
-                            },
-                        },
-                        "failed": {
-                            "summary": "실패",
-                            "value": {
-                                "task_id": 32,
-                                "status": "failed",
-                                "progress": None,
-                                "message": None,
-                                "result": None,
-                                "error": {
-                                    "code": "OCR_FAILED",
-                                    "message": "이미지에서 텍스트를 추출할 수 없습니다",
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "TASK_NOT_FOUND",
-                            "message": "작업을 찾을 수 없습니다: 12",
-                        }
-                    }
-                }
-            },
-        },
-    },
 )
 async def get_task_status(
     task_id: str,
@@ -1519,7 +1298,7 @@ async def generate_chat_stream(
 
 @router.post(
     "/chat",
-    summary="채팅 스트리밍 (일반/면접/리포트)",
+    summary="[v1] 채팅 스트리밍 (일반/면접/리포트)",
     description="""
     채팅 스트리밍 응답을 처리합니다.
 
@@ -1534,106 +1313,6 @@ async def generate_chat_stream(
     - behavior: 인성 면접
     - tech: 기술 면접
     """,
-    responses={
-        400: {
-            "description": "Bad Request",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "invalid_request": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_REQUEST",
-                                    "message": "room_id는 필수입니다",
-                                    "field": "room_id",
-                                }
-                            }
-                        },
-                        "invalid_mode": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_MODE",
-                                    "message": "mode는 normal 또는 interview 중 하나여야 합니다",
-                                    "field": "context.mode",
-                                }
-                            }
-                        },
-                        "invalid_interview_type": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_INTERVIEW_TYPE",
-                                    "message": "interview_type은 behavior 또는 tech만 가능합니다",
-                                    "field": "context.interview_type",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        422: {
-            "description": "Unprocessable Entity",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "MISSING_CONTEXT",
-                            "message": "면접 모드 시 context.resume_ocr 또는 context.job_posting_ocr이 필요합니다",
-                        }
-                    }
-                }
-            },
-        },
-        429: {
-            "description": "Too Many Requests",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요",
-                        }
-                    }
-                }
-            },
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다",
-                        }
-                    }
-                }
-            },
-        },
-        503: {
-            "description": "Service Unavailable",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "LLM_UNAVAILABLE",
-                            "message": "AI 서비스에 연결할 수 없습니다",
-                        }
-                    }
-                }
-            },
-        },
-    },
 )
 async def chat(
     request: ChatRequest,
@@ -1659,25 +1338,13 @@ async def chat(
 @router.post(
     "/calendar/parse",
     response_model=CalendarParseResponse,
-    summary="캘린더 일정 정보 파싱",
+    summary="[v1] 캘린더 일정 정보 파싱",
     description="""
     캘린더 모달에서 파일/텍스트를 분석하여 일정 정보를 추출합니다 (폼 자동 채우기용).
-
-    **처리 방식:** 동기 - 간단한 파싱 작업
-
-    **Pydantic AI 사용:** CalendarParseResult
-
-    **사용 시나리오:**
-    - 모달에서 채용공고 파일/텍스트 첨부 → 일정 정보 추출
-    - Frontend가 모달 폼에 자동 채워넣음
-    - 사용자 확인/수정 → 저장 → Backend가 Google Calendar에 추가
     """,
 )
 async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
     """캘린더 일정 파싱"""
-    # validator에서 이미 검증됨
-
-    # Pydantic AI로 구조화된 결과 반환
     return CalendarParseResponse(
         success=True,
         company="카카오",
@@ -1689,10 +1356,3 @@ async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
         ],
         hashtags=["#카카오", "#백엔드", "#신입"],
     )
-
-
-# ============================================================================
-# API 4: 게시판 첨부파일 마스킹 (비동기)
-# ============================================================================
-# 이 API는 app/api/routes/masking.py로 이동되었습니다.
-# masking.py에서 파일 기반 저장소와 실제 Gemini API를 사용합니다.

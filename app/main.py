@@ -8,7 +8,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import ai, masking
+from app.api.routes import v2
+from app.api.routes.v1 import ai as v1_ai
+from app.api.routes.v1 import masking as v1_masking
 from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
 from app.services.cloudwatch_service import CloudWatchService
 
@@ -115,9 +117,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-# 라우터 등록
-app.include_router(ai.router)
-app.include_router(masking.router)
+# 라우터 등록 (v2: 기본, v1: 하위 호환)
+app.include_router(v2.router)  # v2: /ai/...
+app.include_router(v1_ai.router)  # v1: /ai/v1/...
+app.include_router(v1_masking.router)  # v1: /ai/v1/masking/...
 
 
 app.add_middleware(CloudWatchMiddleware)
@@ -145,21 +148,29 @@ async def root():
     """
     return {
         "message": "Welcome to AI Server API",
-        "version": "1.0.0",
-        "total_apis": 9,
+        "version": "2.0.0",
         "docs": "/docs",
         "redoc": "/redoc",
-        "api_list": [
-            {"id": 1, "endpoint": "POST /ai/ocr/extract", "type": "async"},
-            {"id": 2, "endpoint": "POST /ai/file/embed", "type": "sync"},
-            {"id": 3, "endpoint": "POST /ai/analyze", "type": "streaming"},
-            {"id": 4, "endpoint": "POST /ai/interview/question", "type": "sync"},
-            {"id": 5, "endpoint": "POST /ai/interview/save", "type": "sync"},
-            {"id": 6, "endpoint": "POST /ai/interview/report", "type": "streaming"},
-            {"id": 7, "endpoint": "POST /ai/chat", "type": "streaming"},
-            {"id": 8, "endpoint": "POST /ai/calendar/parse", "type": "sync"},
-            {"id": 9, "endpoint": "POST /ai/masking/draft", "type": "async"},
-        ],
+        "api_versions": {
+            "v2 (current)": [
+                {"endpoint": "POST /ai/text/extract", "type": "async"},
+                {"endpoint": "GET /ai/task/{task_id}", "type": "sync"},
+                {"endpoint": "POST /ai/chat", "type": "streaming"},
+                {"endpoint": "POST /ai/calendar/parse", "type": "sync"},
+                {"endpoint": "POST /ai/masking/draft", "type": "async"},
+                {"endpoint": "GET /ai/masking/task/{task_id}", "type": "sync"},
+                {"endpoint": "GET /ai/masking/health", "type": "sync"},
+            ],
+            "v1 (legacy)": [
+                {"endpoint": "POST /ai/v1/text/extract", "type": "async"},
+                {"endpoint": "GET /ai/v1/task/{task_id}", "type": "sync"},
+                {"endpoint": "POST /ai/v1/chat", "type": "streaming"},
+                {"endpoint": "POST /ai/v1/calendar/parse", "type": "sync"},
+                {"endpoint": "POST /ai/v1/masking/draft", "type": "async"},
+                {"endpoint": "GET /ai/v1/masking/task/{task_id}", "type": "sync"},
+                {"endpoint": "GET /ai/v1/masking/health", "type": "sync"},
+            ],
+        },
     }
 
 
