@@ -77,7 +77,7 @@ async def masking_draft(
     # 백그라운드에서 처리
     async def process_masking(store):
         logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
-        logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
+        logger.info("[PROCESS_MASKING] Using model: %s", request.model)
         try:
             # 모델 선택
             if request.model == MaskingModelType.CHANDRA:
@@ -92,7 +92,7 @@ async def masking_draft(
             task_data["progress"] = 10
             task_data["message"] = "파일을 다운로드 중입니다..."
             store.save(task_id, task_data)
-            logger.info(f"Task {task_id}: Downloading file")
+            logger.info("Task %s: Downloading file", task_id)
 
             # 파일 타입에 따라 처리
             if request.file_type == "pdf":
@@ -153,7 +153,7 @@ async def masking_draft(
                         )
                     )
                 except ValueError:
-                    logger.warning(f"Unknown PII type: {pii_type}")
+                    logger.warning("Unknown PII type: %s", pii_type)
 
             task_data = store.get(task_id)
             task_data["status"] = TaskStatus.COMPLETED
@@ -168,10 +168,10 @@ async def masking_draft(
             ).model_dump()
             store.save(task_id, task_data)
 
-            logger.info(f"Task {task_id} completed with {len(detected_pii)} PII detections")
+            logger.info("Task %s completed with %d PII detections", task_id, len(detected_pii))
 
         except Exception as e:
-            logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
+            logger.error("Task %s failed: %s", task_id, str(e), exc_info=True)
             task_data = store.get(task_id) or {}
             task_data["status"] = TaskStatus.FAILED
             task_data["message"] = f"마스킹 작업 실패: {str(e)}"
@@ -185,7 +185,7 @@ async def masking_draft(
     # 작업 완료 시 자동으로 set에서 제거
     task.add_done_callback(lambda t: background_tasks_set.discard(t))
 
-    logger.info(f"Created background task {task_id}, current tasks: {len(background_tasks_set)}")
+    logger.info("Created background task %s, current tasks: %d", task_id, len(background_tasks_set))
 
     return AsyncTaskResponse(
         task_id=task_id,
@@ -241,7 +241,7 @@ async def masking_health_check():
             "provider": "Google Gemini 3 Flash Preview",
         }
     except Exception as e:
-        logger.error(f"Gemini health check failed: {e}")
+        logger.error("Gemini health check failed: %s", e)
         health_status["models"]["gemini"] = {"status": "error", "error": str(e)}
 
     # Chandra 체크
@@ -252,7 +252,7 @@ async def masking_health_check():
             "provider": "datalab-to/chandra",
         }
     except Exception as e:
-        logger.error(f"Chandra health check failed: {e}")
+        logger.error("Chandra health check failed: %s", e)
         health_status["models"]["chandra"] = {"status": "error", "error": str(e)}
 
     # 모든 모델이 실패하면 전체 상태 error
