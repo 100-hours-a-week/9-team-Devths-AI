@@ -233,7 +233,9 @@ async def get_masking_task_status(
 
 
 @router.get(
-    "/masking/health", summary="PII 마스킹 서비스 헬스 체크", description="PII 마스킹 서비스 상태 확인"
+    "/masking/health",
+    summary="PII 마스킹 서비스 헬스 체크",
+    description="PII 마스킹 서비스 상태 확인",
 )
 async def masking_health_check():
     """PII 마스킹 서비스 헬스 체크"""
