@@ -40,11 +40,13 @@ class VectorDBService:
             Settings(persist_directory=persist_directory, anonymized_telemetry=False)
         )
 
-        # Collection names
+        # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션)
         self.RESUME_COLLECTION = "resumes"
         self.POSTING_COLLECTION = "job_postings"
         self.PORTFOLIO_COLLECTION = "portfolios"
-        self.INTERVIEW_COLLECTION = "interview_questions"
+        self.INTERVIEW_COLLECTION = "interview_feedback"
+        self.ANALYSIS_RESULTS_COLLECTION = "analysis_results"
+        self.CHAT_CONTEXT_COLLECTION = "chat_context"
 
         # Create or get collections
         self.resume_collection = self.chroma_client.get_or_create_collection(
@@ -58,22 +60,33 @@ class VectorDBService:
         )
         self.interview_collection = self.chroma_client.get_or_create_collection(
             name=self.INTERVIEW_COLLECTION,
-            metadata={"description": "Interview Q&A embeddings for RAG"},
+            metadata={"description": "Interview Q&A + feedback (A안: interview_type)"},
+        )
+        self.analysis_results_collection = self.chroma_client.get_or_create_collection(
+            name=self.ANALYSIS_RESULTS_COLLECTION,
+            metadata={"description": "Analysis/matching results"},
+        )
+        self.chat_context_collection = self.chroma_client.get_or_create_collection(
+            name=self.CHAT_CONTEXT_COLLECTION,
+            metadata={"description": "Important chat context"},
         )
 
         logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
     def _get_collection(self, collection_type: str):
-        """Get collection by type"""
-        # Handle both singular and plural forms
+        """Get collection by type (문서 6개 컬렉션 + 별칭)"""
         if collection_type in ("resume", "resumes"):
             return self.resume_collection
         elif collection_type in ("job_posting", "job_postings"):
             return self.posting_collection
         elif collection_type in ("portfolio", "portfolios"):
             return self.portfolio_collection
-        elif collection_type in ("interview", "interview_questions"):
+        elif collection_type in ("interview", "interview_questions", "interview_feedback"):
             return self.interview_collection
+        elif collection_type == "analysis_results":
+            return self.analysis_results_collection
+        elif collection_type == "chat_context":
+            return self.chat_context_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
 
@@ -114,7 +127,7 @@ class VectorDBService:
         Args:
             document_id: Unique document ID
             text: Document text
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
             metadata: Additional metadata
 
         Returns:
@@ -161,7 +174,7 @@ class VectorDBService:
                 "text": str,
                 "metadata": dict (optional)
             }
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
 
         Returns:
             List of vector IDs
@@ -216,7 +229,7 @@ class VectorDBService:
 
         Args:
             query_text: Query text
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
             n_results: Number of results to return
             where: Metadata filter (optional)
 
@@ -265,7 +278,7 @@ class VectorDBService:
 
         Args:
             user_id: User ID
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
 
         Returns:
             List of all documents for the user
@@ -304,7 +317,7 @@ class VectorDBService:
 
         Args:
             document_id: Document ID
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
 
         Returns:
             Document data or None if not found
@@ -336,7 +349,7 @@ class VectorDBService:
 
         Args:
             document_id: Document ID
-            collection_type: "resume", "job_posting", or "portfolio"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
 
         Returns:
             True if deleted, False otherwise
@@ -356,7 +369,7 @@ class VectorDBService:
         Get number of documents in collection
 
         Args:
-            collection_type: "resume", "job_posting", "portfolio", or "interview_questions"
+            collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
 
         Returns:
             Number of documents
@@ -384,7 +397,7 @@ class VectorDBService:
             metadatas: List of metadata dicts
             ids: List of unique IDs
             user_id: User ID (0 for public data)
-            collection_name: Collection name (e.g., "interview_questions")
+            collection_name: Collection name (e.g., "interview_feedback")
 
         Returns:
             List of added IDs

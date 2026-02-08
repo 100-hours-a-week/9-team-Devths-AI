@@ -49,8 +49,8 @@ class Settings(BaseSettings):
         description="Gemini model name",
     )
     gemini_embedding_model: str = Field(
-        default="text-embedding-004",
-        description="Gemini embedding model name",
+        default="gemini-embedding-001",
+        description="Gemini embedding model name (VectorDB 문서 설계 최종 선정)",
     )
 
     # ============================================
@@ -97,8 +97,16 @@ class Settings(BaseSettings):
         description="ChromaDB collection for portfolios",
     )
     chroma_collection_interview: str = Field(
-        default="interview_questions",
-        description="ChromaDB collection for interview questions",
+        default="interview_feedback",
+        description="ChromaDB collection for interview Q&A + feedback (문서 설계 A안)",
+    )
+    chroma_collection_analysis_results: str = Field(
+        default="analysis_results",
+        description="ChromaDB collection for analysis/matching results",
+    )
+    chroma_collection_chat_context: str = Field(
+        default="chat_context",
+        description="ChromaDB collection for important chat context",
     )
 
     # ============================================
@@ -162,6 +170,34 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # OpenAI Configuration (평가 토론용)
+    # ============================================
+    openai_api_key: str | None = Field(
+        default=None,
+        description="OpenAI API key for evaluation debate",
+    )
+
+    # ============================================
+    # Evaluation Configuration (면접 답변 분석)
+    # ============================================
+    eval_gemini_model: str = Field(
+        default="gemini-3-pro-preview",
+        description="Gemini model for interview evaluation",
+    )
+    eval_thinking_level: str = Field(
+        default="HIGH",
+        description="Gemini thinking level for evaluation (NONE, LOW, MEDIUM, HIGH)",
+    )
+    eval_gpt_model: str = Field(
+        default="gpt-4o",
+        description="OpenAI model for debate evaluation",
+    )
+    eval_debate_enabled: bool = Field(
+        default=True,
+        description="Enable debate feature (requires OpenAI API key)",
+    )
+
+    # ============================================
     # Interview Configuration
     # ============================================
     interview_max_questions: int = Field(
@@ -200,6 +236,16 @@ class Settings(BaseSettings):
     def langfuse_available(self) -> bool:
         """Check if Langfuse is configured."""
         return bool(self.langfuse_secret_key and self.langfuse_public_key)
+
+    @property
+    def openai_available(self) -> bool:
+        """Check if OpenAI is configured for debate."""
+        return bool(self.openai_api_key)
+
+    @property
+    def debate_available(self) -> bool:
+        """Check if debate feature is available."""
+        return self.eval_debate_enabled and self.openai_available
 
 
 @lru_cache

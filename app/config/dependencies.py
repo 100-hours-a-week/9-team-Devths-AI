@@ -238,6 +238,59 @@ def get_masking_service(
     )
 
 
+def get_openai_provider(
+    settings: Settings = Depends(get_settings),
+) -> "BaseLLMProvider | None":
+    """Get OpenAI provider instance (optional).
+
+    Returns None if OpenAI is not configured.
+    Used for evaluation debate feature.
+    """
+    if not settings.openai_available:
+        return None
+
+    from app.infrastructure.llm.openai_provider import OpenAIProvider
+
+    return OpenAIProvider(
+        api_key=settings.openai_api_key,
+        model_name=settings.eval_gpt_model,
+    )
+
+
+def get_evaluation_analyzer(
+    settings: Settings = Depends(get_settings),
+):
+    """Get Evaluation Analyzer instance (Gemini 3 Pro)."""
+    from app.domain.evaluation.analyzer import InterviewAnalyzer
+
+    return InterviewAnalyzer(
+        api_key=settings.google_api_key,
+        model_name=settings.eval_gemini_model,
+        thinking_level=settings.eval_thinking_level,
+    )
+
+
+def get_debate_service(
+    settings: Settings = Depends(get_settings),
+):
+    """Get Debate service instance (LangGraph).
+
+    Returns None if debate is not available.
+    """
+    if not settings.debate_available:
+        return None
+
+    from app.domain.evaluation.debate_graph import DebateService
+
+    return DebateService(
+        google_api_key=settings.google_api_key,
+        openai_api_key=settings.openai_api_key,
+        gemini_model=settings.eval_gemini_model,
+        gpt_model=settings.eval_gpt_model,
+        thinking_level=settings.eval_thinking_level,
+    )
+
+
 # ============================================
 # Utility Dependencies
 # ============================================

@@ -6,7 +6,7 @@ v2 라우트는 기존 /ai prefix를 유지하며 도메인별로 파일이 분�
 
 from fastapi import APIRouter
 
-from app.api.routes.v2 import calendar, chat, masking, task, text_extract
+from app.api.routes.v2 import calendar, chat, evaluation, masking, task, text_extract
 
 router = APIRouter(
     prefix="/ai",
@@ -20,3 +20,4 @@ router.include_router(task.router, tags=["Task Status"])
 router.include_router(chat.router, tags=["Chat"])
 router.include_router(calendar.router, tags=["Calendar"])
 router.include_router(masking.router, tags=["PII Masking"])
+router.include_router(evaluation.router, tags=["Evaluation"])

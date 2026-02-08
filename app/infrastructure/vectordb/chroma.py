@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ChromaVectorStore(BaseVectorStore):
     """ChromaDB vector store implementation."""
 
-    # Collection type mappings
+    # Collection type mappings (문서 [AI] 09_VectorDB_설계.md A안)
     COLLECTION_NAMES = {
         "resume": "resumes",
         "resumes": "resumes",
@@ -28,15 +28,18 @@ class ChromaVectorStore(BaseVectorStore):
         "job_postings": "job_postings",
         "portfolio": "portfolios",
         "portfolios": "portfolios",
-        "interview": "interview_questions",
-        "interview_questions": "interview_questions",
+        "interview": "interview_feedback",
+        "interview_questions": "interview_feedback",
+        "interview_feedback": "interview_feedback",
+        "analysis_results": "analysis_results",
+        "chat_context": "chat_context",
     }
 
     def __init__(
         self,
         persist_directory: str = "./chroma_db",
         api_key: str | None = None,
-        embedding_model: str = "text-embedding-004",
+        embedding_model: str = "gemini-embedding-001",
     ):
         """Initialize ChromaDB vector store.
 
@@ -61,7 +64,7 @@ class ChromaVectorStore(BaseVectorStore):
             )
         )
 
-        # Create or get collections
+        # Create or get collections (문서 6개 컬렉션)
         self._collections = {
             "resumes": self.chroma_client.get_or_create_collection(
                 name="resumes",
@@ -75,9 +78,19 @@ class ChromaVectorStore(BaseVectorStore):
                 name="portfolios",
                 metadata={"description": "Portfolio embeddings"},
             ),
-            "interview_questions": self.chroma_client.get_or_create_collection(
-                name="interview_questions",
-                metadata={"description": "Interview Q&A embeddings"},
+            "interview_feedback": self.chroma_client.get_or_create_collection(
+                name="interview_feedback",
+                metadata={
+                    "description": "Interview Q&A + feedback (A안: interview_type 메타데이터)"
+                },
+            ),
+            "analysis_results": self.chroma_client.get_or_create_collection(
+                name="analysis_results",
+                metadata={"description": "Analysis/matching results"},
+            ),
+            "chat_context": self.chroma_client.get_or_create_collection(
+                name="chat_context",
+                metadata={"description": "Important chat context"},
             ),
         }
 
