@@ -155,7 +155,9 @@ class OpenAIProvider(BaseLLMProvider):
             usage={
                 "prompt_tokens": response.usage.prompt_tokens,
                 "total_tokens": response.usage.total_tokens,
-            } if response.usage else None,
+            }
+            if response.usage
+            else None,
         )
 
     def _build_messages(

@@ -113,22 +113,14 @@ class DebateResponse(BaseModel):
     session_id: str = Field(..., description="면접 세션 ID")
 
     # 최종 합의 결과
-    final_analysis: AnalyzeInterviewResponse = Field(
-        ..., description="최종 분석 결과 (토론 합의)"
-    )
+    final_analysis: AnalyzeInterviewResponse = Field(..., description="최종 분석 결과 (토론 합의)")
 
     # 개별 분석 비교
-    gemini_analysis: AnalyzeInterviewResponse = Field(
-        ..., description="Gemini 분석 결과"
-    )
-    gpt4o_analysis: AnalyzeInterviewResponse | None = Field(
-        None, description="GPT-4o 분석 결과"
-    )
+    gemini_analysis: AnalyzeInterviewResponse = Field(..., description="Gemini 분석 결과")
+    gpt4o_analysis: AnalyzeInterviewResponse | None = Field(None, description="GPT-4o 분석 결과")
 
     # 토론 메타데이터
     disagreements: list[DisagreementDetail] = Field(
         default_factory=list, description="불일치 항목들"
     )
-    consensus_method: str = Field(
-        "single", description="합의 방법 (single/merged/debated)"
-    )
+    consensus_method: str = Field("single", description="합의 방법 (single/merged/debated)")

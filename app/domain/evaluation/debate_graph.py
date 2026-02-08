@@ -95,7 +95,10 @@ def create_debate_graph(
             response = await openai_client.chat.completions.create(
                 model=gpt_model,
                 messages=[
-                    {"role": "system", "content": "당신은 면접 답변 평가 전문가입니다. 반드시 JSON 형식으로만 응답해주세요."},
+                    {
+                        "role": "system",
+                        "content": "당신은 면접 답변 평가 전문가입니다. 반드시 JSON 형식으로만 응답해주세요.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -105,7 +108,9 @@ def create_debate_graph(
             response_text = response.choices[0].message.content or ""
             gpt4o_analysis = _parse_json(response_text)
 
-            logger.info(f"GPT-4o analysis complete: {len(gpt4o_analysis.get('questions', []))} questions")
+            logger.info(
+                f"GPT-4o analysis complete: {len(gpt4o_analysis.get('questions', []))} questions"
+            )
 
             return {
                 "gpt4o_analysis": gpt4o_analysis,
@@ -159,28 +164,31 @@ def create_debate_graph(
             o_verdict = o_q.get("verdict", "")
 
             if score_diff >= SCORE_DISAGREEMENT_THRESHOLD or g_verdict != o_verdict:
-                disagreements.append({
-                    "question_index": i,
-                    "question": g_q.get("question", o_q.get("question", "")),
-                    "gemini_score": g_score,
-                    "gpt4o_score": o_score,
-                    "score_diff": score_diff,
-                    "gemini_verdict": g_verdict,
-                    "gpt4o_verdict": o_verdict,
-                    "gemini_reasoning": g_q.get("reasoning", ""),
-                    "gpt4o_reasoning": o_q.get("reasoning", ""),
-                })
+                disagreements.append(
+                    {
+                        "question_index": i,
+                        "question": g_q.get("question", o_q.get("question", "")),
+                        "gemini_score": g_score,
+                        "gpt4o_score": o_score,
+                        "score_diff": score_diff,
+                        "gemini_verdict": g_verdict,
+                        "gpt4o_verdict": o_verdict,
+                        "gemini_reasoning": g_q.get("reasoning", ""),
+                        "gpt4o_reasoning": o_q.get("reasoning", ""),
+                    }
+                )
             else:
-                agreements.append({
-                    "question_index": i,
-                    "question": g_q.get("question", o_q.get("question", "")),
-                    "agreed_score": round((g_score + o_score) / 2),
-                    "agreed_verdict": g_verdict or o_verdict,
-                })
+                agreements.append(
+                    {
+                        "question_index": i,
+                        "question": g_q.get("question", o_q.get("question", "")),
+                        "agreed_score": round((g_score + o_score) / 2),
+                        "agreed_verdict": g_verdict or o_verdict,
+                    }
+                )
 
         logger.info(
-            f"Comparison: {len(agreements)} agreements, "
-            f"{len(disagreements)} disagreements"
+            f"Comparison: {len(agreements)} agreements, " f"{len(disagreements)} disagreements"
         )
 
         return {
@@ -483,7 +491,10 @@ async def _get_gpt4o_rebuttal(
         response = await openai_client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "당신은 면접 답변 평가 전문가입니다. JSON으로만 응답하세요."},
+                {
+                    "role": "system",
+                    "content": "당신은 면접 답변 평가 전문가입니다. JSON으로만 응답하세요.",
+                },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.3,
@@ -524,9 +535,7 @@ class DebateService:
             gpt_model=gpt_model,
             thinking_level=thinking_level,
         )
-        logger.info(
-            f"DebateService initialized: gemini={gemini_model}, gpt={gpt_model}"
-        )
+        logger.info(f"DebateService initialized: gemini={gemini_model}, gpt={gpt_model}")
 
     async def run_debate(
         self,
@@ -572,7 +581,9 @@ class DebateService:
         gpt4o_data = result.get("gpt4o_analysis")
 
         return DebateResult(
-            final_analysis=InterviewAnalysis.from_dict(final_data) if final_data else InterviewAnalysis(),
+            final_analysis=InterviewAnalysis.from_dict(final_data)
+            if final_data
+            else InterviewAnalysis(),
             gemini_analysis=InterviewAnalysis.from_dict(gemini_analysis),
             gpt4o_analysis=InterviewAnalysis.from_dict(gpt4o_data) if gpt4o_data else None,
             disagreements=result.get("disagreements", []),

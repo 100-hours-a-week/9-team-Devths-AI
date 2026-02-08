@@ -76,9 +76,7 @@ class InterviewAnalysis:
     def from_dict(cls, data: dict[str, Any]) -> "InterviewAnalysis":
         """Create from dictionary."""
         return cls(
-            questions=[
-                QuestionAnalysis.from_dict(q) for q in data.get("questions", [])
-            ],
+            questions=[QuestionAnalysis.from_dict(q) for q in data.get("questions", [])],
             overall_score=data.get("overall_score", 0),
             overall_feedback=data.get("overall_feedback", ""),
             strengths=data.get("strengths", []),

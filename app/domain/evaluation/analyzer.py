@@ -51,8 +51,7 @@ class InterviewAnalyzer:
         self.thinking_level = thinking_level
 
         logger.info(
-            f"InterviewAnalyzer initialized: model={model_name}, "
-            f"thinking={thinking_level}"
+            f"InterviewAnalyzer initialized: model={model_name}, " f"thinking={thinking_level}"
         )
 
     async def analyze(
@@ -140,7 +139,11 @@ class InterviewAnalyzer:
         texts = []
         for part in candidate.content.parts:
             # thought 파트는 제외하고 text만 추출
-            if hasattr(part, "text") and part.text and not (hasattr(part, "thought") and part.thought):
+            if (
+                hasattr(part, "text")
+                and part.text
+                and not (hasattr(part, "thought") and part.thought)
+            ):
                 texts.append(part.text)
 
         return "".join(texts)
