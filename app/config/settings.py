@@ -49,8 +49,8 @@ class Settings(BaseSettings):
         description="Gemini model name",
     )
     gemini_embedding_model: str = Field(
-        default="text-embedding-004",
-        description="Gemini embedding model name",
+        default="gemini-embedding-001",
+        description="Gemini embedding model name (VectorDB 문서 설계 최종 선정)",
     )
 
     # ============================================
@@ -97,8 +97,16 @@ class Settings(BaseSettings):
         description="ChromaDB collection for portfolios",
     )
     chroma_collection_interview: str = Field(
-        default="interview_questions",
-        description="ChromaDB collection for interview questions",
+        default="interview_feedback",
+        description="ChromaDB collection for interview Q&A + feedback (문서 설계 A안)",
+    )
+    chroma_collection_analysis_results: str = Field(
+        default="analysis_results",
+        description="ChromaDB collection for analysis/matching results",
+    )
+    chroma_collection_chat_context: str = Field(
+        default="chat_context",
+        description="ChromaDB collection for important chat context",
     )
 
     # ============================================

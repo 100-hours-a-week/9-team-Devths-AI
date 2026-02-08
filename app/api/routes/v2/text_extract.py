@@ -295,6 +295,30 @@ async def text_extract(
                     user_id=str(request.user_id),
                 )
                 logger.info("✅ 분석 리포트 생성 완료")
+                # 문서 설계: 분석 완료 시 analysis_results 컬렉션에 저장
+                try:
+                    matching = analysis_result.get("matching", {})
+                    analysis_doc_id = f"analysis_{request.user_id}_{uuid.uuid4().hex[:8]}"
+                    await rag.vectordb.add_document(
+                        document_id=analysis_doc_id,
+                        text=format_analysis_text(
+                            resume_analysis=analysis_result.get("resume_analysis"),
+                            posting_analysis=analysis_result.get("posting_analysis"),
+                            summary="",
+                        )
+                        or "분석 결과 없음",
+                        collection_type="analysis_results",
+                        metadata={
+                            "user_id": str(request.user_id),
+                            "analysis_type": "full",
+                            "score": matching.get("score"),
+                            "grade": matching.get("grade", ""),
+                            "created_at": datetime.now().isoformat(),
+                        },
+                    )
+                    logger.info("   ✅ VectorDB analysis_results 저장 완료")
+                except Exception as ex:
+                    logger.warning("   ⚠️ analysis_results 저장 건너뜀: %s", ex)
             except Exception as e:
                 analysis_failed = True
                 logger.warning(

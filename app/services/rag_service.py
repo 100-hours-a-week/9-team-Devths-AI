@@ -336,9 +336,23 @@ class RAGService:
             if not posting_text:
                 posting_text = "정보 없음"
 
+            # 이전 면접 피드백 검색 (문서 A안: interview_feedback + interview_type 필터)
+            feedback_text = ""
+            try:
+                feedback_results = await self.vectordb.query(
+                    query_text=f"{interview_type} 면접 약점 피드백",
+                    collection_type="interview_feedback",
+                    n_results=2,
+                    where={"user_id": user_id, "interview_type": interview_type},
+                )
+                if feedback_results:
+                    feedback_text = "\n".join(r["text"] for r in feedback_results[:2])
+            except Exception:
+                pass
+
             # Generate question
             question = await self.llm.generate_interview_question(
-                resume_text, posting_text, interview_type, user_id=user_id
+                resume_text, posting_text, interview_type, user_id=user_id, previous_feedback=feedback_text or None
             )
             return question
 

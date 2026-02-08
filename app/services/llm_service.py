@@ -588,6 +588,7 @@ class LLMService:
         posting_text: str,
         interview_type: str = "technical",
         user_id: str | None = None,
+        previous_feedback: str | None = None,
     ) -> dict[str, Any]:
         """
         Generate interview question
@@ -596,11 +597,18 @@ class LLMService:
             resume_text: Resume content
             posting_text: Job posting content
             interview_type: "technical" or "personality"
+            previous_feedback: Optional previous interview feedback (RAG from interview_feedback)
 
         Returns:
             Interview question as dict
         """
         try:
+            feedback_block = ""
+            if previous_feedback:
+                feedback_block = f"""
+참고 - 이전 면접에서의 약점/피드백:
+{previous_feedback[:800]}...
+"""
             if interview_type == "technical":
                 prompt = f"""다음 이력서와 채용공고를 바탕으로 기술 면접 질문을 생성해주세요.
 
@@ -609,7 +617,7 @@ class LLMService:
 
 채용공고:
 {posting_text[:500]}...
-
+{feedback_block}
 JSON 형식으로 질문을 제공해주세요:
 {{
   "question": "질문 내용",
@@ -622,7 +630,7 @@ JSON 형식으로 질문을 제공해주세요:
 
 이력서:
 {resume_text[:500]}...
-
+{feedback_block}
 JSON 형식으로 질문을 제공해주세요:
 {{
   "question": "질문 내용",
