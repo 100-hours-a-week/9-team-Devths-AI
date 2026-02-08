@@ -6,6 +6,7 @@
 """
 
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -27,6 +28,16 @@ from app.schemas.evaluation import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluation")
+
+
+def _sanitize_log_value(value: str, max_length: int = 50) -> str:
+    """Log Injection 방지를 위해 로그 값을 정제합니다."""
+    # 개행문자와 탭 제거 (Log Forging 방지)
+    sanitized = re.sub(r"[\r\n\t]", "", str(value))
+    # 길이 제한
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length] + "..."
+    return sanitized
 
 
 # ============================================
@@ -53,7 +64,7 @@ async def analyze_interview(
     """
     logger.info(
         "Analyze interview: session=%s, questions=%d",
-        request.session_id,
+        _sanitize_log_value(request.session_id),
         len(request.qa_pairs),
     )
 
@@ -130,7 +141,7 @@ async def debate_analysis(
 
     logger.info(
         "Debate analysis: session=%s, questions=%d",
-        request.session_id,
+        _sanitize_log_value(request.session_id),
         len(request.qa_pairs),
     )
 
