@@ -143,6 +143,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## API 엔드포인트
 
+> 📄 **상세 API 명세(요청/응답 Body, 에러 코드)**: [API_SPEC.md](./API_SPEC.md)
+
 ### v2 API (기본, `/ai/...`)
 
 | Method | Path | 설명 |

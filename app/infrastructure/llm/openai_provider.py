@@ -57,7 +57,7 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> LLMResponse:
         """Generate a response from OpenAI.
 
@@ -102,7 +102,7 @@ class OpenAIProvider(BaseLLMProvider):
         temperature: float = 0.7,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> AsyncIterator[str]:
         """Generate a streaming response from OpenAI.
 
@@ -133,7 +133,7 @@ class OpenAIProvider(BaseLLMProvider):
     async def create_embedding(
         self,
         text: str,
-        **kwargs: Any,
+        **_kwargs: Any,
     ) -> EmbeddingResponse:
         """Create an embedding using OpenAI.
 

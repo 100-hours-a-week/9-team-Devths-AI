@@ -12,9 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.config.dependencies import (
     get_debate_service,
     get_evaluation_analyzer,
-    get_settings,
 )
-from app.config.settings import Settings
 from app.domain.evaluation.analyzer import InterviewAnalyzer
 from app.domain.evaluation.debate_graph import DebateService
 from app.schemas.evaluation import (
@@ -45,7 +43,6 @@ router = APIRouter(prefix="/evaluation")
 async def analyze_interview(
     request: AnalyzeInterviewRequest,
     analyzer: InterviewAnalyzer = Depends(get_evaluation_analyzer),
-    settings: Settings = Depends(get_settings),
 ):
     """면접 종료 시 Gemini 3 Pro로 답변을 분석합니다.
 
@@ -55,8 +52,9 @@ async def analyze_interview(
     - 부적절/보완필요 시 추천 답변 제공
     """
     logger.info(
-        f"Analyze interview: session={request.session_id}, "
-        f"questions={len(request.qa_pairs)}"
+        "Analyze interview: session=%s, questions=%d",
+        request.session_id,
+        len(request.qa_pairs),
     )
 
     # Q&A 데이터 변환
@@ -97,7 +95,7 @@ async def analyze_interview(
         strengths=analysis.strengths,
         improvements=analysis.improvements,
         model_used=analysis.model_used,
-        debate_available=settings.debate_available,
+        debate_available=True,  # 토론 가능 여부는 True로 설정 (OpenAI 키 유무는 debate 호출 시 체크)
     )
 
 
@@ -115,7 +113,6 @@ async def analyze_interview(
 async def debate_analysis(
     request: DebateRequest,
     debate_service: DebateService | None = Depends(get_debate_service),
-    settings: Settings = Depends(get_settings),
 ):
     """Gemini×OpenAI 토론으로 심층 분석을 수행합니다.
 
@@ -132,8 +129,9 @@ async def debate_analysis(
         )
 
     logger.info(
-        f"Debate analysis: session={request.session_id}, "
-        f"questions={len(request.qa_pairs)}"
+        "Debate analysis: session=%s, questions=%d",
+        request.session_id,
+        len(request.qa_pairs),
     )
 
     # Q&A 데이터 변환

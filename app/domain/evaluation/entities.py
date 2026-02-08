@@ -7,7 +7,6 @@ Defines data structures for interview analysis and debate evaluation.
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-
 # ============================================
 # 1단계: Gemini 면접 분석 결과
 # ============================================

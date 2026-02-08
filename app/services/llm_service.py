@@ -1,7 +1,6 @@
 """
 LLM Service using Gemini Flash API
 
-Provides chat functionality and OCR using Google's Gemini 1.5 Flash model.
 """
 
 import asyncio
