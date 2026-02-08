@@ -352,7 +352,11 @@ class RAGService:
 
             # Generate question
             question = await self.llm.generate_interview_question(
-                resume_text, posting_text, interview_type, user_id=user_id, previous_feedback=feedback_text or None
+                resume_text,
+                posting_text,
+                interview_type,
+                user_id=user_id,
+                previous_feedback=feedback_text or None,
             )
             return question
 

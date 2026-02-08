@@ -80,7 +80,9 @@ class ChromaVectorStore(BaseVectorStore):
             ),
             "interview_feedback": self.chroma_client.get_or_create_collection(
                 name="interview_feedback",
-                metadata={"description": "Interview Q&A + feedback (A안: interview_type 메타데이터)"},
+                metadata={
+                    "description": "Interview Q&A + feedback (A안: interview_type 메타데이터)"
+                },
             ),
             "analysis_results": self.chroma_client.get_or_create_collection(
                 name="analysis_results",
