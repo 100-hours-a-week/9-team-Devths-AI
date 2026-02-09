@@ -40,13 +40,17 @@ class ChromaVectorStore(BaseVectorStore):
         persist_directory: str = "./chroma_db",
         api_key: str | None = None,
         embedding_model: str = "gemini-embedding-001",
+        chroma_server_host: str | None = None,
+        chroma_server_port: int = 8000,
     ):
         """Initialize ChromaDB vector store.
 
         Args:
-            persist_directory: Directory to persist ChromaDB data.
+            persist_directory: Directory to persist ChromaDB data (embedded mode).
             api_key: Google API key for embeddings.
             embedding_model: Gemini embedding model name.
+            chroma_server_host: ChromaDB server host (v2 server mode). If set, use HttpClient.
+            chroma_server_port: ChromaDB server port.
         """
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not api_key:
@@ -56,13 +60,21 @@ class ChromaVectorStore(BaseVectorStore):
         self.genai_client = genai.Client(api_key=api_key)
         self._embedding_model = embedding_model
 
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.Client(
-            Settings(
-                persist_directory=persist_directory,
-                anonymized_telemetry=False,
+        # Initialize ChromaDB: server mode (v2) or embedded mode
+        if chroma_server_host:
+            self.chroma_client = chromadb.HttpClient(
+                host=chroma_server_host,
+                port=chroma_server_port,
             )
-        )
+            logger.info(f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}")
+        else:
+            self.chroma_client = chromadb.Client(
+                Settings(
+                    persist_directory=persist_directory,
+                    anonymized_telemetry=False,
+                )
+            )
+            logger.info(f"ChromaVectorStore initialized at {persist_directory}")
 
         # Create or get collections (문서 6개 컬렉션)
         self._collections = {
@@ -93,8 +105,6 @@ class ChromaVectorStore(BaseVectorStore):
                 metadata={"description": "Important chat context"},
             ),
         }
-
-        logger.info(f"ChromaVectorStore initialized at {persist_directory}")
 
     @property
     def store_name(self) -> str:

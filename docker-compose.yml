@@ -1,0 +1,160 @@
+# v2 5서버 구성 (로컬 테스트)
+# CPU만: docker-compose up -d
+# GPU 포함: docker-compose --profile gpu up -d
+services:
+  # -----------------------------------------
+  # 1. AI Endpoint Server (CPU)
+  # -----------------------------------------
+  ai-endpoint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-endpoint:v2
+    container_name: ai_endpoint
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      # ChromaDB (VectorDB)
+      - CHROMA_SERVER_HOST=vectordb
+      - CHROMA_SERVER_PORT=8000
+      # OCR
+      - EASYOCR_SERVER_URL=http://easyocr-server:8000
+      - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
+      - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
+      # LLM APIs
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # vLLM (로컬 테스트: Docker 서비스명, 프로덕션: 실제 서버 URL로 교체)
+      - GCP_VLLM_BASE_URL=http://exaone-8b:8000
+      - VLLM_32B_BASE_URL=http://exaone-32b:8000
+      # S3 Storage
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_REGION=${S3_REGION:-ap-northeast-2}
+      - S3_BUCKET=${S3_BUCKET:-devths-dev}
+      # Redis (세션/태스크 저장소)
+      - REDIS_URL=redis://redis:6379/0
+      # Langfuse (모니터링)
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+    depends_on:
+      - vectordb
+      - redis
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 2. Redis (세션/태스크 저장소)
+  # -----------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ai_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 3. VectorDB (ChromaDB, CPU)
+  # -----------------------------------------
+  vectordb:
+    image: chromadb/chroma:latest
+    container_name: chromadb_server
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 4. Exaone 8B (vLLM, GPU) - profile: gpu
+  # -----------------------------------------
+  exaone-8b:
+    image: vllm/vllm-openai:latest
+    container_name: exaone_8b
+    ports:
+      - "8003:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      vllm serve LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 4096
+      --trust-remote-code
+    profiles:
+      - gpu
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 5. EasyOCR (GPU) - profile: gpu
+  # -----------------------------------------
+  easyocr-server:
+    build:
+      context: ./easyocr_server
+      dockerfile: Dockerfile
+    image: easyocr-server:v1
+    container_name: easyocr_server
+    ports:
+      - "8002:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 6. Exaone 32B (vLLM, GPU) - profile: gpu
+  # 로컬 테스트용. 프로덕션에서는 RunPod 서버리스 사용.
+  # 프로덕션 시 VLLM_32B_BASE_URL을 RunPod 엔드포인트로 변경.
+  # -----------------------------------------
+  exaone-32b:
+    image: vllm/vllm-openai:latest
+    container_name: exaone_32b
+    ports:
+      - "8004:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      vllm serve LGAI-EXAONE/EXAONE-3.5-32B-Instruct
+      --host 0.0.0.0
+      --port 8000
+      --max-model-len 4096
+      --trust-remote-code
+    profiles:
+      - gpu
+    networks:
+      - ai_network
+
+networks:
+  ai_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  chroma_data:

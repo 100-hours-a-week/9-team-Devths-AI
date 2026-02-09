@@ -18,13 +18,21 @@ logger = logging.getLogger(__name__)
 class VectorDBService:
     """VectorDB Service for storing and retrieving embeddings"""
 
-    def __init__(self, api_key: str | None = None, persist_directory: str = "./chroma_db"):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        persist_directory: str = "./chroma_db",
+        chroma_server_host: str | None = None,
+        chroma_server_port: int = 8000,
+    ):
         """
         Initialize VectorDB Service
 
         Args:
             api_key: Google API key for embeddings (uses GOOGLE_API_KEY env var if not provided)
-            persist_directory: Directory to persist ChromaDB data
+            persist_directory: Directory to persist ChromaDB data (embedded mode)
+            chroma_server_host: ChromaDB server host (v2 server mode). If set, use HttpClient.
+            chroma_server_port: ChromaDB server port
         """
         # Configure Gemini API for embeddings
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
@@ -34,11 +42,20 @@ class VectorDBService:
         # Initialize Gemini Client for embeddings
         self.genai_client = genai.Client(api_key=api_key)
 
-        # Initialize ChromaDB
-        # ChromaDB 0.4.24 uses Client with Settings
-        self.chroma_client = chromadb.Client(
-            Settings(persist_directory=persist_directory, anonymized_telemetry=False)
-        )
+        # Initialize ChromaDB: server mode (v2) or embedded mode
+        if chroma_server_host:
+            self.chroma_client = chromadb.HttpClient(
+                host=chroma_server_host,
+                port=chroma_server_port,
+            )
+            logger.info(
+                f"VectorDB Service initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
+            )
+        else:
+            self.chroma_client = chromadb.Client(
+                Settings(persist_directory=persist_directory, anonymized_telemetry=False)
+            )
+            logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
         # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션)
         self.RESUME_COLLECTION = "resumes"
@@ -70,8 +87,6 @@ class VectorDBService:
             name=self.CHAT_CONTEXT_COLLECTION,
             metadata={"description": "Important chat context"},
         )
-
-        logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
     def _get_collection(self, collection_type: str):
         """Get collection by type (문서 6개 컬렉션 + 별칭)"""

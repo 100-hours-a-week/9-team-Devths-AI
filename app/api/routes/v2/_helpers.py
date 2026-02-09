@@ -30,7 +30,11 @@ def get_services():
         settings = get_settings()
         api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
         _llm_service = LLMService(api_key=api_key)
-        _vectordb_service = VectorDBService(api_key=api_key)
+        _vectordb_service = VectorDBService(
+            api_key=api_key,
+            chroma_server_host=settings.chroma_server_host,
+            chroma_server_port=settings.chroma_server_port,
+        )
 
         # Initialize vLLM service (GCP GPU server)
         gcp_vllm_url = settings.gcp_vllm_base_url or os.getenv("GCP_VLLM_BASE_URL")
