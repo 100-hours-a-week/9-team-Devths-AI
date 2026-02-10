@@ -38,6 +38,18 @@ def _sanitize_log_value(value: str, max_length: int = 50) -> str:
     return sanitized
 
 
+def _validate_qa_list(qa_list: list[dict]) -> str | None:
+    """Q&A 리스트의 형식을 검증합니다.
+
+    Returns:
+        에러 메시지 (정상이면 None)
+    """
+    for i, qa in enumerate(qa_list):
+        if "question" not in qa or "answer" not in qa:
+            return f"context[{i}]에 question, answer 필드가 필요합니다."
+    return None
+
+
 # ============================================
 # Gemini 단독 분석 스트리밍 (retry=false)
 # ============================================
@@ -48,6 +60,7 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
     sse_end = "\n\n"
     qa_list = request.context or []
 
+    # context 빈 배열 검사
     if not qa_list:
         yield sse_error_event(
             code="EMPTY_CONTEXT",
@@ -58,7 +71,31 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
         yield f"data: [DONE]{sse_end}"
         return
 
-    rag = get_services()
+    # context Q&A 형식 검증
+    validation_error = _validate_qa_list(qa_list)
+    if validation_error:
+        yield sse_error_event(
+            code="INVALID_CONTEXT",
+            status=400,
+            message=validation_error,
+            fallback="Q&A 데이터 형식이 올바르지 않습니다. 각 항목에 question과 answer를 포함해주세요.",
+        )
+        yield f"data: [DONE]{sse_end}"
+        return
+
+    # RAG 서비스 초기화
+    try:
+        rag = get_services()
+    except Exception as e:
+        logger.error("RAG 서비스 초기화 실패: %s", str(e), exc_info=True)
+        yield sse_error_event(
+            code="LLM_UNAVAILABLE",
+            status=503,
+            message=str(e),
+            fallback="AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+        )
+        yield f"data: [DONE]{sse_end}"
+        return
 
     content = "면접 평가 리포트를 생성 중입니다...\n"
     yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}{sse_end}"
@@ -113,6 +150,14 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
 
         logger.info("✅ 면접 평가 리포트 생성 완료 (응답 길이: %d자)", len(full_report))
 
+    except ConnectionError as e:
+        logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
+        yield sse_error_event(
+            code="LLM_UNAVAILABLE",
+            status=503,
+            message=str(e),
+            fallback="AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+        )
     except Exception as e:
         logger.error("면접 평가 리포트 생성 오류: %s", str(e), exc_info=True)
         yield sse_error_event(
@@ -130,6 +175,40 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
 # ============================================
 
 
+def _format_analysis_as_text(analysis) -> str:
+    """InterviewAnalysis 객체를 텍스트 리포트로 변환합니다."""
+    lines = []
+
+    for i, q in enumerate(analysis.questions, 1):
+        lines.append(f"━━━ 질문 {i} ━━━")
+        lines.append(f"질문: {q.question}")
+        lines.append(f"답변: {q.user_answer}")
+        lines.append(f"판정: {q.verdict} (점수: {q.score}/5)")
+        lines.append(f"평가: {q.reasoning}")
+        if q.recommended_answer:
+            lines.append(f"추천 답변: {q.recommended_answer}")
+        lines.append("")
+
+    lines.append("━━━ 종합 평가 ━━━")
+    lines.append(f"종합 점수: {analysis.overall_score}/5")
+    lines.append(f"종합 피드백: {analysis.overall_feedback}")
+    lines.append("")
+
+    if analysis.strengths:
+        lines.append("강점:")
+        for s in analysis.strengths:
+            lines.append(f"  - {s}")
+        lines.append("")
+
+    if analysis.improvements:
+        lines.append("개선점:")
+        for imp in analysis.improvements:
+            lines.append(f"  - {imp}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 async def _generate_debate_stream(
     request: AnalyzeInterviewRequest,
     analyzer: InterviewAnalyzer,
@@ -139,12 +218,25 @@ async def _generate_debate_stream(
     sse_end = "\n\n"
     qa_list = request.context or []
 
+    # context 빈 배열 검사
     if not qa_list:
         yield sse_error_event(
             code="EMPTY_CONTEXT",
             status=400,
             message="평가할 Q&A 데이터가 없습니다.",
             fallback="면접 문답 데이터가 비어 있습니다. context에 Q&A 목록을 전달해주세요.",
+        )
+        yield f"data: [DONE]{sse_end}"
+        return
+
+    # context Q&A 형식 검증
+    validation_error = _validate_qa_list(qa_list)
+    if validation_error:
+        yield sse_error_event(
+            code="INVALID_CONTEXT",
+            status=400,
+            message=validation_error,
+            fallback="Q&A 데이터 형식이 올바르지 않습니다. 각 항목에 question과 answer를 포함해주세요.",
         )
         yield f"data: [DONE]{sse_end}"
         return
@@ -159,8 +251,10 @@ async def _generate_debate_stream(
         for qa in qa_list
     ]
 
+    gemini_result = None
+
+    # ── 1단계: Gemini 구조화 분석 ──
     try:
-        # 1단계: Gemini 구조화 분석
         progress = "🔍 Gemini 분석 중...\n"
         yield f"data: {json.dumps({'chunk': progress}, ensure_ascii=False)}{sse_end}"
 
@@ -169,7 +263,19 @@ async def _generate_debate_stream(
         gemini_dict = gemini_result.to_dict()
         logger.info("✅ [Debate] 1단계 완료: overall_score=%d", gemini_result.overall_score)
 
-        # 2단계: Gemini×GPT-4o 토론
+    except Exception as e:
+        logger.error("Gemini 분석 실패: %s", str(e), exc_info=True)
+        yield sse_error_event(
+            code="LLM_ERROR",
+            status=500,
+            message=str(e),
+            fallback="Gemini 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        )
+        yield f"data: [DONE]{sse_end}"
+        return
+
+    # ── 2단계: Gemini×GPT-4o 토론 ──
+    try:
         progress = "🤖 GPT-4o 심층 분석 및 토론 중...\n"
         yield f"data: {json.dumps({'chunk': progress}, ensure_ascii=False)}{sse_end}"
 
@@ -187,48 +293,26 @@ async def _generate_debate_stream(
         yield f"data: {json.dumps({'chunk': progress}, ensure_ascii=False)}{sse_end}"
 
         final = debate_result.final_analysis
-
-        # 각 질문별 평가 출력
-        for i, q in enumerate(final.questions, 1):
-            report_text = f"━━━ 질문 {i} ━━━\n"
-            report_text += f"질문: {q.question}\n"
-            report_text += f"답변: {q.user_answer}\n"
-            report_text += f"판정: {q.verdict} (점수: {q.score}/5)\n"
-            report_text += f"평가: {q.reasoning}\n"
-            if q.recommended_answer:
-                report_text += f"추천 답변: {q.recommended_answer}\n"
-            report_text += "\n"
-            yield f"data: {json.dumps({'chunk': report_text}, ensure_ascii=False)}{sse_end}"
-
-        # 종합 피드백
-        summary_text = "━━━ 종합 평가 ━━━\n"
-        summary_text += f"종합 점수: {final.overall_score}/5\n"
-        summary_text += f"종합 피드백: {final.overall_feedback}\n\n"
-
-        if final.strengths:
-            summary_text += "강점:\n"
-            for s in final.strengths:
-                summary_text += f"  - {s}\n"
-            summary_text += "\n"
-
-        if final.improvements:
-            summary_text += "개선점:\n"
-            for imp in final.improvements:
-                summary_text += f"  - {imp}\n"
-            summary_text += "\n"
-
-        yield f"data: {json.dumps({'chunk': summary_text}, ensure_ascii=False)}{sse_end}"
+        report_text = _format_analysis_as_text(final)
+        yield f"data: {json.dumps({'chunk': report_text}, ensure_ascii=False)}{sse_end}"
 
         logger.info("✅ [Debate] 최종 리포트 스트리밍 완료")
 
     except Exception as e:
-        logger.error("Debate 리포트 생성 오류: %s", str(e), exc_info=True)
+        logger.error("Debate 토론 실패: %s", str(e), exc_info=True)
+
+        # 토론 실패 시 Gemini 1단계 결과라도 반환
         yield sse_error_event(
-            code="LLM_ERROR",
+            code="DEBATE_ERROR",
             status=500,
             message=str(e),
-            fallback="심층 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            fallback="심층 분석 중 오류가 발생했습니다. Gemini 단독 분석 결과를 제공합니다.",
         )
+
+        if gemini_result and gemini_result.questions:
+            fallback_text = "\n[Gemini 단독 분석 결과]\n\n"
+            fallback_text += _format_analysis_as_text(gemini_result)
+            yield f"data: {json.dumps({'chunk': fallback_text}, ensure_ascii=False)}{sse_end}"
 
     yield f"data: [DONE]{sse_end}"
 
@@ -247,6 +331,92 @@ async def _generate_debate_stream(
     **retry=false (기본):** Gemini 단독 분석 → SSE 리포트
     **retry=true (답변 다시 받기):** Gemini×GPT-4o 토론 → SSE 리포트
     """,
+    responses={
+        400: {
+            "description": "Bad Request",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "empty_context": {
+                            "value": {
+                                "detail": {
+                                    "code": "EMPTY_CONTEXT",
+                                    "message": "평가할 Q&A 데이터가 없습니다.",
+                                }
+                            }
+                        },
+                        "invalid_context": {
+                            "value": {
+                                "detail": {
+                                    "code": "INVALID_CONTEXT",
+                                    "message": "context의 각 항목에 question, answer 필드가 필요합니다.",
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Validation Error",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "code": "VALIDATION_ERROR",
+                            "message": "필수 필드 누락 (room_id, user_id, session_id, context)",
+                        }
+                    }
+                }
+            },
+        },
+        500: {
+            "description": "Internal Server Error",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "llm_error": {
+                            "value": {
+                                "detail": {
+                                    "code": "LLM_ERROR",
+                                    "message": "LLM 서비스 호출 실패하였습니다.",
+                                }
+                            }
+                        },
+                        "debate_error": {
+                            "value": {
+                                "detail": {
+                                    "code": "DEBATE_ERROR",
+                                    "message": "심층 분석 중 오류가 발생했습니다.",
+                                }
+                            }
+                        },
+                        "stream_error": {
+                            "value": {
+                                "detail": {
+                                    "code": "STREAM_ERROR",
+                                    "message": "스트리밍 연결이 중단되었습니다.",
+                                }
+                            }
+                        },
+                    }
+                }
+            },
+        },
+        503: {
+            "description": "Service Unavailable",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": {
+                            "code": "LLM_UNAVAILABLE",
+                            "message": "AI 서비스에 연결할 수 없습니다.",
+                        }
+                    }
+                }
+            },
+        },
+    },
 )
 async def analyze_interview(
     request: AnalyzeInterviewRequest,
@@ -262,38 +432,31 @@ async def analyze_interview(
         request.retry,
     )
 
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+
     # retry=true → Gemini×GPT-4o 토론
     if request.retry:
         if not debate_service:
-            # debate 서비스 미사용 시 Gemini 단독으로 폴백
             logger.warning("Debate service unavailable, falling back to Gemini-only")
             return StreamingResponse(
                 _generate_analyze_stream(request),
                 media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
+                headers=sse_headers,
             )
 
         return StreamingResponse(
             _generate_debate_stream(request, analyzer, debate_service),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+            headers=sse_headers,
         )
 
     # retry=false → Gemini 단독 분석
     return StreamingResponse(
         _generate_analyze_stream(request),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=sse_headers,
     )
