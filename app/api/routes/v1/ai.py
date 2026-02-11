@@ -2,12 +2,18 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 
+# ============================================================================
+# Phase 5 마이그레이션: DI 기반 인프라
+# ============================================================================
+from app.config.dependencies import get_legacy_task_storage, get_session_store
+from app.config.settings import get_settings
 from app.prompts import (
     create_tech_followup_prompt,
     create_tech_interview_init_prompt,
@@ -32,32 +38,23 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
+from app.services.cloudwatch_service import CloudWatchService
 from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
 from app.services.vllm_service import VLLMService
-from app.utils.log_sanitizer import safe_info, sanitize_log_input
-from app.utils.task_store import get_task_store
+from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
+from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/ai",
-    tags=["AI APIs (v3.0)"],
+    prefix="/ai/v1",
+    tags=["AI APIs v1 (Legacy)"],
     responses={404: {"description": "Not found"}},
 )
 
-# 통합 작업 저장소 (파일 기반, 서버 재시작 시에도 유지)
-# 백엔드에서 전달받은 task_id를 키로 사용
-task_store = get_task_store()
-
-
-# ============================================================================
-# 면접 세션 캐시 (메모리 기반)
-# - Spring 백엔드가 세션 상태를 전달하지 않는 문제의 임시 해결책
-# - 운영 환경에서는 Redis 권장
-# ============================================================================
-interview_sessions: dict[str, InterviewSession] = {}
+# 면접 세션: get_session_store() DI로 주입 (ai.py 내 interview_sessions 제거)
 
 
 def get_session_key(user_id: int, interview_id: int | None) -> str:
@@ -73,16 +70,17 @@ rag_service = None
 
 
 def get_services():
-    """Get or initialize AI services"""
+    """Get or initialize AI services (설정은 config/settings 사용)"""
     global llm_service, vllm_service, vectordb_service, rag_service
 
     if llm_service is None:
-        api_key = os.getenv("GOOGLE_API_KEY")
+        settings = get_settings()
+        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
         llm_service = LLMService(api_key=api_key)
         vectordb_service = VectorDBService(api_key=api_key)
 
         # Initialize vLLM service (GCP GPU server)
-        gcp_vllm_url = os.getenv("GCP_VLLM_BASE_URL")
+        gcp_vllm_url = settings.gcp_vllm_base_url or os.getenv("GCP_VLLM_BASE_URL")
 
         try:
             if gcp_vllm_url:
@@ -188,7 +186,7 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     "/text/extract",
     response_model=AsyncTaskResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="텍스트 추출 + 임베딩 저장 (이력서 + 채용공고)",
+    summary="[v1] 텍스트 추출 + 임베딩 저장 (이력서 + 채용공고)",
     description="""
     이력서와 채용공고에서 텍스트를 추출하고 내부에서 임베딩까지 처리합니다.
 
@@ -198,148 +196,26 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     - 각 문서는 파일 업로드(`s3_key` + `file_type`) 또는 텍스트 입력(`text`) 중 하나 선택
 
     **처리 방식:** 비동기 (task_id 반환 → 폴링 필요)
-
-    **내부 처리 흐름:**
-    1. 이력서 처리: 파일이면 OCR/VLM으로 텍스트 추출, 텍스트면 그대로 사용
-    2. 채용공고 처리: 파일이면 OCR/VLM으로 텍스트 추출, 텍스트면 그대로 사용
-    3. 각 텍스트 청킹 (500 tokens, 50 overlap)
-    4. Gemini Embedding 생성
-    5. VectorDB에 저장 (resume, job_posting 컬렉션)
-    6. 분석 리포트 생성 (이력서/채용공고 분석)
-    7. 추출된 텍스트 + 분석 결과 반환
     """,
-    responses={
-        400: {
-            "description": "Bad Request",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "invalid_request": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_REQUEST",
-                                    "message": "resume과 job_posting 는 필수 입력해야합니다",
-                                }
-                            }
-                        },
-                        "invalid_file_type": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_FILE_TYPE",
-                                    "message": "file_type은 pdf 또는 image만 가능합니다",
-                                    "field": "resume.file_type",
-                                }
-                            }
-                        },
-                        "invalid_document": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_DOCUMENT",
-                                    "message": "s3_key 또는 text 중 하나는 필수입니다",
-                                    "field": "resume",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "FILE_NOT_FOUND",
-                            "message": "파일을 찾을 수 없습니다: users/12/resume/abc123.pdf",
-                        }
-                    }
-                }
-            },
-        },
-        422: {
-            "description": "Unprocessable Entity",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "OCR_FAILED",
-                            "message": "이미지에서 텍스트를 추출할 수 없습니다",
-                        }
-                    }
-                }
-            },
-        },
-        429: {
-            "description": "Too Many Requests",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요",
-                        }
-                    }
-                }
-            },
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다",
-                        }
-                    }
-                }
-            },
-        },
-        503: {
-            "description": "Service Unavailable",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "llm_unavailable": {
-                            "value": {
-                                "detail": {
-                                    "code": "LLM_UNAVAILABLE",
-                                    "message": "AI 서비스에 연결할 수 없습니다",
-                                }
-                            }
-                        },
-                        "s3_unavailable": {
-                            "value": {
-                                "detail": {
-                                    "code": "S3_UNAVAILABLE",
-                                    "message": "파일 스토리지에 연결할 수 없습니다",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-    },
 )
-async def text_extract(request: TextExtractRequest):
+async def text_extract(
+    request: TextExtractRequest,
+    task_storage=Depends(get_legacy_task_storage),
+):
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
 
-    # 비동기 작업 시작 (통합 task_store 사용)
+    # 모니터링 메트릭 전송
+    try:
+        cw = CloudWatchService.get_instance()
+        # fire-and-forget (await 안함, 배경 실행)
+        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
+    except Exception:
+        pass
+
+    # 비동기 작업 시작 (DI: task_storage)
     task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
-    task_store.save(
+    task_storage.save(
         task_key,
         {
             "type": "text_extract",
@@ -351,7 +227,7 @@ async def text_extract(request: TextExtractRequest):
     )
 
     # 백그라운드에서 처리
-    async def process_text_extract():
+    async def process_text_extract(store):
         try:
             rag = get_services()
 
@@ -500,7 +376,7 @@ async def text_extract(request: TextExtractRequest):
             logger.info("")
 
             # 결과 저장 (명세서에 따른 응답 구조)
-            task_data = task_store.get(task_key) or {}
+            task_data = store.get(task_key) or {}
             task_data["status"] = TaskStatus.COMPLETED
 
             # formatted_text 생성 (백엔드에서 바로 표시용)
@@ -545,7 +421,7 @@ async def text_extract(request: TextExtractRequest):
                 formatted_text=formatted_text,
                 ai_message=ai_message,
             ).model_dump()
-            task_store.save(task_key, task_data)
+            store.save(task_key, task_data)
 
             logger.info("")
             logger.info("✅ 텍스트 추출 + 분석 완료!")
@@ -554,12 +430,12 @@ async def text_extract(request: TextExtractRequest):
 
         except Exception as e:
             logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
-            task_data = task_store.get(task_key) or {}
+            task_data = store.get(task_key) or {}
             task_data["status"] = TaskStatus.FAILED
             task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
-            task_store.save(task_key, task_data)
+            store.save(task_key, task_data)
 
-    asyncio.create_task(process_text_extract())
+    asyncio.create_task(process_text_extract(task_storage))
 
     return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)
 
@@ -572,101 +448,16 @@ async def text_extract(request: TextExtractRequest):
 @router.get(
     "/task/{task_id}",
     response_model=TaskStatusResponse,
-    summary="비동기 작업 상태 조회",
+    summary="[v1] 비동기 작업 상태 조회",
     description="비동기 처리 작업의 상태를 조회하고 결과를 확인합니다.",
-    responses={
-        200: {
-            "description": "성공",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "processing": {
-                            "summary": "처리 중",
-                            "value": {
-                                "task_id": 32,
-                                "status": "processing",
-                                "progress": None,
-                                "message": None,
-                                "result": None,
-                                "error": None,
-                            },
-                        },
-                        "completed": {
-                            "summary": "완료 (text_extract)",
-                            "value": {
-                                "task_id": 32,
-                                "status": "completed",
-                                "progress": 100,
-                                "message": None,
-                                "result": {
-                                    "success": True,
-                                    "summary": "카카오 | 백엔드 개발자",
-                                    "resume_ocr": "이름: 홍길동\n경력: 3년...",
-                                    "job_posting_ocr": "카카오 백엔드 채용\n자격요건: Java...",
-                                    "resume_analysis": {
-                                        "strengths": ["Java/Spring 숙련도", "프로젝트 경험"],
-                                        "weaknesses": ["클라우드 경험 부족"],
-                                        "suggestions": ["AWS 학습 권장"],
-                                    },
-                                    "posting_analysis": {
-                                        "company": "카카오",
-                                        "position": "백엔드 개발자",
-                                        "required_skills": ["Java", "Spring", "MySQL"],
-                                        "preferred_skills": ["Docker", "Kubernetes"],
-                                    },
-                                    "formatted_text": "지원 회사 및 직무 : 카카오 | 백엔드 개발자\n\n이력서 분석\n\n장점\n1. Java/Spring 숙련도\n2. 프로젝트 경험\n\n단점\n1. 클라우드 경험 부족\n\n채용 공고 분석\n\n기업 / 포지션\n카카오 / 백엔드 개발자\n\n필수 역량\n- Java\n- Spring\n- MySQL\n\n우대 사항\n- Docker\n- Kubernetes",
-                                    "room_id": 23,
-                                },
-                                "error": None,
-                            },
-                        },
-                        "failed": {
-                            "summary": "실패",
-                            "value": {
-                                "task_id": 32,
-                                "status": "failed",
-                                "progress": None,
-                                "message": None,
-                                "result": None,
-                                "error": {
-                                    "code": "OCR_FAILED",
-                                    "message": "이미지에서 텍스트를 추출할 수 없습니다",
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        404: {
-            "description": "Not Found",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "TASK_NOT_FOUND",
-                            "message": "작업을 찾을 수 없습니다: 12",
-                        }
-                    }
-                }
-            },
-        },
-    },
 )
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    task_storage=Depends(get_legacy_task_storage),
+):
     """통합 비동기 작업 상태 조회 (text_extract, masking 등)"""
     task_key = str(task_id)  # 문자열 키로 통일
-    task = task_store.get(task_key)
+    task = task_storage.get(task_key)
 
     if task is None:
         raise HTTPException(
@@ -702,8 +493,39 @@ async def get_task_status(task_id: str):
 # ============================================================================
 
 
-async def generate_chat_stream(request: ChatRequest):
-    """채팅 응답 스트리밍 생성"""
+async def generate_chat_stream(
+    request: ChatRequest,
+    session_store,
+):
+    """채팅 응답 스트리밍 생성 (session_store: DI from get_session_store)"""
+
+    # =========================================================================
+    # 프롬프트 인젝션 검사 (API 호출 전 사전 필터링)
+    # =========================================================================
+    user_message_raw = request.message or ""
+    guard_result = check_prompt_injection(user_message_raw)
+
+    if guard_result.risk_level == RiskLevel.BLOCK:
+        # 차단: 안전한 응답 반환 (LLM 호출 없이)
+        safe_warning(
+            logger,
+            "🚨 프롬프트 인젝션 차단: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
+        )
+        blocked_response = guard_result.message
+        yield f"data: {json.dumps({'content': blocked_response}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    if guard_result.risk_level == RiskLevel.WARNING:
+        # 경고: 로깅만 하고 계속 진행
+        safe_warning(
+            logger,
+            "⚠️ 의심스러운 입력 감지: user_id=%s, patterns=%s",
+            request.user_id,
+            str(guard_result.matched_patterns),
+        )
 
     # context에서 모드 결정 (normal 또는 interview)
     mode = request.context.mode if request.context else ChatMode.NORMAL
@@ -712,8 +534,15 @@ async def generate_chat_stream(request: ChatRequest):
     newline = "\n"
     sse_end = "\n\n"
 
+    # 모니터링 시작
+    start_time = time.time()
+
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
+
+    # 메트릭 차원 정의
+    dims = {"Model": model, "Mode": str(mode)}
+
     logger.info("")
     logger.info(f"{'='*80}")
     logger.info("=== 💬 채팅 요청 시작 ===")
@@ -1040,7 +869,9 @@ async def generate_chat_stream(request: ChatRequest):
                     logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
         except Exception as e:
-            error_msg = f"오류가 발생했습니다: {str(e)}"
+            # 보안: 상세 에러는 로그에만 기록, 사용자에게는 일반 메시지만 전달
+            logger.error("채팅 처리 오류: %s", str(e), exc_info=True)
+            error_msg = "일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
             yield f"data: {json.dumps({'chunk': error_msg}, ensure_ascii=False)}{sse_end}"
             full_response = error_msg
 
@@ -1056,10 +887,11 @@ async def generate_chat_stream(request: ChatRequest):
             session_key = get_session_key(request.user_id, request.interview_id)
             user_message = request.message or ""
 
-            # 세션 상태 확인 (요청에 없으면 캐시에서 조회)
+            # 세션 상태 확인 (요청에 없으면 세션 스토어에서 조회)
             session = request.context.interview_session
             if session is None:
-                session = interview_sessions.get(session_key)
+                session_data = await session_store.get(session_key)
+                session = InterviewSession.model_validate(session_data) if session_data else None
                 if session:
                     safe_info(
                         logger,
@@ -1164,9 +996,9 @@ async def generate_chat_stream(request: ChatRequest):
 
                         logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
-                        # 세션 캐시에 저장
-                        interview_sessions[session_key] = new_session
-                        safe_info(logger, "💾 [면접] 세션 캐시 저장: %s", session_key)
+                        # 세션 스토어에 저장
+                        await session_store.set(session_key, new_session.model_dump())
+                        safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
 
                         # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
@@ -1333,16 +1165,16 @@ async def generate_chat_stream(request: ChatRequest):
                     else:
                         # 모든 질문 완료 - 타이핑 효과
                         session.phase = "completed"
-                        complete_msg = f"{newline}{newline}수고하셨습니다! 모든 면접 질문이 완료되었습니다. 면접 결과 리포트를 생성하시려면 리포트 모드를 선택해주세요."
+                        complete_msg = f"{newline}{newline}면접 결과 리포트를 생성 중입니다. 잠시만 기다려 주세요."
                         for char in complete_msg:
                             yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                             await asyncio.sleep(0.015)
 
-                # 세션 캐시 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
-                interview_sessions[session_key] = session
+                # 세션 스토어 업데이트 (PHASE 2 블록 내부, if current_q.is_completed 외부)
+                await session_store.set(session_key, session.model_dump())
                 safe_info(
                     logger,
-                    "💾 [면접] 세션 캐시 업데이트: %s, phase=%s, Q%d/5",
+                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%d/5",
                     session_key,
                     session.phase,
                     session.current_question_id,
@@ -1350,7 +1182,7 @@ async def generate_chat_stream(request: ChatRequest):
 
                 # 면접 완료 시 세션 정리
                 if session.phase == "completed":
-                    interview_sessions.pop(session_key, None)
+                    await session_store.delete(session_key)
                     safe_info(logger, "🗑️ [면접] 완료된 세션 삭제: %s", session_key)
 
                 # 업데이트된 세션 상태 전달
@@ -1365,8 +1197,8 @@ async def generate_chat_stream(request: ChatRequest):
             # PHASE 3: 면접 완료
             # ===================================================================
             elif session.phase == "completed":
-                # 이미 완료된 세션 - 캐시에서 삭제
-                interview_sessions.pop(session_key, None)
+                # 이미 완료된 세션 - 스토어에서 삭제
+                await session_store.delete(session_key)
                 complete_msg = "면접이 이미 완료되었습니다. 리포트 모드에서 결과를 확인하세요."
                 yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
                 yield f"data: [DONE]{sse_end}"
@@ -1455,10 +1287,18 @@ async def generate_chat_stream(request: ChatRequest):
             {"success": False, "mode": "report", "error": str(e)}
             yield f"data: [DONE]{sse_end}"
 
+    # Latency 측정 종료 및 전송
+    try:
+        duration = (time.time() - start_time) * 1000
+        cw = CloudWatchService.get_instance()
+        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+    except Exception as e:
+        logger.error(f"Failed to record latency metric: {e}")
+
 
 @router.post(
     "/chat",
-    summary="채팅 스트리밍 (일반/면접/리포트)",
+    summary="[v1] 채팅 스트리밍 (일반/면접/리포트)",
     description="""
     채팅 스트리밍 응답을 처리합니다.
 
@@ -1473,111 +1313,14 @@ async def generate_chat_stream(request: ChatRequest):
     - behavior: 인성 면접
     - tech: 기술 면접
     """,
-    responses={
-        400: {
-            "description": "Bad Request",
-            "content": {
-                "application/json": {
-                    "examples": {
-                        "invalid_request": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_REQUEST",
-                                    "message": "room_id는 필수입니다",
-                                    "field": "room_id",
-                                }
-                            }
-                        },
-                        "invalid_mode": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_MODE",
-                                    "message": "mode는 normal 또는 interview 중 하나여야 합니다",
-                                    "field": "context.mode",
-                                }
-                            }
-                        },
-                        "invalid_interview_type": {
-                            "value": {
-                                "detail": {
-                                    "code": "INVALID_INTERVIEW_TYPE",
-                                    "message": "interview_type은 behavior 또는 tech만 가능합니다",
-                                    "field": "context.interview_type",
-                                }
-                            }
-                        },
-                    }
-                }
-            },
-        },
-        401: {
-            "description": "Unauthorized",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {"code": "UNAUTHORIZED", "message": "유효하지 않은 API Key입니다"}
-                    }
-                }
-            },
-        },
-        422: {
-            "description": "Unprocessable Entity",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "MISSING_CONTEXT",
-                            "message": "면접 모드 시 context.resume_ocr 또는 context.job_posting_ocr이 필요합니다",
-                        }
-                    }
-                }
-            },
-        },
-        429: {
-            "description": "Too Many Requests",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "RATE_LIMIT_EXCEEDED",
-                            "message": "요청 한도 초과. 1분 후 재시도하세요",
-                        }
-                    }
-                }
-            },
-        },
-        500: {
-            "description": "Internal Server Error",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "INTERNAL_ERROR",
-                            "message": "내부 서버 오류가 발생했습니다",
-                        }
-                    }
-                }
-            },
-        },
-        503: {
-            "description": "Service Unavailable",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": {
-                            "code": "LLM_UNAVAILABLE",
-                            "message": "AI 서비스에 연결할 수 없습니다",
-                        }
-                    }
-                }
-            },
-        },
-    },
 )
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    session_store=Depends(get_session_store),
+):
     """채팅 처리 (일반/면접)"""
     return StreamingResponse(
-        generate_chat_stream(request),
+        generate_chat_stream(request, session_store),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1595,25 +1338,13 @@ async def chat(request: ChatRequest):
 @router.post(
     "/calendar/parse",
     response_model=CalendarParseResponse,
-    summary="캘린더 일정 정보 파싱",
+    summary="[v1] 캘린더 일정 정보 파싱",
     description="""
     캘린더 모달에서 파일/텍스트를 분석하여 일정 정보를 추출합니다 (폼 자동 채우기용).
-
-    **처리 방식:** 동기 - 간단한 파싱 작업
-
-    **Pydantic AI 사용:** CalendarParseResult
-
-    **사용 시나리오:**
-    - 모달에서 채용공고 파일/텍스트 첨부 → 일정 정보 추출
-    - Frontend가 모달 폼에 자동 채워넣음
-    - 사용자 확인/수정 → 저장 → Backend가 Google Calendar에 추가
     """,
 )
 async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
     """캘린더 일정 파싱"""
-    # validator에서 이미 검증됨
-
-    # Pydantic AI로 구조화된 결과 반환
     return CalendarParseResponse(
         success=True,
         company="카카오",
@@ -1625,10 +1356,3 @@ async def calendar_parse(request: CalendarParseRequest):  # noqa: ARG001
         ],
         hashtags=["#카카오", "#백엔드", "#신입"],
     )
-
-
-# ============================================================================
-# API 4: 게시판 첨부파일 마스킹 (비동기)
-# ============================================================================
-# 이 API는 app/api/routes/masking.py로 이동되었습니다.
-# masking.py에서 파일 기반 저장소와 실제 Gemini API를 사용합니다.

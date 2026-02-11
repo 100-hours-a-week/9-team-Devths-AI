@@ -43,8 +43,8 @@ async def main():
 
     print(f"📊 총 {len(data)}개의 면접 Q&A 로드", flush=True)
 
-    # 컬렉션 이름: interview_questions
-    collection_name = "interview_questions"
+    # 컬렉션 이름: 문서 설계 interview_feedback (A안)
+    collection_name = "interview_feedback"
 
     # 데이터 임베딩 (100개씩 배치)
     batch_size = 100
@@ -62,9 +62,10 @@ async def main():
             text = f"질문: {item['question']}\n답변: {item['answer']}"
             texts.append(text)
 
-            # 메타데이터
+            # 메타데이터 (문서 A안: interview_type 필수 - technical | personality)
             metadatas.append(
                 {
+                    "interview_type": item.get("interview_type", item.get("interviewType", "technical")),
                     "occupation": item.get("occupation", ""),
                     "experience": item.get("experience", ""),
                     "age_range": item.get("ageRange", ""),
