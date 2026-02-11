@@ -8,7 +8,6 @@ POST /ai/evaluation/analyze - 면접 평가 리포트 생성 (SSE 스트리밍)
 
 import json
 import logging
-import re
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -28,14 +27,6 @@ from app.schemas.evaluation import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluation")
-
-
-def _sanitize_log_value(value: str, max_length: int = 50) -> str:
-    """Log Injection 방지를 위해 로그 값을 정제합니다."""
-    sanitized = re.sub(r"[\r\n\t]", "", str(value))
-    if len(sanitized) > max_length:
-        sanitized = sanitized[:max_length] + "..."
-    return sanitized
 
 
 def _validate_qa_list(qa_list: list[dict]) -> str | None:
@@ -88,11 +79,12 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
         rag = get_services()
     except Exception as e:
         logger.error("RAG 서비스 초기화 실패: %s", str(e), exc_info=True)
+        fallback_msg = "AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요."
         yield sse_error_event(
             code="LLM_UNAVAILABLE",
             status=503,
-            message=str(e),
-            fallback="AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            message=fallback_msg,
+            fallback=fallback_msg,
         )
         yield f"data: [DONE]{sse_end}"
         return
@@ -150,19 +142,21 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
 
     except ConnectionError as e:
         logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
+        fallback_msg = "AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요."
         yield sse_error_event(
             code="LLM_UNAVAILABLE",
             status=503,
-            message=str(e),
-            fallback="AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            message=fallback_msg,
+            fallback=fallback_msg,
         )
     except Exception as e:
         logger.error("면접 평가 리포트 생성 오류: %s", str(e), exc_info=True)
+        fallback_msg = "면접 리포트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         yield sse_error_event(
             code="LLM_ERROR",
             status=500,
-            message=str(e),
-            fallback="면접 리포트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            message=fallback_msg,
+            fallback=fallback_msg,
         )
 
     yield f"data: [DONE]{sse_end}"
@@ -263,11 +257,12 @@ async def _generate_debate_stream(
 
     except Exception as e:
         logger.error("Gemini 분석 실패: %s", str(e), exc_info=True)
+        fallback_msg = "Gemini 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         yield sse_error_event(
             code="LLM_ERROR",
             status=500,
-            message=str(e),
-            fallback="Gemini 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            message=fallback_msg,
+            fallback=fallback_msg,
         )
         yield f"data: [DONE]{sse_end}"
         return
@@ -297,12 +292,13 @@ async def _generate_debate_stream(
     except Exception as e:
         logger.error("Debate 토론 실패: %s", str(e), exc_info=True)
 
-        # 토론 실패 시 Gemini 1단계 결과라도 반환
+        # 토론 실패 시 Gemini 1단계 결과라도 반환 (예외 상세는 클라이언트에 노출하지 않음)
+        fallback_msg = "심층 분석 중 오류가 발생했습니다. Gemini 단독 분석 결과를 제공합니다."
         yield sse_error_event(
             code="DEBATE_ERROR",
             status=500,
-            message=str(e),
-            fallback="심층 분석 중 오류가 발생했습니다. Gemini 단독 분석 결과를 제공합니다.",
+            message=fallback_msg,
+            fallback=fallback_msg,
         )
 
         if gemini_result and gemini_result.questions:
@@ -420,10 +416,9 @@ async def analyze_interview(
     debate_service: DebateService | None = Depends(get_debate_service),
 ):
     """면접 Q&A 기반 평가 리포트를 SSE 스트리밍으로 생성합니다."""
+    # SAST: 사용자 입력(session_id/user_id)을 로그에 넣지 않음 (Log Injection 방지)
     logger.info(
-        "Analyze interview: session=%s, user=%s, questions=%d, retry=%s",
-        _sanitize_log_value(str(request.session_id)),
-        _sanitize_log_value(str(request.user_id)),
+        "Analyze interview: questions=%d, retry=%s",
         len(request.context),
         request.retry,
     )
