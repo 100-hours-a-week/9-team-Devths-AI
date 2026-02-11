@@ -680,81 +680,6 @@ async def generate_chat_stream(
             )
             yield f"data: [DONE]{sse_end}"
 
-    # =========================================================================
-    # 3. 리포트 모드 - 면접 평가 리포트 생성
-    # =========================================================================
-    elif mode == ChatMode.REPORT:
-        try:
-            interview_type = request.context.interview_type or "tech"
-            interview_type_kr = "기술" if interview_type == "tech" else "인성"
-            qa_list = request.context.qa_list or []
-
-            if not qa_list:
-                yield f"data: [DONE]{sse_end}"
-                return
-
-            content = f"{interview_type_kr} 면접 평가 리포트를 생성 중입니다...{newline}"
-            yield f"data: {json.dumps({'chunk': content}, ensure_ascii=False)}{sse_end}"
-
-            qa_text = ""
-            for i, qa in enumerate(qa_list, 1):
-                q = qa.get("question", "")
-                a = qa.get("answer", "")
-                qa_text += f"질문 {i}: {q}\n답변 {i}: {a}\n\n"
-
-            report_prompt = f"""
-다음은 {interview_type_kr} 면접 Q&A 기록입니다:
-
-{qa_text}
-
-위 면접 내용을 바탕으로 상세한 평가 리포트를 작성해주세요.
-다음 항목을 포함해주세요:
-1. 각 답변에 대한 개별 평가 (잘한 점, 개선점)
-2. 전체적인 강점 패턴
-3. 전체적인 약점 패턴
-4. 향후 학습 가이드
-"""
-
-            full_report = ""
-
-            model_choice = (
-                request.model.value if hasattr(request.model, "value") else str(request.model)
-            )
-
-            if model_choice == "vllm" and rag.vllm:
-                logger.info("📊 [vLLM] 면접 평가 리포트 생성 시작")
-                async for chunk in rag.vllm.generate_response(
-                    user_message=report_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
-                ):
-                    full_report += chunk
-                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
-            else:
-                logger.info("📊 [Gemini] 면접 평가 리포트 생성 시작")
-                async for chunk in rag.llm.generate_response(
-                    user_message=report_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
-                    user_id=request.user_id,
-                ):
-                    full_report += chunk
-                    yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
-
-            yield f"data: [DONE]{sse_end}"
-
-        except Exception as e:
-            logger.error(f"Interview report generation error: {e}", exc_info=True)
-            yield sse_error_event(
-                code="LLM_ERROR",
-                status=500,
-                message=str(e),
-                fallback="면접 리포트 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-            )
-            yield f"data: [DONE]{sse_end}"
-
     # Latency 측정 종료 및 전송
     try:
         duration = (time.time() - start_time) * 1000
@@ -766,7 +691,7 @@ async def generate_chat_stream(
 
 @router.post(
     "/chat",
-    summary="채팅 스트리밍 (일반/면접/리포트)",
+    summary="채팅 스트리밍 (일반/면접)",
     description="""
     채팅 스트리밍 응답을 처리합니다.
 
@@ -775,7 +700,8 @@ async def generate_chat_stream(
     **모드:**
     - normal: 일반 대화
     - interview: 면접 질문 생성
-    - report: 면접 평가 리포트 생성
+
+    **면접 평가 리포트는 `/ai/evaluation/analyze`를 사용하세요.**
 
     **면접 타입 (context.interview_type):**
     - behavior: 인성 면접

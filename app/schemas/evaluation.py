@@ -7,6 +7,8 @@
 
 from pydantic import BaseModel, Field
 
+from app.schemas.chat import LLMModel
+
 # ============================================
 # 공통 타입
 # ============================================
@@ -38,29 +40,71 @@ class QuestionAnalysisResponse(BaseModel):
 
 
 class AnalyzeInterviewRequest(BaseModel):
-    """면접 분석 요청 (1단계 - 면접 종료 시)."""
+    """면접 분석 요청 (1단계 - 면접 종료 시).
 
-    session_id: str = Field(..., description="면접 세션 ID")
-    qa_pairs: list[QAPair] = Field(..., description="질의응답 목록")
-    resume_text: str = Field("", description="이력서 텍스트")
-    job_posting_text: str = Field("", description="채용공고 텍스트")
-    interview_type: str = Field("tech", description="면접 유형 (tech/behavior)")
+    프론트엔드에서 면접 종료 버튼을 누르면
+    채팅에서 수집된 Q&A 데이터를 context로 전달하여 평가 리포트를 생성합니다.
+    """
+
+    model: LLMModel = Field(
+        default=LLMModel.GEMINI, description="사용할 LLM 모델 (gemini 또는 vllm)"
+    )
+    room_id: int = Field(..., description="채팅방 ID")
+    user_id: int = Field(..., description="사용자 ID")
+    message: str | None = Field(None, description="사용자 메시지")
+    session_id: int | str = Field(..., description="면접 세션 ID")
+    context: list[dict] = Field(..., description="Q&A 목록 [{question: str, answer: str}, ...]")
+    retry: bool = Field(
+        default=False,
+        description="true면 Gemini×GPT-4o 토론(답변 다시 받기), false면 Gemini 단독 분석",
+    )
 
     class Config:
         json_schema_extra = {
-            "example": {
-                "session_id": "session_abc123",
-                "qa_pairs": [
-                    {
-                        "question": "Spring Boot에서 의존성 주입이 무엇인가요?",
-                        "answer": "의존성 주입은 객체가 필요로 하는 의존 객체를 외부에서 주입하는 패턴입니다...",
-                        "category": "cs_fundamentals",
-                    }
-                ],
-                "resume_text": "3년 경력 백엔드 개발자...",
-                "job_posting_text": "Spring Boot 경험 필수...",
-                "interview_type": "tech",
-            }
+            "examples": [
+                {
+                    "name": "면접 리포트 생성 (면접 종료)",
+                    "value": {
+                        "model": "gemini",
+                        "room_id": 1,
+                        "user_id": 12,
+                        "message": None,
+                        "session_id": 23,
+                        "context": [
+                            {
+                                "question": "자기소개 해주세요",
+                                "answer": "안녕하세요...",
+                            },
+                            {
+                                "question": "프로젝트 경험을 말씀해주세요",
+                                "answer": "저는...",
+                            },
+                        ],
+                        "retry": False,
+                    },
+                },
+                {
+                    "name": "답변 다시 받기 (Gemini×GPT-4o 토론)",
+                    "value": {
+                        "model": "gemini",
+                        "room_id": 1,
+                        "user_id": 12,
+                        "message": None,
+                        "session_id": 23,
+                        "context": [
+                            {
+                                "question": "자기소개 해주세요",
+                                "answer": "안녕하세요...",
+                            },
+                            {
+                                "question": "프로젝트 경험을 말씀해주세요",
+                                "answer": "저는...",
+                            },
+                        ],
+                        "retry": True,
+                    },
+                },
+            ]
         }
 
 

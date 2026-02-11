@@ -1,5 +1,5 @@
 # easyocr_server/Dockerfile (v2 OCR 보조 서버, GPU)
-FROM pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-runtime
 
 WORKDIR /app
 
