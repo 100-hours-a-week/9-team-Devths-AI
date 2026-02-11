@@ -53,9 +53,7 @@ class AnalyzeInterviewRequest(BaseModel):
     user_id: int = Field(..., description="사용자 ID")
     message: str | None = Field(None, description="사용자 메시지")
     session_id: int | str = Field(..., description="면접 세션 ID")
-    context: list[dict] = Field(
-        ..., description="Q&A 목록 [{question: str, answer: str}, ...]"
-    )
+    context: list[dict] = Field(..., description="Q&A 목록 [{question: str, answer: str}, ...]")
     retry: bool = Field(
         default=False,
         description="true면 Gemini×GPT-4o 토론(답변 다시 받기), false면 Gemini 단독 분석",

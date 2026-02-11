@@ -121,9 +121,7 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
 """
 
     full_report = ""
-    model_choice = (
-        request.model.value if hasattr(request.model, "value") else str(request.model)
-    )
+    model_choice = request.model.value if hasattr(request.model, "value") else str(request.model)
 
     try:
         if model_choice == "vllm" and rag.vllm:
@@ -284,9 +282,7 @@ async def _generate_debate_stream(
             qa_pairs=qa_pairs,
             gemini_analysis=gemini_dict,
         )
-        logger.info(
-            "✅ [Debate] 2단계 완료: consensus=%s", debate_result.consensus_method
-        )
+        logger.info("✅ [Debate] 2단계 완료: consensus=%s", debate_result.consensus_method)
 
         # 3단계: 최종 결과를 텍스트 리포트로 SSE 스트리밍
         progress = f"\n📋 토론 완료 (합의 방법: {debate_result.consensus_method})\n\n"
