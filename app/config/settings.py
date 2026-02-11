@@ -54,15 +54,23 @@ class Settings(BaseSettings):
     )
 
     # ============================================
-    # vLLM Configuration (GCP GPU Server)
+    # vLLM Configuration (GPU Servers)
     # ============================================
     gcp_vllm_base_url: str | None = Field(
         default=None,
-        description="GCP vLLM server base URL",
+        description="vLLM 8B server base URL (평시 질의응답, GCP L4 서버리스)",
     )
     vllm_model_name: str = Field(
-        default="MLP-KTLim/llama-3-Korean-Bllossom-8B",
-        description="vLLM model name",
+        default="LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct",
+        description="vLLM 8B model name",
+    )
+    vllm_32b_base_url: str | None = Field(
+        default=None,
+        description="vLLM 32B server base URL (면접 질문 생성, RunPod H100/A100 서버리스)",
+    )
+    vllm_32b_model_name: str = Field(
+        default="LGAI-EXAONE/EXAONE-3.5-32B-Instruct",
+        description="vLLM 32B model name",
     )
 
     # ============================================
@@ -75,6 +83,10 @@ class Settings(BaseSettings):
     clova_ocr_secret_key: str | None = Field(
         default=None,
         description="Naver CLOVA OCR secret key",
+    )
+    easyocr_server_url: str | None = Field(
+        default=None,
+        description="EasyOCR Server URL (Internal GPU Server, v2)",
     )
 
     # ============================================
@@ -107,6 +119,14 @@ class Settings(BaseSettings):
     chroma_collection_chat_context: str = Field(
         default="chat_context",
         description="ChromaDB collection for important chat context",
+    )
+    chroma_server_host: str | None = Field(
+        default=None,
+        description="ChromaDB Server Host (v2 server mode)",
+    )
+    chroma_server_port: int = Field(
+        default=8000,
+        description="ChromaDB Server Port",
     )
 
     # ============================================
@@ -229,8 +249,13 @@ class Settings(BaseSettings):
 
     @property
     def vllm_available(self) -> bool:
-        """Check if vLLM server is configured."""
+        """Check if vLLM 8B server is configured."""
         return bool(self.gcp_vllm_base_url)
+
+    @property
+    def vllm_32b_available(self) -> bool:
+        """Check if vLLM 32B server is configured."""
+        return bool(self.vllm_32b_base_url)
 
     @property
     def langfuse_available(self) -> bool:

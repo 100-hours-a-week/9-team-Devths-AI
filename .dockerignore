@@ -1,0 +1,49 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.eggs
+dist
+build
+
+# Environment
+.env
+.env.*
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Local data
+chroma_db/
+*.db
+
+# Documentation
+*.md
+4.DOCS/
+
+# Tests & Notebooks
+tests/
+notebooks/
+*.ipynb
+
+# Separate Docker builds
+easyocr_server/
+
+# Deploy scripts (not needed in container)
+deploy/
+scripts/
+
+# Cache
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Logs
+logs/
+*.log

@@ -45,9 +45,9 @@ def get_llm_provider(
 def get_vllm_provider(
     settings: Settings = Depends(get_settings),
 ) -> "BaseLLMProvider | None":
-    """Get vLLM provider instance (optional).
+    """Get vLLM 8B provider instance (평시 질의응답).
 
-    Returns None if vLLM is not configured.
+    Returns None if vLLM 8B is not configured.
     """
     if not settings.vllm_available:
         return None
@@ -61,12 +61,32 @@ def get_vllm_provider(
 
 
 @lru_cache
+def get_vllm_32b_provider(
+    settings: Settings = Depends(get_settings),
+) -> "BaseLLMProvider | None":
+    """Get vLLM 32B provider instance (면접 질문 생성).
+
+    Returns None if vLLM 32B is not configured.
+    RunPod 서버리스 또는 GCP GPU 서버에서 구동.
+    """
+    if not settings.vllm_32b_available:
+        return None
+
+    from app.infrastructure.llm.vllm import VLLMProvider
+
+    return VLLMProvider(
+        base_url=settings.vllm_32b_base_url,
+        model_name=settings.vllm_32b_model_name,
+    )
+
+
+@lru_cache
 def get_vectordb(
     settings: Settings = Depends(get_settings),
 ) -> "BaseVectorStore":
     """Get VectorDB instance.
 
-    Returns ChromaDB by default.
+    Returns ChromaDB. Uses server mode (HttpClient) when chroma_server_host is set (v2).
     """
     from app.infrastructure.vectordb.chroma import ChromaVectorStore
 
@@ -74,6 +94,8 @@ def get_vectordb(
         persist_directory=settings.chroma_persist_dir,
         api_key=settings.google_api_key,
         embedding_model=settings.gemini_embedding_model,
+        chroma_server_host=settings.chroma_server_host,
+        chroma_server_port=settings.chroma_server_port,
     )
 
 
