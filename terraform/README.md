@@ -14,13 +14,37 @@ v2 인프라 설계 기준 **Exaone 8B**·**EasyOCR** 전용 GCP VM을 프로비
 
 ```bash
 cd terraform/gcp-exaone8b   # 또는 gcp-easyocr
-cp terraform.tfvars.example terraform.tfvars
-# terraform.tfvars 에 project_id 등 수정
+# terraform.tfvars 가 없으면: cp terraform.tfvars.example terraform.tfvars 후 project_id 수정
 
 terraform init
 terraform plan
 terraform apply
 ```
+
+## 기존 VM이 이미 있을 때 (Import)
+
+콘솔에서 이미 만든 `easyocr` / `exaone8b` VM을 이 Terraform이 관리하도록 넣을 때 사용합니다.  
+**apply 하지 말고** 아래만 실행하세요.
+
+**EasyOCR:**
+
+```bash
+cd terraform/gcp-easyocr
+terraform init
+terraform import google_compute_instance.easyocr projects/gen-lang-client-0124970927/zones/asia-northeast3-a/instances/easyocr
+terraform plan   # No changes 또는 변경분만 나오면 성공
+```
+
+**Exaone 8B:**
+
+```bash
+cd terraform/gcp-exaone8b
+terraform init
+terraform import google_compute_instance.exaone8b projects/gen-lang-client-0124970927/zones/asia-northeast3-a/instances/exaone8b
+terraform plan   # No changes 또는 변경분만 나오면 성공
+```
+
+- 프로젝트/존이 다르면 위 `projects/.../zones/.../instances/이름` 부분을 실제 값으로 바꾸면 됩니다.
 
 ## Exaone 8B
 

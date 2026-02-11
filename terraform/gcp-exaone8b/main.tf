@@ -3,6 +3,25 @@
 
 locals {
   subnet = var.subnet_self_link != "" ? var.subnet_self_link : "projects/${var.project_id}/regions/${var.region}/subnetworks/default"
+  startup_script = <<-EOT
+    #!/bin/bash
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Docker 설치
+    curl -fsSL https://get.docker.com | sh
+    usermod -aG docker ubuntu 2>/dev/null || usermod -aG docker $(logname) 2>/dev/null || true
+
+    # NVIDIA Container Toolkit
+    distribution=$(. /etc/os-release; echo $ID$VERSION_ID)
+    curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | apt-key add -
+    curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    apt-get update && apt-get install -y nvidia-container-toolkit
+    nvidia-ctk runtime configure --runtime=docker
+    systemctl restart docker
+
+    echo "Docker and NVIDIA Container Toolkit ready. Run Exaone 8B manually with HUGGING_FACE_HUB_TOKEN."
+  EOT
 }
 
 resource "google_compute_instance" "exaone8b" {
@@ -46,26 +65,7 @@ resource "google_compute_instance" "exaone8b" {
     enable-osconfig = "TRUE"
   }
 
-  metadata_startup_script = var.install_docker_nvidia ? <<-EOT
-    #!/bin/bash
-    set -e
-    export DEBIAN_FRONTEND=noninteractive
-
-    # Docker 설치
-    curl -fsSL https://get.docker.com | sh
-    usermod -aG docker ubuntu 2>/dev/null || usermod -aG docker $(logname) 2>/dev/null || true
-
-    # NVIDIA Container Toolkit
-    distribution=$(. /etc/os-release; echo $ID$VERSION_ID)
-    curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | apt-key add -
-    curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-    apt-get update && apt-get install -y nvidia-container-toolkit
-    nvidia-ctk runtime configure --runtime=docker
-    systemctl restart docker
-
-    echo "Docker and NVIDIA Container Toolkit ready. Run Exaone 8B manually with HUGGING_FACE_HUB_TOKEN."
-  EOT
-  : null
+  metadata_startup_script = var.install_docker_nvidia ? local.startup_script : null
 }
 
 output "exaone8b_name" {
