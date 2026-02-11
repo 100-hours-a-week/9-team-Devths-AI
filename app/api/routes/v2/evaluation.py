@@ -416,12 +416,8 @@ async def analyze_interview(
     debate_service: DebateService | None = Depends(get_debate_service),
 ):
     """면접 Q&A 기반 평가 리포트를 SSE 스트리밍으로 생성합니다."""
-    # SAST: 사용자 입력(session_id/user_id)을 로그에 넣지 않음 (Log Injection 방지)
-    logger.info(
-        "Analyze interview: questions=%d, retry=%s",
-        len(request.context),
-        request.retry,
-    )
+    # SAST: request 기반 값은 로그에 넣지 않음 (Log Injection 방지)
+    logger.info("Analyze interview requested")
 
     sse_headers = {
         "Cache-Control": "no-cache",
