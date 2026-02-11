@@ -66,7 +66,9 @@ class ChromaVectorStore(BaseVectorStore):
                 host=chroma_server_host,
                 port=chroma_server_port,
             )
-            logger.info(f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}")
+            logger.info(
+                f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
+            )
         else:
             self.chroma_client = chromadb.Client(
                 Settings(
