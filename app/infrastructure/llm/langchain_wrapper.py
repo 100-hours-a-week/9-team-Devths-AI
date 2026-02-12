@@ -117,7 +117,7 @@ class LangChainLLMGateway:
         *,
         system_prompt: str | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None,  # noqa: ARG002
+        max_tokens: int | None = None,
         **kwargs: Any,  # noqa: ARG002
     ) -> str:
         """Generate a response using LangChain.
@@ -134,10 +134,15 @@ class LangChainLLMGateway:
         """
         lc_messages = self._convert_messages(messages, system_prompt)
 
-        # Override temperature if provided
+        # Override temperature and max_tokens if provided
         llm = self._llm
+        bind_kwargs = {}
         if temperature is not None:
-            llm = llm.with_config({"temperature": temperature})
+            bind_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            bind_kwargs["max_output_tokens"] = max_tokens
+        if bind_kwargs:
+            llm = llm.bind(**bind_kwargs)
 
         response = await llm.ainvoke(lc_messages)
         return response.content
@@ -148,7 +153,7 @@ class LangChainLLMGateway:
         *,
         system_prompt: str | None = None,
         temperature: float | None = None,
-        max_tokens: int | None = None,  # noqa: ARG002
+        max_tokens: int | None = None,
         **kwargs: Any,  # noqa: ARG002
     ) -> AsyncIterator[str]:
         """Generate a streaming response using LangChain.
@@ -165,10 +170,15 @@ class LangChainLLMGateway:
         """
         lc_messages = self._convert_messages(messages, system_prompt)
 
-        # Override temperature if provided
+        # Override temperature and max_tokens if provided
         llm = self._llm
+        bind_kwargs = {}
         if temperature is not None:
-            llm = llm.with_config({"temperature": temperature})
+            bind_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            bind_kwargs["max_output_tokens"] = max_tokens
+        if bind_kwargs:
+            llm = llm.bind(**bind_kwargs)
 
         async for chunk in llm.astream(lc_messages):
             if chunk.content:
