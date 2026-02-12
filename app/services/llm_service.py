@@ -18,6 +18,7 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
+from app.config.settings import get_settings
 from app.services.cloudwatch_service import CloudWatchService
 from app.utils.langfuse_client import create_generation, trace_llm_call
 
@@ -44,6 +45,9 @@ class LLMService:
         self.model_name = "gemini-3-flash-preview"  # Gemini 3 Flash Preview
         # 분석용 모델도 동일하게 사용 (gemini-3-pro는 존재하지 않음)
         self.analysis_model = "gemini-3-flash-preview"
+
+        # 중앙화된 설정 로드
+        self._settings = get_settings()
 
         logger.info(f"LLM Service initialized with model: {self.model_name}")
 
@@ -181,12 +185,12 @@ class LLMService:
                 types.Content(role="user", parts=[types.Part.from_text(text=final_message)])
             ]
 
-            # Create config
+            # Create config (중앙화 설정 사용)
             config = types.GenerateContentConfig(
-                temperature=0.7,
+                temperature=self._settings.llm_temperature_chat,
                 top_p=0.9,
                 top_k=40,
-                max_output_tokens=2048,
+                max_output_tokens=self._settings.llm_max_tokens_chat,
                 system_instruction=system_prompt if system_prompt else None,
             )
 
@@ -274,12 +278,12 @@ class LLMService:
                 types.Content(role="user", parts=[types.Part.from_text(text=final_message)])
             ]
 
-            # Create config
+            # Create config (중앙화 설정 사용)
             config = types.GenerateContentConfig(
-                temperature=0.7,
+                temperature=self._settings.llm_temperature_chat,
                 top_p=0.9,
                 top_k=40,
-                max_output_tokens=2048,
+                max_output_tokens=self._settings.llm_max_tokens_chat,
                 system_instruction=system_prompt if system_prompt else None,
             )
 
@@ -350,10 +354,10 @@ class LLMService:
             f"[분석] 이력서 길이: {len(resume_text_trimmed)}자, 채용공고 길이: {len(posting_text_trimmed)}자"
         )
 
-        # 기본 설정
+        # 기본 설정 (중앙화 설정 사용)
         config = types.GenerateContentConfig(
-            temperature=0.3,
-            max_output_tokens=2048,
+            temperature=self._settings.llm_temperature_analysis,
+            max_output_tokens=self._settings.llm_max_tokens_analysis,
         )
 
         # 결과 저장용
@@ -642,8 +646,8 @@ JSON 형식으로 질문을 제공해주세요:
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
 
             config = types.GenerateContentConfig(
-                temperature=0.8,
-                max_output_tokens=512,
+                temperature=self._settings.llm_temperature_interview_question,
+                max_output_tokens=self._settings.llm_max_tokens_interview,
             )
 
             response = self.client.models.generate_content(
@@ -698,6 +702,136 @@ JSON 형식으로 질문을 제공해주세요:
 
         except Exception as e:
             logger.error(f"Error generating interview question: {e}")
+            raise
+
+    async def generate_interview_questions_batch(
+        self,
+        resume_text: str,
+        posting_text: str,
+        interview_type: str = "technical",
+        count: int = 5,
+        user_id: str | None = None,
+        previous_feedback: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        한번에 여러 면접 질문을 구조화하여 생성
+
+        Args:
+            resume_text: Resume content
+            posting_text: Job posting content
+            interview_type: "technical" or "personality"
+            count: Number of questions to generate (default: 5)
+            user_id: User ID for tracing
+            previous_feedback: Optional previous interview feedback
+
+        Returns:
+            List of interview questions as dicts
+        """
+        import json
+
+        try:
+            feedback_block = ""
+            if previous_feedback:
+                feedback_block = f"""
+참고 - 이전 면접에서의 약점/피드백:
+{previous_feedback[:800]}
+"""
+
+            type_label = "기술 면접" if interview_type == "technical" else "인성 면접"
+
+            prompt = f"""다음 이력서와 채용공고를 바탕으로 {type_label} 질문을 {count}개 생성해주세요.
+
+이력서:
+{resume_text[:800]}
+
+채용공고:
+{posting_text[:800]}
+{feedback_block}
+질문들은 서로 다른 주제와 난이도를 가져야 합니다.
+난이도는 easy, medium, hard를 적절히 섞어주세요.
+
+반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력하세요:
+[
+  {{"question": "질문 내용 1", "difficulty": "easy", "category": "{type_label}", "follow_up": false}},
+  {{"question": "질문 내용 2", "difficulty": "medium", "category": "{type_label}", "follow_up": false}},
+  {{"question": "질문 내용 3", "difficulty": "medium", "category": "{type_label}", "follow_up": false}},
+  {{"question": "질문 내용 4", "difficulty": "hard", "category": "{type_label}", "follow_up": false}},
+  {{"question": "질문 내용 5", "difficulty": "hard", "category": "{type_label}", "follow_up": false}}
+]"""
+
+            contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+
+            config = types.GenerateContentConfig(
+                temperature=self._settings.llm_temperature_interview_question,
+                max_output_tokens=self._settings.llm_max_tokens_interview * 2,  # 배치이므로 2배
+            )
+
+            response = self.client.models.generate_content(
+                model=self.model_name, contents=contents, config=config
+            )
+
+            self._record_token_usage(response, self.model_name)
+            result_text = response.text if hasattr(response, "text") else ""
+
+            # JSON 배열 파싱
+            clean_text = result_text.strip()
+
+            # 코드 블록 제거
+            if clean_text.startswith("```"):
+                clean_text = clean_text.split("\n", 1)[1] if "\n" in clean_text else clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+            clean_text = clean_text.strip()
+
+            # JSON 배열 추출
+            start_idx = clean_text.find("[")
+            end_idx = clean_text.rfind("]") + 1
+
+            questions = []
+            if start_idx != -1 and end_idx > start_idx:
+                json_str = clean_text[start_idx:end_idx]
+                parsed = json.loads(json_str)
+                if isinstance(parsed, list):
+                    questions = parsed[:count]
+
+            # Langfuse 기록
+            self._langfuse_trace_and_generation(
+                trace_name="gemini_generate_interview_questions_batch",
+                generation_name="gemini_interview_batch",
+                input_text=prompt[:2000],
+                output_text=result_text[:4000],
+                user_id=user_id,
+                metadata={
+                    "temperature": self._settings.llm_temperature_interview_question,
+                    "type": "interview_question_batch",
+                    "interview_type": interview_type,
+                    "requested_count": count,
+                    "actual_count": len(questions),
+                },
+            )
+
+            if questions:
+                logger.info(
+                    f"✅ 면접 질문 배치 생성 완료: {len(questions)}개 ({interview_type})"
+                )
+                return questions
+
+            # 배치 파싱 실패 시 개별 생성으로 폴백
+            logger.warning("배치 파싱 실패, 개별 생성으로 폴백")
+            fallback_questions = []
+            for _ in range(count):
+                q = await self.generate_interview_question(
+                    resume_text=resume_text,
+                    posting_text=posting_text,
+                    interview_type=interview_type,
+                    user_id=user_id,
+                    previous_feedback=previous_feedback,
+                )
+                fallback_questions.append(q)
+            return fallback_questions
+
+        except Exception as e:
+            logger.error(f"Error generating batch interview questions: {e}")
             raise
 
     async def extract_text_from_file(
@@ -894,8 +1028,8 @@ Return ONLY the extracted text, without any additional commentary or formatting.
             ]
 
             config = types.GenerateContentConfig(
-                temperature=0.1,  # Low temperature for accurate extraction
-                max_output_tokens=2048,
+                temperature=self._settings.llm_temperature_ocr,
+                max_output_tokens=self._settings.llm_max_tokens_chat,
             )
 
             response = self.client.models.generate_content(
