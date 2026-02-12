@@ -230,6 +230,42 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # LLM Generation Parameters
+    # ============================================
+    llm_temperature_chat: float = Field(
+        default=0.1,
+        description="채팅 응답 temperature (0에 가까울수록 정확, 문서 기반)",
+    )
+    llm_temperature_analysis: float = Field(
+        default=0.1,
+        description="분석 temperature (일관성 중요)",
+    )
+    llm_temperature_interview_question: float = Field(
+        default=0.7,
+        description="면접 질문 생성 temperature (다양성 필요)",
+    )
+    llm_temperature_evaluation: float = Field(
+        default=0.1,
+        description="면접 평가 temperature (정확성 중요)",
+    )
+    llm_temperature_ocr: float = Field(
+        default=0.1,
+        description="OCR 텍스트 추출 temperature",
+    )
+    llm_max_tokens_chat: int = Field(
+        default=2048,
+        description="채팅 응답 최대 토큰 수",
+    )
+    llm_max_tokens_analysis: int = Field(
+        default=2048,
+        description="분석 최대 토큰 수",
+    )
+    llm_max_tokens_interview: int = Field(
+        default=1024,
+        description="면접 질문/평가 최대 토큰 수",
+    )
+
+    # ============================================
     # Computed Properties
     # ============================================
     @property

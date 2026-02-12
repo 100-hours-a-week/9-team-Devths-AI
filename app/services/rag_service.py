@@ -364,6 +364,71 @@ class RAGService:
             logger.error(f"Error generating interview question: {e}")
             raise
 
+    async def generate_interview_questions_batch(
+        self,
+        user_id: str,
+        interview_type: str = "technical",
+        count: int = 5,
+    ) -> list[dict[str, Any]]:
+        """
+        면접 질문을 한번에 여러 개 생성 (배치 처리)
+
+        Args:
+            user_id: User ID
+            interview_type: "technical" or "personality"
+            count: Number of questions to generate (default: 5)
+
+        Returns:
+            List of interview questions
+        """
+        try:
+            # Get resume
+            resume_results = await self.vectordb.query(
+                query_text="이력서 전체 내용",
+                collection_type="resume",
+                n_results=1,
+                where={"user_id": user_id},
+            )
+            resume_text = resume_results[0]["text"] if resume_results else "정보 없음"
+
+            # Get posting
+            posting_results = await self.vectordb.query(
+                query_text="채용공고 전체 내용",
+                collection_type="job_posting",
+                n_results=1,
+                where={"user_id": user_id},
+            )
+            posting_text = posting_results[0]["text"] if posting_results else "정보 없음"
+
+            # 이전 면접 피드백 검색
+            feedback_text = ""
+            try:
+                feedback_results = await self.vectordb.query(
+                    query_text=f"{interview_type} 면접 약점 피드백",
+                    collection_type="interview_feedback",
+                    n_results=2,
+                    where={"user_id": user_id, "interview_type": interview_type},
+                )
+                if feedback_results:
+                    feedback_text = "\n".join(r["text"] for r in feedback_results[:2])
+            except Exception:
+                pass
+
+            # 배치 생성
+            questions = await self.llm.generate_interview_questions_batch(
+                resume_text=resume_text,
+                posting_text=posting_text,
+                interview_type=interview_type,
+                count=count,
+                user_id=user_id,
+                previous_feedback=feedback_text or None,
+            )
+            return questions
+
+        except Exception as e:
+            logger.error(f"Error generating batch interview questions: {e}")
+            raise
+
     async def evaluate_interview_answer(
         self, question: str, answer: str, history: list[dict[str, str]] | None = None
     ) -> AsyncIterator[str]:
