@@ -39,8 +39,12 @@ class QuestionAnalysisResponse(BaseModel):
 # ============================================
 
 
-class AnalyzeInterviewRequestValue(BaseModel):
-    """면접 분석 요청의 value 내부 모델."""
+class AnalyzeInterviewRequest(BaseModel):
+    """면접 분석 요청 (1단계 - 면접 종료 시).
+
+    프론트엔드에서 면접 종료 버튼을 누르면
+    채팅에서 수집된 Q&A 데이터를 context로 전달하여 평가 리포트를 생성합니다.
+    """
 
     model: LLMModel = Field(
         default=LLMModel.GEMINI, description="사용할 LLM 모델 (gemini 또는 vllm)"
@@ -54,57 +58,6 @@ class AnalyzeInterviewRequestValue(BaseModel):
         default=False,
         description="true면 Gemini×GPT-4o 토론(답변 다시 받기), false면 Gemini 단독 분석",
     )
-    interview_type: str = Field(default="tech", description="면접 유형 (tech/personality)")
-
-
-class AnalyzeInterviewRequest(BaseModel):
-    """면접 분석 요청 (1단계 - 면접 종료 시).
-
-    프론트엔드에서 면접 종료 버튼을 누르면
-    채팅에서 수집된 Q&A 데이터를 context로 전달하여 평가 리포트를 생성합니다.
-
-    프론트엔드 전송 형식:
-    {
-        "name": "면접 리포트 생성 (면접 종료)",
-        "value": { room_id, user_id, session_id, context, ... }
-    }
-    """
-
-    name: str | None = Field(None, description="요청 이름 (프론트엔드 전송용)")
-    value: AnalyzeInterviewRequestValue = Field(..., description="요청 데이터")
-
-    # value 내부 필드를 직접 접근할 수 있도록 프로퍼티 제공
-    @property
-    def model(self) -> LLMModel:
-        return self.value.model
-
-    @property
-    def room_id(self) -> int:
-        return self.value.room_id
-
-    @property
-    def user_id(self) -> int:
-        return self.value.user_id
-
-    @property
-    def message(self) -> str | None:
-        return self.value.message
-
-    @property
-    def session_id(self) -> int | str:
-        return self.value.session_id
-
-    @property
-    def context(self) -> list[dict]:
-        return self.value.context
-
-    @property
-    def retry(self) -> bool:
-        return self.value.retry
-
-    @property
-    def interview_type(self) -> str:
-        return self.value.interview_type
 
     class Config:
         json_schema_extra = {
@@ -128,7 +81,6 @@ class AnalyzeInterviewRequest(BaseModel):
                             },
                         ],
                         "retry": False,
-                        "interview_type": "tech",
                     },
                 },
                 {
@@ -150,7 +102,6 @@ class AnalyzeInterviewRequest(BaseModel):
                             },
                         ],
                         "retry": True,
-                        "interview_type": "tech",
                     },
                 },
             ]
