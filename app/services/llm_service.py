@@ -811,9 +811,7 @@ JSON 형식으로 질문을 제공해주세요:
             )
 
             if questions:
-                logger.info(
-                    f"✅ 면접 질문 배치 생성 완료: {len(questions)}개 ({interview_type})"
-                )
+                logger.info(f"✅ 면접 질문 배치 생성 완료: {len(questions)}개 ({interview_type})")
                 return questions
 
             # 배치 파싱 실패 시 개별 생성으로 폴백
