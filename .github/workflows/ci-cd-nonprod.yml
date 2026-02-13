@@ -99,6 +99,7 @@ jobs:
             echo "✅ Security Check Passed: No critical vulnerabilities found on $CURRENT_REF."
           fi
 
+
   # ========================================================
   # Job 3: Test (Additional Check)
   # ========================================================
@@ -139,9 +140,7 @@ jobs:
         run: poetry run pytest
 
   # ========================================================
-  # Job 4: CD (Build & Push)
-  # - Only runs on Push to main/develop/release (not PR)
-  # - Requires CI (Lint, Test, Static-Analysis) to pass
+  # Job 4: CD (Build & Push to ECR)
   # ========================================================
   cd:
     needs: [lint, static-analysis, test]
@@ -193,12 +192,104 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+
   # ========================================================
-  # Job 5: Discord Notification - CI
+  # Job 5: Deploy to EC2 (CodeDeploy)
+  # ========================================================
+  deploy-to-ec2:
+    needs: [cd]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "value=$(date +'%Y%m%d_%H%M%S')-$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Package Deployment Scripts (Minimal)
+        id: package
+        run: |
+          echo "📦 Creating deployment package..."
+          ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
+          mkdir -p deploy-package
+
+          # Copy ONLY deployment scripts and appspec
+          cp -r deploy/ deploy-package/
+          cp appspec.yml deploy-package/
+
+          # Create .deploy-env file
+          echo "export DEPLOY_BRANCH=\"${{ github.ref_name }}\"" > deploy-package/.deploy-env
+          echo "export DEPLOY_TIMESTAMP=\"${{ steps.timestamp.outputs.value }}\"" >> deploy-package/.deploy-env
+          echo "export DEPLOY_SHA=\"${{ github.sha }}\"" >> deploy-package/.deploy-env
+          echo "export CODEDEPLOY_DEPLOYMENT_GROUP=\"${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }}\"" >> deploy-package/.deploy-env
+
+          # Zip the package
+          cd deploy-package
+          zip -r ../$ARTIFACT_NAME .
+          cd ..
+
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload to S3
+        id: upload
+        run: |
+          echo "☁️ Uploading to S3..."
+          ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
+          S3_KEY="AI/${{ github.ref_name }}/$ARTIFACT_NAME"
+          aws s3 cp $ARTIFACT_NAME s3://${{ secrets.AWS_S3_BUCKET }}/$S3_KEY
+          echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+
+      - name: Trigger CodeDeploy
+        id: codedeploy
+        run: |
+          echo "🚀 Triggering CodeDeploy..."
+          S3_KEY="${{ steps.upload.outputs.s3_key }}"
+          
+          # Determine Deployment Group
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_DEV }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_STAGING }}"
+          else
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_DEV }}"
+          fi
+          
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ secrets.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name $DEPLOY_GROUP \
+            --s3-location bucket=${{ secrets.AWS_S3_BUCKET }},key=$S3_KEY,bundleType=zip \
+            --description "Docker Deploy - ${{ github.ref_name }} - ${{ github.sha }}" \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Deployment started: $DEPLOYMENT_ID"
+
+          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
+            echo "deployment_status=Success" >> $GITHUB_OUTPUT
+            echo "✅ Deployment completed successfully!"
+          else
+            echo "deployment_status=Failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+  # ========================================================
+  # Job 6: Discord Notification - CI/CD
   # ========================================================
   notify-discord-ci:
     runs-on: ubuntu-latest
-    needs: [lint, static-analysis, test, cd]
+    needs: [lint, static-analysis, test, cd, deploy-to-ec2]
     if: always()
     steps:
       - name: Prepare Data
@@ -211,8 +302,8 @@ jobs:
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
-          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && 'success' || 'failure' }}
-          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
+          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 'success' || 'failure' }}
+          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
           description: |
             **Commit**: ${{ steps.prep.outputs.title }}
             **Branch**: `${{ steps.prep.outputs.branch }}`
@@ -221,9 +312,10 @@ jobs:
             - Lint: ${{ needs.lint.result == 'success' && '✅' || '❌' }}
             - Static Analysis: ${{ needs.static-analysis.result == 'success' && '✅' || '❌' }}
             - Test & Smoke: ${{ needs.test.result == 'success' && '✅' || '❌' }}
-            - Docker Build: ${{ needs.cd.result == 'success' && '✅' || (needs.cd.result == 'skipped' && '⏭️ Skipped' || '❌') }}
+            - Docker Push: ${{ needs.cd.result == 'success' && '✅' || '❌' }}
+            - EC2 Deploy: ${{ needs.deploy-to-ec2.result == 'success' && '✅' || (needs.deploy-to-ec2.result == 'skipped' && '⏭️ Skipped' || '❌') }}
             
             **🔗 Link**: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && 65280 || 16711680 }}"
+          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 65280 || 16711680 }}"
           username: AI CI/CD Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
