@@ -30,10 +30,9 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Install system dependencies (runtime only)
-# libgl1-mesa-glx: OpenCV dependency
+# Install system dependencies (runtime only)
 # poppler-utils: PDF processing dependency (pdf2image)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
