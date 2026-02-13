@@ -48,8 +48,7 @@ openai = "^2.15.0"
 # RAG and VectorDB (서빙에 필수)
 chromadb = "^0.4.24"
 
-# CloudWatch Monitoring
-boto3 = "^1.34.0"
+
 
 # Pydantic Settings (설정 관리)
 pydantic-settings = "^2.1.0"

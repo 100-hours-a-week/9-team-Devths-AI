@@ -64,7 +64,9 @@ async def main():
             # 메타데이터 (문서 A안: interview_type 필수 - technical | personality)
             metadatas.append(
                 {
-                    "interview_type": item.get("interview_type", item.get("interviewType", "technical")),
+                    "interview_type": item.get(
+                        "interview_type", item.get("interviewType", "technical")
+                    ),
                     "occupation": item.get("occupation", ""),
                     "experience": item.get("experience", ""),
                     "age_range": item.get("ageRange", ""),

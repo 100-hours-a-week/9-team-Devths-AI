@@ -17,6 +17,7 @@ from app.services.calendar_parsing import CalendarParsingService
 # .env 파일 로드
 load_dotenv()
 
+
 # [CI/CD] GitHub Actions 환경에서 API Key가 없을 경우 테스트를 건너뛰기 위한 설정
 @pytest.mark.skipif(not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set")
 async def test_text_parsing():

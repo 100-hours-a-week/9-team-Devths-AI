@@ -30,7 +30,6 @@ from app.schemas.chat import (
     InterviewQuestionState,
     InterviewSession,
 )
-from app.services.cloudwatch_service import CloudWatchService
 from app.utils.log_sanitizer import safe_info, safe_warning
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
@@ -85,7 +84,7 @@ async def generate_chat_stream(
     start_time = time.time()
 
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
-    dims = {"Model": model, "Mode": str(mode)}
+    # dims = {"Model": model, "Mode": str(mode)}
 
     logger.info("")
     logger.info(f"{'='*80}")
@@ -680,13 +679,9 @@ async def generate_chat_stream(
             )
             yield f"data: [DONE]{sse_end}"
 
-    # Latency 측정 종료 및 전송
-    try:
-        duration = (time.time() - start_time) * 1000
-        cw = CloudWatchService.get_instance()
-        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
-    except Exception as e:
-        logger.error(f"Failed to record latency metric: {e}")
+    # Latency measurement (Log based analysis for PLG)
+    duration = (time.time() - start_time) * 1000
+    safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration)
 
 
 @router.post(

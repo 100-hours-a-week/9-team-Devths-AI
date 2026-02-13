@@ -29,7 +29,9 @@ def main():
             print("\n첫 번째 샘플:")
             first_sample = split_data[0]
             for key, value in first_sample.items():
-                print(f"  {key}: {value[:200] if isinstance(value, str) and len(value) > 200 else value}")
+                print(
+                    f"  {key}: {value[:200] if isinstance(value, str) and len(value) > 200 else value}"
+                )
 
     # 데이터 저장
     print("\n💾 데이터셋을 JSON 파일로 저장 중...")
