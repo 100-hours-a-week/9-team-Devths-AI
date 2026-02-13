@@ -67,9 +67,37 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: python
+          queries: security-and-quality
 
       - name: CodeQL Analyze
         uses: github/codeql-action/analyze@v3
+
+      - name: Check and Block on Security Alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "⏳ Waiting for analysis results to be processed (10s)..."
+          sleep 10
+
+          CURRENT_REF="${{ github.ref }}"
+          echo "📍 Current Ref: $CURRENT_REF"
+
+          # Query API for open alerts with High or Critical severity
+          ALERTS=$(gh api "repos/${{ github.repository }}/code-scanning/alerts?tool_name=CodeQL&state=open&ref=$CURRENT_REF" \
+            --jq '[.[] | select(.rule.security_severity_level == "high" or .rule.security_severity_level == "critical")]')
+
+          COUNT=$(echo "$ALERTS" | jq 'length')
+
+          if [ "$COUNT" -gt 0 ]; then
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "❌ Security Check Failed: $COUNT High/Critical vulnerabilities found"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "$ALERTS" | jq -r '.[] | "- [\(.rule.security_severity_level)] \(.rule.description) \n   Location: \(.most_recent_instance.location.path)"'
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+          else
+            echo "✅ Security Check Passed: No critical vulnerabilities found on $CURRENT_REF."
+          fi
 
   # ========================================================
   # Job 3: Test (Additional Check)
