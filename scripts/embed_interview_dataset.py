@@ -7,16 +7,15 @@ import json
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv  # noqa: E402
+
 # 프로젝트 루트를 Python 경로에 추가
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# .env 파일 로드
-from dotenv import load_dotenv
-
 load_dotenv(PROJECT_ROOT / ".env")
 
-from app.services.vectordb_service import VectorDBService
+from app.services.vectordb_service import VectorDBService  # noqa: E402
 
 
 async def main():
@@ -35,7 +34,7 @@ async def main():
     # JSONL 형식 (한 줄에 하나의 JSON 객체)
     print(f"데이터 파일 로드 중: {valid_file}", flush=True)
     data = []
-    with open(valid_file, "r", encoding="utf-8") as f:
+    with open(valid_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:

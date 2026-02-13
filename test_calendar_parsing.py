@@ -9,6 +9,7 @@ python test_calendar_parsing.py
 import asyncio
 import os
 
+import pytest
 from dotenv import load_dotenv
 
 from app.services.calendar_parsing import CalendarParsingService
@@ -16,7 +17,8 @@ from app.services.calendar_parsing import CalendarParsingService
 # .env 파일 로드
 load_dotenv()
 
-
+# [CI/CD] GitHub Actions 환경에서 API Key가 없을 경우 테스트를 건너뛰기 위한 설정
+@pytest.mark.skipif(not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set")
 async def test_text_parsing():
     """텍스트 기반 채용공고 파싱 테스트"""
     print("=" * 80)
@@ -59,6 +61,7 @@ async def test_text_parsing():
     return result
 
 
+@pytest.mark.skipif(not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set")
 async def test_text_parsing_simple():
     """간단한 텍스트 파싱 테스트"""
     print("\n" + "=" * 80)
@@ -88,6 +91,7 @@ async def test_text_parsing_simple():
     return result
 
 
+@pytest.mark.skipif(not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY not set")
 async def test_empty_text():
     """빈 텍스트 처리 테스트"""
     print("\n" + "=" * 80)

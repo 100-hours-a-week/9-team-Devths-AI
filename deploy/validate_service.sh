@@ -12,17 +12,16 @@ MAX_RETRIES=30
 RETRY_INTERVAL=2
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 1. 프로세스 확인
+# 1. 프로세스 확인 (Docker Container)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-echo "🔎 Checking if server process is running..."
-if pgrep -f "uvicorn app.main:app" > /dev/null; then
-    PID=$(pgrep -f "uvicorn app.main:app" | head -n 1)
-    echo "✅ Server process is running (PID: $PID)"
+echo "🔎 Checking if Docker container is running..."
+CONTAINER_NAME="ai-service"
+if docker ps --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+    echo "✅ Docker container '$CONTAINER_NAME' is running."
 else
-    echo "❌ Server process not found!"
-    echo "📋 Last 30 lines of log:"
-    tail -n 30 "$LOG_FILE" 2>/dev/null || echo "Log file not found"
+    echo "❌ Docker container '$CONTAINER_NAME' is NOT running!"
+    docker ps -a | grep "$CONTAINER_NAME"
     exit 1
 fi
 
