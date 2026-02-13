@@ -14,7 +14,10 @@ jobs:
   # - Linting (ruff)
   # - Testing (pytest)
   # ========================================================
-  ci:
+  # ========================================================
+  # Job 1: Lint (Required Check)
+  # ========================================================
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -46,16 +49,70 @@ jobs:
       - name: Run Lint (Ruff)
         run: poetry run ruff check .
 
+  # ========================================================
+  # Job 2: Static Analysis (Required Check)
+  # - Using CodeQL
+  # ========================================================
+  static-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: CodeQL Init
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: CodeQL Analyze
+        uses: github/codeql-action/analyze@v3
+
+  # ========================================================
+  # Job 3: Test (Additional Check)
+  # ========================================================
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v3
+        id: poetry-cache
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install Dependencies
+        run: |
+          poetry install --with dev
+
       - name: Run Tests (Pytest)
         run: poetry run pytest
 
   # ========================================================
-  # Job 2: CD (Build & Push)
+  # Job 4: CD (Build & Push)
   # - Only runs on Push to main/develop/release (not PR)
-  # - Requires CI to pass
+  # - Requires CI (Lint, Test, Static-Analysis) to pass
   # ========================================================
   cd:
-    needs: ci
+    needs: [lint, static-analysis, test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
