@@ -302,8 +302,8 @@ jobs:
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
-          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 'success' || 'failure' }}
-          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
+          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 'success' || 'failure' }}
+          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
           description: |
             **Commit**: ${{ steps.prep.outputs.title }}
             **Branch**: `${{ steps.prep.outputs.branch }}`
@@ -316,6 +316,6 @@ jobs:
             - EC2 Deploy: ${{ needs.deploy-to-ec2.result == 'success' && '✅' || (needs.deploy-to-ec2.result == 'skipped' && '⏭️ Skipped' || '❌') }}
             
             **🔗 Link**: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && needs.cd.result == 'success' && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 65280 || 16711680 }}"
+          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 65280 || 16711680 }}"
           username: AI CI/CD Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
