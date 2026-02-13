@@ -1,11 +1,13 @@
 name: Devths-AI CICD 파이프라인
 
 on:
-  push:
-    branches:
-      - develop
-      - release/**
-      - main
+# 기존 워크플로우를 남겨서 필요 시 수동 배포를 진행할 수 있도록 합니다.
+  workflow_dispatch:
+  # push:
+  #   branches:
+  #     - develop
+  #     - release/**
+  #     - main
 
 env:
   PYTHON_VERSION: '3.10'

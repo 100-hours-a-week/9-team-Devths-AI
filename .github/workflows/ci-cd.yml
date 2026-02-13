@@ -1,0 +1,93 @@
+
+name: AI Service CI/CD
+
+on:
+  push:
+    branches: [ "main", "develop", "release/*" ]
+  pull_request:
+    branches: [ "main", "develop", "release/*" ]
+  workflow_dispatch:
+
+jobs:
+  # ========================================================
+  # Job 1: CI (Quality Gate)
+  # - Linting (ruff)
+  # - Testing (pytest)
+  # ========================================================
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Dependencies
+        run: |
+          poetry install --with dev
+
+      - name: Run Lint (Ruff)
+        run: poetry run ruff check .
+
+      - name: Run Tests (Pytest)
+        run: poetry run pytest
+
+  # ========================================================
+  # Job 2: CD (Build & Push)
+  # - Only runs on Push to main/develop/release (not PR)
+  # - Requires CI to pass
+  # ========================================================
+  cd:
+    needs: ci
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Determine ECR Repository
+        id: ecr-repo
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
+            echo "env_tag=dev" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "repo_name=devths/ai-prod" >> $GITHUB_OUTPUT
+            echo "env_tag=prod" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
+             echo "repo_name=devths/ai-stg" >> $GITHUB_OUTPUT
+             echo "env_tag=stg" >> $GITHUB_OUTPUT
+          else
+             echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
+             echo "env_tag=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ steps.ecr-repo.outputs.repo_name }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "::notice::Image pushed to $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
