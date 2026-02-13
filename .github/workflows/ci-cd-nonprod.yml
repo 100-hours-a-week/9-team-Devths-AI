@@ -312,7 +312,7 @@ jobs:
             - Lint: ${{ needs.lint.result == 'success' && '✅' || '❌' }}
             - Static Analysis: ${{ needs.static-analysis.result == 'success' && '✅' || '❌' }}
             - Test & Smoke: ${{ needs.test.result == 'success' && '✅' || '❌' }}
-            - Docker Push: ${{ needs.cd.result == 'success' && '✅' || '❌' }}
+            - Docker Push: ${{ needs.cd.result == 'success' && '✅' || (needs.cd.result == 'skipped' && '⏭️ Skipped' || '❌') }}
             - EC2 Deploy: ${{ needs.deploy-to-ec2.result == 'success' && '✅' || (needs.deploy-to-ec2.result == 'skipped' && '⏭️ Skipped' || '❌') }}
             
             **🔗 Link**: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
