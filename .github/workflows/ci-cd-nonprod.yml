@@ -3,9 +3,9 @@ name: AI Service CI/CD
 
 on:
   push:
-    branches: [ "main", "develop", "release/*" ]
+    branches: [ "develop", "release/*" ]
   pull_request:
-    branches: [ "main", "develop", "release/*" ]
+    branches: [ "develop", "release/*" ]
   workflow_dispatch:
 
 jobs:
@@ -70,9 +70,6 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
             echo "env_tag=dev" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "repo_name=devths/ai-prod" >> $GITHUB_OUTPUT
-            echo "env_tag=prod" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
              echo "repo_name=devths/ai-stg" >> $GITHUB_OUTPUT
              echo "env_tag=stg" >> $GITHUB_OUTPUT
