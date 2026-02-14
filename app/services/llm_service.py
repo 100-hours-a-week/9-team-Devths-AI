@@ -44,9 +44,8 @@ class LLMService:
 
         # API 키 수집 (다중 키 분산 처리)
         api_keys = self._settings.all_google_api_keys
-        if api_key:
-            if api_key not in api_keys:
-                api_keys.append(api_key)
+        if api_key and api_key not in api_keys:
+            api_keys.append(api_key)
         if not api_keys:
             # 환경변수에서 직접 로드 (하위 호환)
             env_key = os.getenv("GOOGLE_API_KEY")
