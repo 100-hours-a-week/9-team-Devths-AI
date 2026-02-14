@@ -6,6 +6,7 @@ Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
 
 import logging
 import os
+import random
 from typing import Any
 
 import chromadb
@@ -39,8 +40,11 @@ class VectorDBService:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY environment variable is required")
 
-        # Initialize Gemini Client for embeddings
-        self.genai_client = genai.Client(api_key=api_key)
+        # 쉼표 구분 다중 키 → 각 키별 클라이언트 생성 (분산 처리)
+        api_keys = [k.strip() for k in api_key.split(",") if k.strip()]
+        self._genai_clients = [genai.Client(api_key=k) for k in api_keys]
+        self.genai_client = self._genai_clients[0]  # 하위 호환
+        logger.info(f"VectorDB 임베딩: {len(self._genai_clients)}개 API 키 로드")
 
         # Initialize ChromaDB: server mode (v2) or embedded mode
         if chroma_server_host:
@@ -116,9 +120,8 @@ class VectorDBService:
             Embedding vector
         """
         try:
-            result = self.genai_client.models.embed_content(
-                model="gemini-embedding-001", contents=text
-            )
+            client = random.choice(self._genai_clients)
+            result = client.models.embed_content(model="gemini-embedding-001", contents=text)
             # Extract embedding from EmbedContentResponse
             # result.embeddings is a list of Embedding objects
             if hasattr(result, "embeddings") and len(result.embeddings) > 0:
