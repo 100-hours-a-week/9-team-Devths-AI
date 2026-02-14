@@ -19,6 +19,7 @@ from app.prompts import (
     create_followup_prompt,
 )
 
+from .interview_templates import InterviewTemplateService
 from .llm_service import LLMService
 from .ocr_service import OCRService
 from .vectordb_service import VectorDBService
@@ -51,7 +52,9 @@ class RAGService:
         self.vectordb = vectordb_service
         # OCRService: 전달받거나 자동 생성
         self.ocr = ocr_service or OCRService(llm_service=llm_service)
-        logger.info("RAG Service initialized (with OCRService)")
+        # 템플릿 기반 면접 질문 서비스
+        self.interview_templates = InterviewTemplateService()
+        logger.info("RAG Service initialized (with OCRService + InterviewTemplateService)")
 
     async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
         """
@@ -414,16 +417,45 @@ class RAGService:
             except Exception:
                 pass
 
-            # 배치 생성
-            questions = await self.llm.generate_interview_questions_batch(
+            # 5개 질문 = 템플릿 3개 + LLM(프로젝트 기반) 2개
+            template_count = min(3, count)
+            llm_count = count - template_count  # 나머지는 LLM
+
+            # 1단계: 템플릿 기반 질문 생성 (LLM 호출 없이 즉시)
+            template_questions = self.interview_templates.generate_questions(
                 resume_text=resume_text,
                 posting_text=posting_text,
                 interview_type=interview_type,
-                count=count,
-                user_id=user_id,
-                previous_feedback=feedback_text or None,
+                count=template_count,
             )
-            return questions
+            logger.info(f"✅ 템플릿 질문 {len(template_questions)}개 생성 완료")
+
+            # 2단계: LLM 프로젝트 기반 질문 생성 (이력서/채용공고 맞춤)
+            llm_questions = []
+            if llm_count > 0:
+                try:
+                    llm_questions = await self.llm.generate_interview_questions_batch(
+                        resume_text=resume_text,
+                        posting_text=posting_text,
+                        interview_type=interview_type,
+                        count=llm_count,
+                        user_id=user_id,
+                        previous_feedback=feedback_text or None,
+                    )
+                    logger.info(f"✅ LLM 프로젝트 질문 {len(llm_questions)}개 생성 완료")
+                except Exception as llm_err:
+                    # LLM 실패 시 템플릿으로 폴백
+                    logger.warning(f"LLM 질문 생성 실패 → 템플릿 폴백: {llm_err}")
+                    fallback = self.interview_templates.generate_questions(
+                        resume_text=resume_text,
+                        posting_text=posting_text,
+                        interview_type=interview_type,
+                        count=llm_count,
+                        asked_questions=[q["question"] for q in template_questions],
+                    )
+                    llm_questions = fallback
+
+            return template_questions + llm_questions
 
         except Exception as e:
             logger.error(f"Error generating batch interview questions: {e}")
