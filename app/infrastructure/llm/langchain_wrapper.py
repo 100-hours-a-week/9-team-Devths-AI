@@ -22,39 +22,67 @@ class LangChainLLMGateway:
 
     Provides a standardized interface for different LLM providers
     through LangChain abstractions.
+    Supports multiple API keys with random selection + fallback for rate limit handling.
     """
 
     def __init__(
         self,
         google_api_key: str | None = None,
-        model_name: str = "gemini-2.0-flash",
+        google_api_keys: list[str] | None = None,
+        model_name: str = "gemini-3-flash-preview",
         embedding_model: str = "models/text-embedding-004",
         temperature: float = 0.7,
     ):
         """Initialize LangChain LLM Gateway.
 
         Args:
-            google_api_key: Google API key (uses GOOGLE_API_KEY env var if not provided).
+            google_api_key: Google API key (단일 키, 하위 호환).
+            google_api_keys: Google API keys (다중 키, 분산 처리용).
             model_name: Default model name for text generation.
             embedding_model: Model name for embeddings.
             temperature: Default temperature for generation.
         """
-        api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
+        import random
+
+        # API 키 수집
+        keys = []
+        if google_api_keys:
+            keys.extend(google_api_keys)
+        if google_api_key and google_api_key not in keys:
+            keys.append(google_api_key)
+        if not keys:
+            env_key = os.getenv("GOOGLE_API_KEY")
+            if env_key:
+                keys.append(env_key)
+
+        if not keys:
             raise ValueError("GOOGLE_API_KEY environment variable is required")
 
-        # Initialize Gemini LLM
-        self._llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
-            temperature=temperature,
-            convert_system_message_to_human=True,
-        )
+        # 랜덤 순서로 섞기 (분산 처리)
+        random.shuffle(keys)
 
-        # Initialize embeddings
+        # 각 키별 LLM 인스턴스 생성
+        llm_instances = [
+            ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=k,
+                temperature=temperature,
+                convert_system_message_to_human=True,
+            )
+            for k in keys
+        ]
+
+        # Primary LLM + fallbacks 설정
+        if len(llm_instances) > 1:
+            self._llm = llm_instances[0].with_fallbacks(llm_instances[1:])
+            logger.info(f"LangChain Gateway: {len(keys)}개 API 키 분산 처리 (with_fallbacks)")
+        else:
+            self._llm = llm_instances[0]
+
+        # Embeddings는 첫 번째 키로 (경량 호출이라 분산 불필요)
         self._embeddings = GoogleGenerativeAIEmbeddings(
             model=embedding_model,
-            google_api_key=api_key,
+            google_api_key=keys[0],
         )
 
         self._model_name = model_name
