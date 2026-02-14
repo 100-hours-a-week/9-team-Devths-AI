@@ -899,7 +899,7 @@ async def generate_chat_stream(
                 if session:
                     safe_info(
                         logger,
-                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
+                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%s/5",
                         session_key,
                         session.phase,
                         session.current_question_id,
@@ -1178,7 +1178,7 @@ async def generate_chat_stream(
                 await session_store.set(session_key, session.model_dump())
                 safe_info(
                     logger,
-                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%d/5",
+                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%s/5",
                     session_key,
                     session.phase,
                     session.current_question_id,
