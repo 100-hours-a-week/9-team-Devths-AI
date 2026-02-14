@@ -175,6 +175,41 @@ class LangChainLLMGateway:
         response = await llm.ainvoke(lc_messages)
         return response.content
 
+    async def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        output_schema: type,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """구조화 출력을 강제하여 Pydantic 모델 인스턴스를 반환합니다.
+
+        Args:
+            messages: 메시지 딕셔너리 리스트.
+            output_schema: 출력 Pydantic 모델 클래스.
+            system_prompt: 선택적 시스템 프롬프트.
+            temperature: 샘플링 온도.
+            max_tokens: 최대 토큰 수.
+
+        Returns:
+            output_schema 타입의 Pydantic 모델 인스턴스.
+        """
+        lc_messages = self._convert_messages(messages, system_prompt)
+
+        llm = self._llm
+        bind_kwargs = {}
+        if temperature is not None:
+            bind_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            bind_kwargs["max_output_tokens"] = max_tokens
+        if bind_kwargs:
+            llm = llm.bind(**bind_kwargs)
+
+        structured_llm = llm.with_structured_output(output_schema)
+        return await structured_llm.ainvoke(lc_messages)
+
     async def generate_stream(
         self,
         messages: list[dict[str, str]],
