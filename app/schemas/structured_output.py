@@ -33,9 +33,7 @@ class InterviewQuestion(BaseModel):
 class InterviewQuestionBatch(BaseModel):
     """면접 질문 배치 생성 구조화 출력."""
 
-    questions: list[InterviewQuestion] = Field(
-        ..., description="생성된 면접 질문 목록"
-    )
+    questions: list[InterviewQuestion] = Field(..., description="생성된 면접 질문 목록")
 
 
 # ============================================
@@ -48,18 +46,10 @@ class AnalysisResult(BaseModel):
 
     company_name: str = Field(default="", description="회사명")
     job_title: str = Field(default="", description="채용 직무")
-    key_requirements: list[str] = Field(
-        default_factory=list, description="핵심 요구사항"
-    )
-    candidate_strengths: list[str] = Field(
-        default_factory=list, description="지원자 강점"
-    )
-    candidate_weaknesses: list[str] = Field(
-        default_factory=list, description="지원자 약점/보완점"
-    )
-    match_score: int = Field(
-        default=0, ge=0, le=100, description="적합도 점수 (0-100)"
-    )
+    key_requirements: list[str] = Field(default_factory=list, description="핵심 요구사항")
+    candidate_strengths: list[str] = Field(default_factory=list, description="지원자 강점")
+    candidate_weaknesses: list[str] = Field(default_factory=list, description="지원자 약점/보완점")
+    match_score: int = Field(default=0, ge=0, le=100, description="적합도 점수 (0-100)")
     summary: str = Field(default="", description="종합 분석 요약")
 
 
@@ -73,32 +63,20 @@ class QuestionEvaluation(BaseModel):
 
     question: str = Field(..., description="면접 질문")
     user_answer: str = Field(..., description="지원자 답변")
-    verdict: str = Field(
-        ..., description="판정 (적절, 부적절, 보완필요)"
-    )
+    verdict: str = Field(..., description="판정 (적절, 부적절, 보완필요)")
     score: int = Field(..., ge=1, le=5, description="점수 (1-5)")
     reasoning: str = Field(..., description="평가 근거")
-    recommended_answer: str | None = Field(
-        None, description="추천 답변 (보완/부적절 시)"
-    )
+    recommended_answer: str | None = Field(None, description="추천 답변 (보완/부적절 시)")
 
 
 class InterviewEvaluation(BaseModel):
     """면접 종합 평가 구조화 출력."""
 
-    questions: list[QuestionEvaluation] = Field(
-        default_factory=list, description="각 질문별 평가"
-    )
-    overall_score: int = Field(
-        default=0, ge=0, le=5, description="종합 점수 (1-5)"
-    )
+    questions: list[QuestionEvaluation] = Field(default_factory=list, description="각 질문별 평가")
+    overall_score: int = Field(default=0, ge=0, le=5, description="종합 점수 (1-5)")
     overall_feedback: str = Field(default="", description="종합 피드백")
-    strengths: list[str] = Field(
-        default_factory=list, description="강점"
-    )
-    improvements: list[str] = Field(
-        default_factory=list, description="개선점"
-    )
+    strengths: list[str] = Field(default_factory=list, description="강점")
+    improvements: list[str] = Field(default_factory=list, description="개선점")
 
 
 # ============================================
@@ -127,6 +105,4 @@ class CalendarEvent(BaseModel):
     end_date: str = Field(default="", description="종료 날짜 (YYYY-MM-DD)")
     description: str = Field(default="", description="일정 설명")
     company_name: str = Field(default="", description="회사명")
-    event_type: str = Field(
-        default="기타", description="일정 유형 (서류마감, 면접, 코딩테스트 등)"
-    )
+    event_type: str = Field(default="기타", description="일정 유형 (서류마감, 면접, 코딩테스트 등)")
