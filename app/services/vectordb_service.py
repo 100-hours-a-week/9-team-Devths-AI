@@ -39,6 +39,9 @@ class VectorDBService:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY environment variable is required")
 
+        # 쉼표 구분 다중 키 지원: 임베딩은 첫 번째 키 사용
+        api_key = api_key.split(",")[0].strip()
+
         # Initialize Gemini Client for embeddings
         self.genai_client = genai.Client(api_key=api_key)
 
