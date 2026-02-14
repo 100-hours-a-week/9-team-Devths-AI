@@ -35,21 +35,46 @@ class LLMService:
         Args:
             api_key: Google API key (uses GOOGLE_API_KEY env var if not provided)
         """
-        # Configure Gemini API
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+        import random
 
-        # Initialize Gemini Client
-        self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-3-flash-preview"  # Gemini 3 Flash Preview
-        # 분석용 모델도 동일하게 사용 (gemini-3-pro는 존재하지 않음)
-        self.analysis_model = "gemini-3-flash-preview"
+        self._random = random
 
         # 중앙화된 설정 로드
         self._settings = get_settings()
 
-        logger.info(f"LLM Service initialized with model: {self.model_name}")
+        # API 키 수집 (다중 키 분산 처리)
+        api_keys = self._settings.all_google_api_keys
+        if api_key and api_key not in api_keys:
+            api_keys.append(api_key)
+        if not api_keys:
+            # 환경변수에서 직접 로드 (하위 호환)
+            env_key = os.getenv("GOOGLE_API_KEY")
+            if env_key:
+                api_keys = [env_key]
+
+        if not api_keys:
+            raise ValueError("GOOGLE_API_KEY environment variable is required")
+
+        # 각 키별 Gemini 클라이언트 생성
+        self._clients = [genai.Client(api_key=k) for k in api_keys]
+        self.client = self._clients[0]  # 기본 클라이언트 (하위 호환)
+        self.model_name = "gemini-3-flash-preview"
+        self.analysis_model = "gemini-3-flash-preview"
+
+        logger.info(
+            f"LLM Service initialized with model: {self.model_name}, "
+            f"API keys: {len(self._clients)}개 (분산 처리)"
+        )
+
+    def _get_client(self) -> genai.Client:
+        """랜덤으로 Gemini 클라이언트를 선택합니다."""
+        return self._random.choice(self._clients)
+
+    def _get_shuffled_clients(self) -> list[genai.Client]:
+        """모든 클라이언트를 랜덤 순서로 반환 (폴백용)."""
+        clients = list(self._clients)
+        self._random.shuffle(clients)
+        return clients
 
     def _langfuse_trace_and_generation(
         self,
@@ -195,7 +220,7 @@ class LLMService:
             )
 
             # Generate streaming response
-            response = self.client.models.generate_content_stream(
+            response = self._get_client().models.generate_content_stream(
                 model=self.model_name, contents=contents, config=config
             )
 
@@ -288,7 +313,7 @@ class LLMService:
             )
 
             # Generate non-streaming response
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model=self.model_name, contents=contents, config=config
             )
 
@@ -501,7 +526,7 @@ class LLMService:
 
         for attempt in range(max_retries):
             try:
-                response = self.client.models.generate_content(
+                response = self._get_client().models.generate_content(
                     model=self.analysis_model, contents=contents, config=config
                 )
 
@@ -650,7 +675,7 @@ JSON 형식으로 질문을 제공해주세요:
                 max_output_tokens=self._settings.llm_max_tokens_interview,
             )
 
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model=self.model_name, contents=contents, config=config
             )
 
@@ -766,7 +791,7 @@ JSON 형식으로 질문을 제공해주세요:
                 max_output_tokens=self._settings.llm_max_tokens_interview * 2,  # 배치이므로 2배
             )
 
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model=self.model_name, contents=contents, config=config
             )
 
@@ -1030,7 +1055,7 @@ Return ONLY the extracted text, without any additional commentary or formatting.
                 max_output_tokens=self._settings.llm_max_tokens_chat,
             )
 
-            response = self.client.models.generate_content(
+            response = self._get_client().models.generate_content(
                 model=self.model_name, contents=contents, config=config
             )
 
