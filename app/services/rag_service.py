@@ -10,6 +10,7 @@ Implements the RAG pipeline following the architecture diagram:
 LCEL: 면접 질문 생성·일반 QnA는 LangChain 체인(prompt | llm | StrOutputParser)으로 처리 가능.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -158,17 +159,19 @@ class RAGService:
         if context_types is None:
             context_types = ["resume", "job_posting"]
         try:
+            # Portfolio 컬렉션 제외 (분석 시에는 사용자 데이터만)
+            types_to_fetch = [ct for ct in context_types if ct != "portfolio"]
+            if not types_to_fetch:
+                return ""
+
+            results_per_type = await asyncio.gather(
+                *[
+                    self.vectordb.get_all_documents_by_user(user_id=user_id, collection_type=ct)
+                    for ct in types_to_fetch
+                ]
+            )
             all_results = []
-
-            # Get all documents from each collection type
-            for collection_type in context_types:
-                # Portfolio 컬렉션은 user_id 필터 없이 검색하지 않음 (분석 시에는 사용자 데이터만)
-                if collection_type == "portfolio":
-                    continue
-
-                docs = await self.vectordb.get_all_documents_by_user(
-                    user_id=user_id, collection_type=collection_type
-                )
+            for collection_type, docs in zip(types_to_fetch, results_per_type, strict=True):
                 all_results.extend([(collection_type, doc) for doc in docs])
 
             # Format context
@@ -225,22 +228,23 @@ class RAGService:
         if context_types is None:
             context_types = ["resume", "job_posting"]
         try:
-            all_results = []
 
-            # Query each collection type
-            for collection_type in context_types:
-                # Portfolio (면접 질문) 컬렉션은 user_id 필터 없이 검색 (공통 데이터)
+            async def query_one(collection_type: str):
                 where_filter = None
                 if collection_type != "portfolio" and user_id:
                     where_filter = {"user_id": user_id}
-
                 results = await self.vectordb.query(
                     query_text=query,
                     collection_type=collection_type,
                     n_results=n_results,
                     where=where_filter,
                 )
-                all_results.extend([(collection_type, r) for r in results])
+                return [(collection_type, r) for r in results]
+
+            results_per_type = await asyncio.gather(*[query_one(ct) for ct in context_types])
+            all_results = []
+            for pairs in results_per_type:
+                all_results.extend(pairs)
 
             # Format context
             if not all_results:
@@ -365,33 +369,32 @@ class RAGService:
             Analysis result
         """
         try:
-            # Get resume text
-            if resume_id:
-                resume_doc = await self.vectordb.get_document(resume_id, "resume")
-                resume_text = resume_doc["text"] if resume_doc else ""
-            else:
-                # Search for user's resume
-                resume_results = await self.vectordb.query(
+
+            async def get_resume_text():
+                if resume_id:
+                    doc = await self.vectordb.get_document(resume_id, "resume")
+                    return doc["text"] if doc else ""
+                results = await self.vectordb.query(
                     query_text="이력서 전체 내용",
                     collection_type="resume",
                     n_results=1,
                     where={"user_id": user_id},
                 )
-                resume_text = resume_results[0]["text"] if resume_results else ""
+                return results[0]["text"] if results else ""
 
-            # Get posting text
-            if posting_id:
-                posting_doc = await self.vectordb.get_document(posting_id, "job_posting")
-                posting_text = posting_doc["text"] if posting_doc else ""
-            else:
-                # Search for recent posting
-                posting_results = await self.vectordb.query(
+            async def get_posting_text():
+                if posting_id:
+                    doc = await self.vectordb.get_document(posting_id, "job_posting")
+                    return doc["text"] if doc else ""
+                results = await self.vectordb.query(
                     query_text="채용공고 전체 내용",
                     collection_type="job_posting",
                     n_results=1,
                     where={"user_id": user_id},
                 )
-                posting_text = posting_results[0]["text"] if posting_results else ""
+                return results[0]["text"] if results else ""
+
+            resume_text, posting_text = await asyncio.gather(get_resume_text(), get_posting_text())
 
             if not resume_text or not posting_text:
                 raise ValueError("이력서 또는 채용공고를 찾을 수 없습니다")
@@ -418,43 +421,38 @@ class RAGService:
             Interview question
         """
         try:
-            # Get resume
-            resume_results = await self.vectordb.query(
-                query_text="이력서 전체 내용",
-                collection_type="resume",
-                n_results=1,
-                where={"user_id": user_id},
+
+            async def fetch_feedback_single():
+                try:
+                    feedback_results = await self.vectordb.query(
+                        query_text=f"{interview_type} 면접 약점 피드백",
+                        collection_type="interview_feedback",
+                        n_results=2,
+                        where={"user_id": user_id, "interview_type": interview_type},
+                    )
+                    if feedback_results:
+                        return "\n".join(r["text"] for r in feedback_results[:2])
+                except Exception:
+                    pass
+                return ""
+
+            resume_results, posting_results, feedback_text = await asyncio.gather(
+                self.vectordb.query(
+                    query_text="이력서 전체 내용",
+                    collection_type="resume",
+                    n_results=1,
+                    where={"user_id": user_id},
+                ),
+                self.vectordb.query(
+                    query_text="채용공고 전체 내용",
+                    collection_type="job_posting",
+                    n_results=1,
+                    where={"user_id": user_id},
+                ),
+                fetch_feedback_single(),
             )
-            resume_text = resume_results[0]["text"] if resume_results else ""
-
-            # Get posting
-            posting_results = await self.vectordb.query(
-                query_text="채용공고 전체 내용",
-                collection_type="job_posting",
-                n_results=1,
-                where={"user_id": user_id},
-            )
-            posting_text = posting_results[0]["text"] if posting_results else ""
-
-            if not resume_text:
-                resume_text = "정보 없음"
-
-            if not posting_text:
-                posting_text = "정보 없음"
-
-            # 이전 면접 피드백 검색 (문서 A안: interview_feedback + interview_type 필터)
-            feedback_text = ""
-            try:
-                feedback_results = await self.vectordb.query(
-                    query_text=f"{interview_type} 면접 약점 피드백",
-                    collection_type="interview_feedback",
-                    n_results=2,
-                    where={"user_id": user_id, "interview_type": interview_type},
-                )
-                if feedback_results:
-                    feedback_text = "\n".join(r["text"] for r in feedback_results[:2])
-            except Exception:
-                pass
+            resume_text = resume_results[0]["text"] if resume_results else "정보 없음"
+            posting_text = posting_results[0]["text"] if posting_results else "정보 없음"
 
             # LCEL 체인 사용 (gateway 있으면)
             if self._langchain_gateway:
@@ -528,37 +526,38 @@ class RAGService:
             List of interview questions
         """
         try:
-            # Get resume
-            resume_results = await self.vectordb.query(
-                query_text="이력서 전체 내용",
-                collection_type="resume",
-                n_results=1,
-                where={"user_id": user_id},
+
+            async def fetch_feedback():
+                try:
+                    feedback_results = await self.vectordb.query(
+                        query_text=f"{interview_type} 면접 약점 피드백",
+                        collection_type="interview_feedback",
+                        n_results=2,
+                        where={"user_id": user_id, "interview_type": interview_type},
+                    )
+                    if feedback_results:
+                        return "\n".join(r["text"] for r in feedback_results[:2])
+                except Exception:
+                    pass
+                return ""
+
+            resume_results, posting_results, feedback_text = await asyncio.gather(
+                self.vectordb.query(
+                    query_text="이력서 전체 내용",
+                    collection_type="resume",
+                    n_results=1,
+                    where={"user_id": user_id},
+                ),
+                self.vectordb.query(
+                    query_text="채용공고 전체 내용",
+                    collection_type="job_posting",
+                    n_results=1,
+                    where={"user_id": user_id},
+                ),
+                fetch_feedback(),
             )
             resume_text = resume_results[0]["text"] if resume_results else "정보 없음"
-
-            # Get posting
-            posting_results = await self.vectordb.query(
-                query_text="채용공고 전체 내용",
-                collection_type="job_posting",
-                n_results=1,
-                where={"user_id": user_id},
-            )
             posting_text = posting_results[0]["text"] if posting_results else "정보 없음"
-
-            # 이전 면접 피드백 검색
-            feedback_text = ""
-            try:
-                feedback_results = await self.vectordb.query(
-                    query_text=f"{interview_type} 면접 약점 피드백",
-                    collection_type="interview_feedback",
-                    n_results=2,
-                    where={"user_id": user_id, "interview_type": interview_type},
-                )
-                if feedback_results:
-                    feedback_text = "\n".join(r["text"] for r in feedback_results[:2])
-            except Exception:
-                pass
 
             # 5개 질문 = 템플릿 3개 + LLM(프로젝트 기반) 2개
             template_count = min(3, count)
