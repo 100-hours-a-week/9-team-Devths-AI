@@ -281,8 +281,10 @@ async def text_extract(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
                 )
 
-            resume_result = await extract_document(request.resume, "resume")
-            job_posting_result = await extract_document(request.job_posting, "job_posting")
+            resume_result, job_posting_result = await asyncio.gather(
+                extract_document(request.resume, "resume"),
+                extract_document(request.job_posting, "job_posting"),
+            )
 
             # 분석 리포트 생성
             logger.info("")

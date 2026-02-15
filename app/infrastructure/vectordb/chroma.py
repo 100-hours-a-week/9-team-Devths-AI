@@ -151,6 +151,29 @@ class ChromaVectorStore(BaseVectorStore):
             logger.error(f"Error creating embedding: {e}")
             raise
 
+    async def _create_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Create embeddings for multiple texts in one batch API call.
+
+        Args:
+            texts: List of texts to embed.
+
+        Returns:
+            List of embedding vectors (same order as texts).
+        """
+        if not texts:
+            return []
+        try:
+            result = self.genai_client.models.embed_content(
+                model=self._embedding_model,
+                contents=texts,
+            )
+            if hasattr(result, "embeddings") and result.embeddings:
+                return [e.values for e in result.embeddings]
+            raise ValueError(f"Unexpected embedding result format: {type(result)}")
+        except Exception as e:
+            logger.error(f"Error creating batch embeddings: {e}")
+            raise
+
     async def add_document(
         self,
         document_id: str,
@@ -213,24 +236,18 @@ class ChromaVectorStore(BaseVectorStore):
         try:
             collection = self._get_collection(collection_type)
 
-            ids = []
-            embeddings = []
-            texts = []
+            ids = [doc.id for doc in documents]
+            texts = [doc.text for doc in documents]
             metadatas = []
-
             for doc in documents:
-                embedding = await self._create_embedding(doc.text)
-
-                ids.append(doc.id)
-                embeddings.append(embedding)
-                texts.append(doc.text)
-
-                # Prepare metadata
                 doc_metadata = doc.metadata.copy()
                 doc_metadata["document_id"] = doc.id
                 doc_metadata["collection_type"] = collection_type
                 doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
                 metadatas.append(doc_metadata)
+
+            # Batch embed all texts in one API call
+            embeddings = await self._create_embeddings(texts)
 
             # Add to collection
             collection.add(
