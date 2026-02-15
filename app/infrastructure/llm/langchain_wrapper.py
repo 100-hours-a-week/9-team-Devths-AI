@@ -275,16 +275,20 @@ class LangChainLLMGateway:
         *,
         input_variables: list[str] | None = None,  # noqa: ARG002
         system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
-        """Create a simple LangChain chain.
+        """Create a simple LangChain chain (prompt | llm | StrOutputParser).
 
         Args:
-            prompt_template: Prompt template string.
-            input_variables: List of input variable names.
+            prompt_template: Prompt template string (e.g. with {resume}, {posting}).
+            input_variables: List of input variable names (inferred from template if not set).
             system_prompt: Optional system instructions.
+            temperature: Optional sampling temperature (binds to LLM).
+            max_tokens: Optional max output tokens (binds to LLM).
 
         Returns:
-            LangChain chain (Runnable).
+            LangChain chain (Runnable). ainvoke(input_dict) returns str.
         """
         messages = []
 
@@ -294,7 +298,17 @@ class LangChainLLMGateway:
         messages.append(("human", prompt_template))
 
         prompt = ChatPromptTemplate.from_messages(messages)
-        return prompt | self._llm | self._output_parser
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
 
     def create_chat_chain(
         self,
