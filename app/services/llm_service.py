@@ -42,18 +42,26 @@ class LLMService:
         # 중앙화된 설정 로드
         self._settings = get_settings()
 
-        # API 키 수집 (다중 키 분산 처리)
-        api_keys = self._settings.all_google_api_keys
-        if api_key and api_key not in api_keys:
-            api_keys.append(api_key)
+        # API 키 수집 (다중 키 분산 처리). 공백/줄바꿈 제거하여 유효하지 않은 키 전달 방지
+        api_keys = [
+            k.strip()
+            for k in self._settings.all_google_api_keys
+            if k and isinstance(k, str) and k.strip()
+        ]
+        if api_key and isinstance(api_key, str):
+            add_key = api_key.strip()
+            if add_key and add_key not in api_keys:
+                api_keys.append(add_key)
         if not api_keys:
-            # 환경변수에서 직접 로드 (하위 호환)
-            env_key = os.getenv("GOOGLE_API_KEY")
+            env_key = (os.getenv("GOOGLE_API_KEY") or "").strip()
             if env_key:
                 api_keys = [env_key]
 
         if not api_keys:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError(
+                "GOOGLE_API_KEY environment variable is required. "
+                "배포 환경(서버/도커/CI)에서 GOOGLE_API_KEY가 설정되어 있는지 확인하세요."
+            )
 
         # 각 키별 Gemini 클라이언트 생성
         self._clients = [genai.Client(api_key=k) for k in api_keys]
@@ -256,7 +264,18 @@ class LLMService:
                         level="ERROR",
                         metadata={"error": str(e)},
                     )
-            yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {str(e)}"
+            err_str = str(e)
+            if (
+                "API key not valid" in err_str
+                or "INVALID_ARGUMENT" in err_str
+                or "API_KEY_INVALID" in err_str
+            ):
+                yield (
+                    "죄송합니다. Gemini API 키 오류가 발생했습니다. "
+                    "배포 환경(서버/도커)의 GOOGLE_API_KEY가 유효한지 확인해 주세요."
+                )
+            else:
+                yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {err_str}"
 
     async def generate_response_non_stream(
         self,
