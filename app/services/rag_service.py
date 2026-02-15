@@ -6,12 +6,16 @@ Implements the RAG pipeline following the architecture diagram:
 2. Query VectorDB for relevant context (Resume/Result)
 3. Send Question + Context to LLM
 4. Generate and stream Answer
+
+LCEL: 면접 질문 생성·일반 QnA는 LangChain 체인(prompt | llm | StrOutputParser)으로 처리 가능.
 """
 
+import json
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.config.settings import get_settings
 from app.prompts import (
     SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
@@ -25,7 +29,85 @@ from .ocr_service import OCRService
 from .vectordb_service import VectorDBService
 from .vllm_service import VLLMService
 
+if TYPE_CHECKING:
+    from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+
 logger = logging.getLogger(__name__)
+
+# LCEL 면접 질문용 프롬프트 템플릿 (create_chain 변수 바인딩)
+INTERVIEW_SINGLE_PROMPT = """이력서:
+{resume}
+
+채용공고:
+{posting}
+
+{feedback_block}
+
+위 내용을 바탕으로 {interview_type} 면접 질문 1개를 JSON 형식으로 생성해주세요. 다른 설명 없이 JSON만 출력하세요.
+{{"question": "질문 내용", "difficulty": "easy|medium|hard", "category": "{interview_type}", "follow_up": false}}"""
+
+INTERVIEW_BATCH_PROMPT = """이력서:
+{resume}
+
+채용공고:
+{posting}
+
+{feedback_block}
+
+위 내용을 바탕으로 {interview_type} 면접 질문을 {count}개 생성해주세요. 서로 다른 주제와 난이도(easy, medium, hard)를 섞어주세요.
+반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력하세요:
+[
+  {{"question": "질문1", "difficulty": "easy", "category": "{interview_type}", "follow_up": false}},
+  {{"question": "질문2", "difficulty": "medium", "category": "{interview_type}", "follow_up": false}},
+  ...
+]"""
+
+# LCEL 일반 QnA용 프롬프트 (RAG context + 질문)
+RAG_QNA_PROMPT = """관련 정보:
+{context}
+
+질문: {question}
+
+위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
+
+
+def _parse_interview_json(text: str) -> dict[str, Any] | None:
+    """Parse single interview question JSON from LLM output."""
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start:end])
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _parse_interview_json_list(text: str) -> list[dict[str, Any]]:
+    """Parse list of interview questions (JSON array) from LLM output."""
+    if not text:
+        return []
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start != -1 and end > start:
+        try:
+            parsed = json.loads(text[start:end])
+            return parsed if isinstance(parsed, list) else []
+        except json.JSONDecodeError:
+            pass
+    return []
 
 
 class RAGService:
@@ -37,6 +119,7 @@ class RAGService:
         vectordb_service: VectorDBService,
         vllm_service: VLLMService | None = None,
         ocr_service: OCRService | None = None,
+        langchain_gateway: "LangChainLLMGateway | None" = None,
     ):
         """
         Initialize RAG Service
@@ -46,15 +129,20 @@ class RAGService:
             vectordb_service: VectorDB service instance
             vllm_service: vLLM service instance (optional)
             ocr_service: OCR service instance (EasyOCR + Gemini Fallback)
+            langchain_gateway: LCEL 체인용 Gateway (있으면 면접에서 체인 사용)
         """
         self.llm = llm_service
         self.vllm = vllm_service
         self.vectordb = vectordb_service
+        self._langchain_gateway = langchain_gateway
         # OCRService: 전달받거나 자동 생성
         self.ocr = ocr_service or OCRService(llm_service=llm_service)
         # 템플릿 기반 면접 질문 서비스
         self.interview_templates = InterviewTemplateService()
-        logger.info("RAG Service initialized (with OCRService + InterviewTemplateService)")
+        logger.info(
+            "RAG Service initialized (OCR + InterviewTemplate; LCEL=%s)",
+            "on" if langchain_gateway else "off",
+        )
 
     async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
         """
@@ -232,6 +320,21 @@ class RAGService:
                     system_prompt=system_prompt,
                 ):
                     yield chunk
+            elif self._langchain_gateway:
+                # LCEL 체인: RAG context + 질문 → StrOutputParser 스트리밍
+                logger.info("Using Gemini model (LCEL chain)")
+                settings = get_settings()
+                chain = self._langchain_gateway.create_chain(
+                    RAG_QNA_PROMPT,
+                    system_prompt=system_prompt,
+                    temperature=settings.llm_temperature_chat,
+                    max_tokens=settings.llm_max_tokens_chat,
+                )
+                async for chunk in chain.astream(
+                    {"context": context or "없음", "question": user_message}
+                ):
+                    if chunk:
+                        yield chunk
             else:
                 logger.info("Using Gemini model")
                 async for chunk in self.llm.generate_response(
@@ -353,7 +456,47 @@ class RAGService:
             except Exception:
                 pass
 
-            # Generate question
+            # LCEL 체인 사용 (gateway 있으면)
+            if self._langchain_gateway:
+                type_label = "기술" if interview_type == "technical" else "인성"
+                system_prompt = (
+                    "당신은 기술 면접 전문가입니다. 이력서와 채용공고를 바탕으로 기술 면접 질문을 JSON 형식으로만 생성합니다."
+                    if interview_type == "technical"
+                    else "당신은 인성 면접 전문가입니다. 이력서를 바탕으로 인성 면접 질문을 JSON 형식으로만 생성합니다."
+                )
+                feedback_block = (
+                    f"\n참고 - 이전 면접 피드백:\n{feedback_text[:800]}" if feedback_text else ""
+                )
+                resume_trim = resume_text[:500] + "..." if len(resume_text) > 500 else resume_text
+                posting_trim = (
+                    posting_text[:500] + "..." if len(posting_text) > 500 else posting_text
+                )
+                settings = get_settings()
+                chain = self._langchain_gateway.create_chain(
+                    INTERVIEW_SINGLE_PROMPT,
+                    system_prompt=system_prompt,
+                    temperature=settings.llm_temperature_interview_question,
+                    max_tokens=settings.llm_max_tokens_interview,
+                )
+                result_str = await chain.ainvoke(
+                    {
+                        "resume": resume_trim,
+                        "posting": posting_trim,
+                        "feedback_block": feedback_block,
+                        "interview_type": type_label,
+                    }
+                )
+                parsed = _parse_interview_json(result_str)
+                if parsed:
+                    return parsed
+                return {
+                    "question": result_str,
+                    "difficulty": "medium",
+                    "category": interview_type,
+                    "follow_up": False,
+                }
+
+            # Fallback: 기존 Gemini SDK 직접 호출
             question = await self.llm.generate_interview_question(
                 resume_text,
                 posting_text,
@@ -430,19 +573,58 @@ class RAGService:
             )
             logger.info(f"✅ 템플릿 질문 {len(template_questions)}개 생성 완료")
 
-            # 2단계: LLM 프로젝트 기반 질문 생성 (이력서/채용공고 맞춤)
+            # 2단계: LLM 프로젝트 기반 질문 생성 (LCEL 체인 또는 기존 Gemini)
             llm_questions = []
             if llm_count > 0:
                 try:
-                    llm_questions = await self.llm.generate_interview_questions_batch(
-                        resume_text=resume_text,
-                        posting_text=posting_text,
-                        interview_type=interview_type,
-                        count=llm_count,
-                        user_id=user_id,
-                        previous_feedback=feedback_text or None,
-                    )
-                    logger.info(f"✅ LLM 프로젝트 질문 {len(llm_questions)}개 생성 완료")
+                    if self._langchain_gateway:
+                        type_label = "기술" if interview_type == "technical" else "인성"
+                        system_prompt = (
+                            "당신은 기술 면접 전문가입니다. 이력서와 채용공고를 바탕으로 기술 면접 질문들을 JSON 배열로만 생성합니다."
+                            if interview_type == "technical"
+                            else "당신은 인성 면접 전문가입니다. 이력서를 바탕으로 인성 면접 질문들을 JSON 배열로만 생성합니다."
+                        )
+                        feedback_block = (
+                            f"\n참고 - 이전 면접 피드백:\n{feedback_text[:800]}"
+                            if feedback_text
+                            else ""
+                        )
+                        resume_trim = (
+                            resume_text[:800] + "..." if len(resume_text) > 800 else resume_text
+                        )
+                        posting_trim = (
+                            posting_text[:800] + "..." if len(posting_text) > 800 else posting_text
+                        )
+                        settings = get_settings()
+                        chain = self._langchain_gateway.create_chain(
+                            INTERVIEW_BATCH_PROMPT,
+                            system_prompt=system_prompt,
+                            temperature=settings.llm_temperature_interview_question,
+                            max_tokens=settings.llm_max_tokens_interview * 2,
+                        )
+                        result_str = await chain.ainvoke(
+                            {
+                                "resume": resume_trim,
+                                "posting": posting_trim,
+                                "feedback_block": feedback_block,
+                                "interview_type": type_label,
+                                "count": llm_count,
+                            }
+                        )
+                        llm_questions = _parse_interview_json_list(result_str)[:llm_count]
+                        logger.info(
+                            f"✅ LCEL 체인으로 프로젝트 질문 {len(llm_questions)}개 생성 완료"
+                        )
+                    else:
+                        llm_questions = await self.llm.generate_interview_questions_batch(
+                            resume_text=resume_text,
+                            posting_text=posting_text,
+                            interview_type=interview_type,
+                            count=llm_count,
+                            user_id=user_id,
+                            previous_feedback=feedback_text or None,
+                        )
+                        logger.info(f"✅ LLM 프로젝트 질문 {len(llm_questions)}개 생성 완료")
                 except Exception as llm_err:
                     # LLM 실패 시 템플릿으로 폴백
                     logger.warning(f"LLM 질문 생성 실패 → 템플릿 폴백: {llm_err}")
