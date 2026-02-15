@@ -75,7 +75,10 @@ def get_services():
 
     if llm_service is None:
         settings = get_settings()
-        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
+        raw_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = (raw_key.strip() if isinstance(raw_key, str) and raw_key else raw_key) or None
+        if api_key == "":
+            api_key = None
         llm_service = LLMService(api_key=api_key)
         vectordb_service = VectorDBService(
             api_key=api_key,
