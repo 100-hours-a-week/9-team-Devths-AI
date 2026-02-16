@@ -23,9 +23,9 @@ from app.prompts import (
     SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
     SYSTEM_RAG_CHAT,
-    create_feedback_prompt,
     create_followup_prompt,
 )
+from app.prompts.interview import create_feedback_prompt
 
 from .example_selector import get_few_shot_for_general
 from .interview_templates import InterviewTemplateService

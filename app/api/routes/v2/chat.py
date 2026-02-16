@@ -18,7 +18,6 @@ from app.api.routes.v2._helpers import get_services, get_session_key
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
-    create_feedback_prompt,
     create_tech_followup_prompt,
     format_conversation_history,
     format_followup_question_label,
@@ -27,6 +26,7 @@ from app.prompts import (
     get_system_tech_interview,
     load_prompt_yaml,
 )
+from app.prompts.interview import create_feedback_prompt
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
