@@ -21,6 +21,8 @@ from app.prompts import (
     create_tech_followup_prompt,
     create_tech_interview_init_prompt,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     get_extract_title_prompt,
     get_system_tech_interview,
 )
@@ -497,7 +499,7 @@ async def generate_chat_stream(
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
-                                f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
+                                f"{format_main_question_label(1)}{newline}{first_q.question}"
                             )
                             for char in question_text:
                                 yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
@@ -596,7 +598,9 @@ async def generate_chat_stream(
                                 )
                                 session.phase = "followup"
 
-                                followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
+                                followup_header = format_followup_question_label(
+                                    current_q_id, current_q.current_depth
+                                )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 for char in followup_text:
                                     yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
@@ -624,7 +628,7 @@ async def generate_chat_stream(
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
+                            question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
                             for char in question_text:
                                 yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
