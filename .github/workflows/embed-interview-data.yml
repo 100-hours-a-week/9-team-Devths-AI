@@ -1,0 +1,54 @@
+# 면접 데이터셋을 운영/스테이징 Chroma에 임베딩 (수동 실행)
+# 전제: Chroma 서버가 GitHub runner에서 TCP 접근 가능 (공인 IP + 방화벽 허용 또는 self-hosted runner)
+# Secrets: CHROMA_SERVER_HOST, CHROMA_SERVER_PORT, GEMINI_API_KEY (또는 GOOGLE_API_KEY)
+
+name: Embed Interview Data to Chroma
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_file:
+        description: "데이터 파일 (data/interview_dataset_valid.json 또는 train)"
+        required: false
+        default: "data/interview_dataset_valid.json"
+        type: string
+
+env:
+  PYTHON_VERSION: "3.10"
+
+jobs:
+  embed:
+    name: Embed interview dataset
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME/.local/bin" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        working-directory: .
+        run: poetry install --no-interaction
+
+      - name: Run embed script
+        working-directory: .
+        env:
+          CHROMA_SERVER_HOST: ${{ secrets.CHROMA_SERVER_HOST }}
+          CHROMA_SERVER_PORT: ${{ secrets.CHROMA_SERVER_PORT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INTERVIEW_DATASET_FILE: ${{ inputs.dataset_file }}
+        run: |
+          if [ -z "$CHROMA_SERVER_HOST" ] || [ -z "$GEMINI_API_KEY" ]; then
+            echo "CHROMA_SERVER_HOST and GEMINI_API_KEY (or GOOGLE_API_KEY) must be set in repository Secrets."
+            exit 1
+          fi
+          poetry run python scripts/embed_interview_dataset.py --file "$INTERVIEW_DATASET_FILE"
