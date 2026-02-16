@@ -23,9 +23,11 @@ from app.prompts import (
     SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
     SYSTEM_RAG_CHAT,
+    create_feedback_prompt,
     create_followup_prompt,
 )
 
+from .example_selector import get_few_shot_for_general
 from .interview_templates import InterviewTemplateService
 from .llm_service import LLMService
 from .ocr_service import OCRService
@@ -315,6 +317,20 @@ class RAGService:
 
             # System prompt for job search assistant (from prompts module)
             system_prompt = SYSTEM_RAG_CHAT if context else SYSTEM_GENERAL_CHAT
+
+            # 평시 질의응답: 사용자 질문과 유사한 few-shot 예제 추가 (SemanticSimilarityExampleSelector)
+            if not context and system_prompt == SYSTEM_GENERAL_CHAT:
+                try:
+                    few_shot = await get_few_shot_for_general(self.vectordb, user_message, k=2)
+                    if few_shot:
+                        system_prompt = (
+                            system_prompt.rstrip()
+                            + "\n\n## 추가 유사 예시 (참고)\n\n"
+                            + few_shot
+                            + "\n\n위와 같은 톤으로 답변해주세요."
+                        )
+                except Exception as e:
+                    logger.debug("Few-shot general selection skipped: %s", e)
 
             # Select model
             if model == "vllm" and self.vllm:
@@ -681,19 +697,8 @@ class RAGService:
             Evaluation and feedback chunks
         """
         try:
-            prompt = f"""면접 질문과 답변을 평가하고 피드백을 제공해주세요.
-
-질문: {question}
-
-답변: {answer}
-
-다음 항목에 대해 피드백해주세요:
-1. 좋은 점 (good_points)
-2. 개선할 점 (improvements)
-3. 모범 답안 예시 (example_answer)
-
-친절하고 건설적으로 피드백해주세요."""
-
+            evaluation_content = f"질문: {question}\n\n답변: {answer}"
+            prompt = create_feedback_prompt(evaluation_content)
             system_prompt = (
                 "당신은 면접 평가 전문가입니다. 답변을 분석하고 건설적인 피드백을 제공하세요."
             )
