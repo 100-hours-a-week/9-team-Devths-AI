@@ -14,6 +14,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+from app.prompts.loader import load_prompt_yaml
+
 logger = logging.getLogger(__name__)
 
 
@@ -296,6 +298,49 @@ class LangChainLLMGateway:
             messages.append(("system", system_prompt))
 
         messages.append(("human", prompt_template))
+
+        prompt = ChatPromptTemplate.from_messages(messages)
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
+
+    def create_chain_from_yaml(
+        self,
+        domain: str,
+        name: str,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Create a chain from a YAML prompt file (system + human, optional ai).
+
+        Loads templates/{domain}/{name}.yaml and builds ChatPromptTemplate
+        from system/human/ai keys. Variable substitution is done via ainvoke(input_dict).
+
+        Args:
+            domain: Subdirectory name (e.g. interview, chat).
+            name: File name without extension.
+            temperature: Optional sampling temperature.
+            max_tokens: Optional max output tokens.
+
+        Returns:
+            LangChain chain (Runnable). ainvoke(input_dict) returns str.
+        """
+        d = load_prompt_yaml(domain, name)
+        messages = []
+        if d.get("system"):
+            messages.append(("system", d["system"]))
+        messages.append(("human", d["human"]))
+        if d.get("ai"):
+            messages.append(("ai", d["ai"]))
 
         prompt = ChatPromptTemplate.from_messages(messages)
 

@@ -19,12 +19,12 @@ from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
     create_tech_followup_prompt,
-    create_tech_interview_init_prompt,
     format_conversation_history,
     format_followup_question_label,
     format_main_question_label,
     get_extract_title_prompt,
     get_system_tech_interview,
+    load_prompt_yaml,
 )
 from app.schemas.chat import (
     ChatMode,
@@ -433,13 +433,13 @@ async def generate_chat_stream(
                 job_posting_ocr = request.context.job_posting_ocr if request.context else None
                 portfolio_text = request.context.portfolio_text if request.context else None
 
-                init_prompt = create_tech_interview_init_prompt(
+                init_prompts = load_prompt_yaml("interview", "tech_interview_init")
+                system_prompt = init_prompts["system"]
+                init_prompt = init_prompts["human"].format(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
                     portfolio_text=portfolio_text or context or "정보 없음",
                 )
-
-                system_prompt = get_system_tech_interview()
 
                 if model_choice == "vllm" and rag.vllm:
                     full_response = ""

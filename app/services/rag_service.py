@@ -578,11 +578,6 @@ class RAGService:
                 try:
                     if self._langchain_gateway:
                         type_label = "기술" if interview_type == "technical" else "인성"
-                        system_prompt = (
-                            "당신은 기술 면접 전문가입니다. 이력서와 채용공고를 바탕으로 기술 면접 질문들을 JSON 배열로만 생성합니다."
-                            if interview_type == "technical"
-                            else "당신은 인성 면접 전문가입니다. 이력서를 바탕으로 인성 면접 질문들을 JSON 배열로만 생성합니다."
-                        )
                         feedback_block = (
                             f"\n참고 - 이전 면접 피드백:\n{feedback_text[:800]}"
                             if feedback_text
@@ -595,9 +590,9 @@ class RAGService:
                             posting_text[:800] + "..." if len(posting_text) > 800 else posting_text
                         )
                         settings = get_settings()
-                        chain = self._langchain_gateway.create_chain(
-                            INTERVIEW_BATCH_PROMPT,
-                            system_prompt=system_prompt,
+                        chain = self._langchain_gateway.create_chain_from_yaml(
+                            "interview",
+                            "interview_batch",
                             temperature=settings.llm_temperature_interview_question,
                             max_tokens=settings.llm_max_tokens_interview * 2,
                         )
