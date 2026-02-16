@@ -16,14 +16,13 @@ from app.config.dependencies import get_legacy_task_storage, get_session_store
 from app.config.settings import get_settings
 from app.prompts import (
     create_tech_followup_prompt,
-    create_tech_interview_init_prompt,
     format_conversation_history,
     format_followup_question_label,
     format_main_question_label,
     get_extract_title_prompt,
     get_opening_prompt,
-    # 기술 면접 5단계 프롬프트
     get_system_tech_interview,
+    load_prompt_yaml,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
@@ -935,15 +934,13 @@ async def generate_chat_stream(
                 job_posting_ocr = request.context.job_posting_ocr if request.context else None
                 portfolio_text = request.context.portfolio_text if request.context else None
 
-                # 5개 질문 세트 생성 프롬프트
-                init_prompt = create_tech_interview_init_prompt(
+                init_prompts = load_prompt_yaml("interview", "tech_interview_init")
+                system_prompt = init_prompts["system"]
+                init_prompt = init_prompts["human"].format(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
                     portfolio_text=portfolio_text or context or "정보 없음",
                 )
-
-                # 방안 2: 비스트리밍으로 JSON 생성 (빠름) → 질문을 스트리밍으로 출력 (타이핑 효과)
-                system_prompt = get_system_tech_interview()
 
                 if model_choice == "vllm" and rag.vllm:
                     # vLLM은 기존 스트리밍 방식 유지 (비스트리밍 미지원)
