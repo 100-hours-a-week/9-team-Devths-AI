@@ -18,6 +18,8 @@ from app.prompts import (
     create_tech_followup_prompt,
     create_tech_interview_init_prompt,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     get_extract_title_prompt,
     get_opening_prompt,
     # 기술 면접 5단계 프롬프트
@@ -1009,11 +1011,11 @@ async def generate_chat_stream(
                         await session_store.set(session_key, new_session.model_dump())
                         safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
 
-                        # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
+                        # 첫 번째 질문 출력 (헤더: 1.) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
-                                f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
+                                f"{format_main_question_label(1)}{newline}{first_q.question}"
                             )
                             # 방안 2: 질문을 한 글자씩 스트리밍 출력 (타이핑 효과)
                             for char in question_text:
@@ -1110,7 +1112,7 @@ async def generate_chat_stream(
                             if followup_data.get("should_continue", True) and followup_data.get(
                                 "followup"
                             ):
-                                # 꼬리질문 출력 (헤더: [기술면접 2-1/5] 형식)
+                                # 꼬리질문 출력 (헤더: 1-1, 1-2 형식)
                                 followup_q = followup_data["followup"]["question"]
                                 current_q.conversation.append(
                                     {
@@ -1120,8 +1122,9 @@ async def generate_chat_stream(
                                 )
                                 session.phase = "followup"
 
-                                # 꼬리질문 헤더: [기술면접 {질문번호}-{꼬리질문번호}/5] - 타이핑 효과
-                                followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
+                                followup_header = format_followup_question_label(
+                                    current_q_id, current_q.current_depth
+                                )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 # 한 글자씩 스트리밍 출력 (타이핑 효과)
                                 for char in followup_text:
@@ -1157,8 +1160,8 @@ async def generate_chat_stream(
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            # 다음 질문 출력 (헤더: [기술면접 2/5] 형식) - 타이핑 효과
-                            question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
+                            # 다음 질문 출력 (헤더: 2. 형식) - 타이핑 효과
+                            question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
                             # 한 글자씩 스트리밍 출력 (타이핑 효과)
                             for char in question_text:
