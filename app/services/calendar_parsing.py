@@ -49,9 +49,9 @@ class CalendarParsingService:
             api_key: Google API key (uses GOOGLE_API_KEY env var if not provided)
         """
         # Configure Gemini API
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)

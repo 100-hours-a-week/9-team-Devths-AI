@@ -53,12 +53,12 @@ class LangChainLLMGateway:
         if google_api_key and google_api_key not in keys:
             keys.append(google_api_key)
         if not keys:
-            env_key = os.getenv("GOOGLE_API_KEY")
+            env_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
             if env_key:
                 keys.append(env_key)
 
         if not keys:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
         # 랜덤 순서로 섞기 (분산 처리)
         random.shuffle(keys)
@@ -358,14 +358,19 @@ class LangChainLLMGateway:
     def create_chat_chain(
         self,
         system_prompt: str | None = None,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
         """Create a chat chain with message history support.
 
         Args:
             system_prompt: Optional system instructions.
+            temperature: Optional sampling temperature (binds to LLM).
+            max_tokens: Optional max output tokens (binds to LLM).
 
         Returns:
-            LangChain chat chain (Runnable).
+            LangChain chat chain (Runnable). ainvoke({"messages": [...]}) / astream({"messages": [...]}).
         """
         messages = []
 
@@ -375,7 +380,17 @@ class LangChainLLMGateway:
         messages.append(MessagesPlaceholder(variable_name="messages"))
 
         prompt = ChatPromptTemplate.from_messages(messages)
-        return prompt | self._llm | self._output_parser
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
 
     async def health_check(self) -> bool:
         """Check if the gateway is healthy.
