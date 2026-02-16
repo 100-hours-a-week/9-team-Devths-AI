@@ -53,14 +53,14 @@ class LLMService:
             if add_key and add_key not in api_keys:
                 api_keys.append(add_key)
         if not api_keys:
-            env_key = (os.getenv("GOOGLE_API_KEY") or "").strip()
+            env_key = (os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "").strip()
             if env_key:
                 api_keys = [env_key]
 
         if not api_keys:
             raise ValueError(
-                "GOOGLE_API_KEY environment variable is required. "
-                "배포 환경(서버/도커/CI)에서 GOOGLE_API_KEY가 설정되어 있는지 확인하세요."
+                "GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다. "
+                "배포 환경(서버/도커/CI)에서 설정되어 있는지 확인하세요."
             )
 
         # 각 키별 Gemini 클라이언트 생성
@@ -83,6 +83,16 @@ class LLMService:
         clients = list(self._clients)
         self._random.shuffle(clients)
         return clients
+
+    @staticmethod
+    def _is_api_key_error(exc: BaseException) -> bool:
+        """API 키 관련 오류(재시도 가능) 여부."""
+        err_str = str(exc)
+        return (
+            "API key not valid" in err_str
+            or "INVALID_ARGUMENT" in err_str
+            or "API_KEY_INVALID" in err_str
+        )
 
     def _langfuse_trace_and_generation(
         self,
@@ -213,10 +223,22 @@ class LLMService:
 위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
             final_message_for_trace = final_message
 
-            # Create contents using types.Content
-            contents = [
+            # Build contents: history (if any) + current user message for context
+            contents: list[types.Content] = []
+            if history:
+                for msg in history:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    gemini_role = "model" if role == "assistant" else "user"
+                    contents.append(
+                        types.Content(
+                            role=gemini_role,
+                            parts=[types.Part.from_text(text=content)],
+                        )
+                    )
+            contents.append(
                 types.Content(role="user", parts=[types.Part.from_text(text=final_message)])
-            ]
+            )
 
             # Create config (중앙화 설정 사용)
             config = types.GenerateContentConfig(
@@ -227,35 +249,60 @@ class LLMService:
                 system_instruction=system_prompt if system_prompt else None,
             )
 
-            # Generate streaming response
-            response = self._get_client().models.generate_content_stream(
-                model=self.model_name, contents=contents, config=config
-            )
+            # 여러 API 키 중 유효한 클라이언트로 스트리밍 시도 (키 오류 시 다음 키로 재시도)
+            last_error: BaseException | None = None
+            for client in self._get_shuffled_clients():
+                try:
+                    response = client.models.generate_content_stream(
+                        model=self.model_name, contents=contents, config=config
+                    )
+                    for chunk in response:
+                        if hasattr(chunk, "text") and chunk.text:
+                            full_response += chunk.text
+                            yield chunk.text
+                    self._record_token_usage(response, self.model_name)
+                    if trace is not None:
+                        create_generation(
+                            trace=trace,
+                            name="gemini_stream",
+                            model=self.model_name,
+                            input_text=final_message_for_trace,
+                            output_text=full_response,
+                            metadata={"streaming": True},
+                        )
+                    return
+                except Exception as e:
+                    if self._is_api_key_error(e):
+                        last_error = e
+                        logger.warning(
+                            "Gemini API key rejected, trying next key if available: %s",
+                            type(e).__name__,
+                        )
+                        continue
+                    raise
 
-            # Stream chunks
-            for chunk in response:
-                if hasattr(chunk, "text") and chunk.text:
-                    full_response += chunk.text
-                    yield chunk.text
-
-            # 토큰 사용량 기록 (스트리밍 완료 후 response 객체에서 확인)
-            self._record_token_usage(response, self.model_name)
-
-            # Langfuse generation 기록 (스트리밍 완료 후)
-            if trace is not None:
-                create_generation(
-                    trace=trace,
-                    name="gemini_stream",
-                    model=self.model_name,
-                    input_text=final_message_for_trace,
-                    output_text=full_response,
-                    metadata={"streaming": True},
+            # 모든 키로 실패한 경우
+            if last_error is not None:
+                logger.error("Error generating LLM response (all keys failed): %s", last_error)
+                self._record_error(last_error, self.model_name)
+                if trace is not None:
+                    with contextlib.suppress(Exception):
+                        trace["client"].create_event(
+                            trace_context={"trace_id": trace["trace_id"]},
+                            name="error",
+                            level="ERROR",
+                            metadata={"error": str(last_error)},
+                        )
+                yield (
+                    "죄송합니다. Gemini API 키 오류가 발생했습니다. "
+                    "배포 환경(서버/도커)의 GOOGLE_API_KEY 또는 GEMINI_API_KEY가 유효한지 확인해 주세요."
                 )
+            return
 
         except Exception as e:
-            logger.error(f"Error generating LLM response: {e}")
-            self._record_error(e, self.model_name)  # 에러 메트릭 기록
-
+            if not self._is_api_key_error(e):
+                logger.error(f"Error generating LLM response: {e}")
+                self._record_error(e, self.model_name)
             if trace is not None:
                 with contextlib.suppress(Exception):
                     trace["client"].create_event(
@@ -265,14 +312,10 @@ class LLMService:
                         metadata={"error": str(e)},
                     )
             err_str = str(e)
-            if (
-                "API key not valid" in err_str
-                or "INVALID_ARGUMENT" in err_str
-                or "API_KEY_INVALID" in err_str
-            ):
+            if self._is_api_key_error(e):
                 yield (
                     "죄송합니다. Gemini API 키 오류가 발생했습니다. "
-                    "배포 환경(서버/도커)의 GOOGLE_API_KEY가 유효한지 확인해 주세요."
+                    "배포 환경(서버/도커)의 GOOGLE_API_KEY 또는 GEMINI_API_KEY가 유효한지 확인해 주세요."
                 )
             else:
                 yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {err_str}"

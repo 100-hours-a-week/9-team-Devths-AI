@@ -7,7 +7,7 @@ Centralized configuration management with environment variable support.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     google_api_key: str | None = Field(
         default=None,
         description="Google API key for Gemini (쉼표 구분으로 여러 키 입력 가능)",
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
         default="gemini-3-flash-preview",

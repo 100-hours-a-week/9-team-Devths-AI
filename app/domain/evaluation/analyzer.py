@@ -42,9 +42,9 @@ class InterviewAnalyzer:
             model_name: Gemini model for evaluation.
             thinking_level: Thinking depth (NONE, LOW, MEDIUM, HIGH).
         """
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY가 필요합니다.")
 
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name

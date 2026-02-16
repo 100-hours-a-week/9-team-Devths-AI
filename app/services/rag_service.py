@@ -16,6 +16,8 @@ import logging
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from langchain_core.messages import AIMessage, HumanMessage
+
 from app.config.settings import get_settings
 from app.prompts import (
     SYSTEM_FOLLOWUP,
@@ -325,20 +327,47 @@ class RAGService:
                 ):
                     yield chunk
             elif self._langchain_gateway:
-                # LCEL 체인: RAG context + 질문 → StrOutputParser 스트리밍
+                # LCEL 체인: history 있으면 create_chat_chain(MessagesPlaceholder), 없으면 create_chain
                 logger.info("Using Gemini model (LCEL chain)")
                 settings = get_settings()
-                chain = self._langchain_gateway.create_chain(
-                    RAG_QNA_PROMPT,
-                    system_prompt=system_prompt,
-                    temperature=settings.llm_temperature_chat,
-                    max_tokens=settings.llm_max_tokens_chat,
-                )
-                async for chunk in chain.astream(
-                    {"context": context or "없음", "question": user_message}
-                ):
-                    if chunk:
-                        yield chunk
+                if history:
+                    final_message = user_message
+                    if context:
+                        final_message = f"""관련 정보:
+{context or "없음"}
+
+질문: {user_message}
+
+위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
+                    lc_messages: list[HumanMessage | AIMessage] = []
+                    for msg in history:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        if role == "assistant":
+                            lc_messages.append(AIMessage(content=content))
+                        else:
+                            lc_messages.append(HumanMessage(content=content))
+                    lc_messages.append(HumanMessage(content=final_message))
+                    chain = self._langchain_gateway.create_chat_chain(
+                        system_prompt=system_prompt,
+                        temperature=settings.llm_temperature_chat,
+                        max_tokens=settings.llm_max_tokens_chat,
+                    )
+                    async for chunk in chain.astream({"messages": lc_messages}):
+                        if chunk:
+                            yield chunk
+                else:
+                    chain = self._langchain_gateway.create_chain(
+                        RAG_QNA_PROMPT,
+                        system_prompt=system_prompt,
+                        temperature=settings.llm_temperature_chat,
+                        max_tokens=settings.llm_max_tokens_chat,
+                    )
+                    async for chunk in chain.astream(
+                        {"context": context or "없음", "question": user_message}
+                    ):
+                        if chunk:
+                            yield chunk
             else:
                 logger.info("Using Gemini model")
                 async for chunk in self.llm.generate_response(
