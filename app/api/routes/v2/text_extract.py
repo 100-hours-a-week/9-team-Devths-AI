@@ -23,6 +23,7 @@ from app.schemas.text_extract import (
     TextExtractResult,
 )
 from app.services.cloudwatch_service import CloudWatchService
+from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, sanitize_log_input
 
 logger = logging.getLogger(__name__)
@@ -257,6 +258,17 @@ async def text_extract(
                             f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료: "
                             f"{len(extracted_text)}자 (페이지: {len(pages)})"
                         )
+                elif doc_input.url:
+                    logger.info("   → URL 입력: %s", doc_input.url[:80])
+                    extracted_text = await WebLoaderService.extract_text_from_url(doc_input.url)
+                    pages = None
+                    if extracted_text:
+                        logger.info(
+                            "   ✅ [WebLoader] URL 텍스트 추출 완료: %d자",
+                            len(extracted_text),
+                        )
+                    else:
+                        logger.warning("   ⚠️ URL에서 텍스트를 추출할 수 없습니다")
                 else:
                     extracted_text = doc_input.text or ""
                     pages = None

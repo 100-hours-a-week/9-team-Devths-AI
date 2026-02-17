@@ -13,7 +13,8 @@ class DocumentInput(BaseModel):
     입력 방식:
     1. 파일 업로드: file_id + s3_key + file_type
     2. 텍스트 입력: text
-    3. 혼합 불가: s3_key와 text를 동시에 사용할 수 없음
+    3. URL 입력: url (웹페이지에서 텍스트 추출)
+    4. 혼합 불가: s3_key, text, url 중 하나만 사용
     """
 
     file_id: int | None = Field(None, description="파일 ID (파일 업로드 시)", example=23)
@@ -32,23 +33,30 @@ class DocumentInput(BaseModel):
         description="직접 입력한 텍스트 (텍스트 입력 시)",
         example="이름: 홍길동\n경력: 3년\n기술스택: React, TypeScript...",
     )
+    url: str | None = Field(
+        None,
+        description="웹페이지 URL (URL에서 텍스트 추출 시, 예: 'https://www.saramin.co.kr/...')",
+        example="https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=12345",
+    )
 
     @validator("text", always=True)
     def validate_input_source(cls, v, values):
-        """s3_key 또는 text 중 하나는 필수"""
+        """s3_key, text, url 중 하나는 필수"""
         s3_key = values.get("s3_key")
+        url = values.get("url")
 
         # 빈 문자열은 None으로 처리
         s3_key = s3_key if s3_key else None
+        url = url if url else None
         text = v if v else None
 
-        # 둘 다 없으면 에러
-        if not text and not s3_key:
-            raise ValueError("s3_key 또는 text 중 하나는 필수입니다")
+        sources = [s for s in [s3_key, text, url] if s]
 
-        # 둘 다 있으면 에러
-        if text and s3_key:
-            raise ValueError("s3_key와 text를 동시에 사용할 수 없습니다")
+        if len(sources) == 0:
+            raise ValueError("s3_key, text, url 중 하나는 필수입니다")
+
+        if len(sources) > 1:
+            raise ValueError("s3_key, text, url 중 하나만 사용할 수 있습니다")
 
         return text
 
@@ -106,6 +114,15 @@ class DocumentInput(BaseModel):
             # S3 URL 또는 키 형식 검증
             if not (url_str.startswith("http") or url_str.startswith("s3://") or "/" in url_str):
                 raise ValueError("s3_key는 S3 URL 또는 키 형식이어야 합니다")
+        return v
+
+    @validator("url")
+    def validate_url(cls, v):
+        """URL 형식 검증"""
+        if v:
+            url_str = str(v).strip()
+            if not url_str.startswith(("http://", "https://")):
+                raise ValueError("url은 http:// 또는 https://로 시작해야 합니다")
         return v
 
     @validator("text")
@@ -205,6 +222,28 @@ class TextExtractRequest(BaseModel):
                             "s3_key": None,
                             "file_type": None,
                             "text": "카카오 백엔드 개발자 채용\\n자격요건: Java, Spring...",
+                        },
+                    },
+                },
+                {
+                    "name": "URL 입력 방식 (채용공고 URL)",
+                    "value": {
+                        "task_id": 4,
+                        "model": "auto",
+                        "room_id": 23,
+                        "user_id": 12,
+                        "resume": {
+                            "file_id": 23,
+                            "s3_key": "uploads/2026/01/9eb3907b-resume.pdf",
+                            "file_type": "application/pdf",
+                            "text": None,
+                        },
+                        "job_posting": {
+                            "file_id": None,
+                            "s3_key": None,
+                            "file_type": None,
+                            "text": None,
+                            "url": "https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=12345",
                         },
                     },
                 },

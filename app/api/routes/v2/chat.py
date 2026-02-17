@@ -35,6 +35,7 @@ from app.schemas.chat import (
 )
 from app.services.cloudwatch_service import CloudWatchService
 from app.services.example_selector import get_few_shot_for_personality
+from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
@@ -111,6 +112,13 @@ async def generate_chat_stream(
         try:
             history_dict = []
             user_message = request.message or ""
+
+            # URL 감지 및 웹 컨텍스트 추출 (ADR-059)
+            user_message, web_context = await WebLoaderService.extract_chat_context(user_message)
+            if web_context:
+                logger.info("🌐 URL 웹 컨텍스트 추출 완료: %d자", len(web_context))
+                user_message = f"참고 URL 내용:\n{web_context}\n\n사용자 질문: {user_message}"
+
             is_analysis = any(
                 keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"]
             )
