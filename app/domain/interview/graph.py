@@ -2,77 +2,32 @@
 LangGraph Interview Workflow Implementation.
 
 Implements the interview state machine using LangGraph.
+Uses prompt templates from app.prompts.interview (tech_interview_init, tech_followup, interview_report).
 """
 
 import json
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from langgraph.graph import END, StateGraph
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+from app.prompts.interview import (
+    create_interview_report_prompt,
+    create_tech_followup_prompt,
+    create_tech_interview_init_prompt,
+    format_conversation_history,
+)
 
 from .entities import InterviewState
 
+if TYPE_CHECKING:
+    from app.infrastructure.session.base import BaseSessionStore
+
 logger = logging.getLogger(__name__)
 
-
-# Interview Prompts
-TECH_INTERVIEW_INIT_PROMPT = """당신은 기술 면접관입니다. 지원자의 이력서와 채용공고를 바탕으로 5개의 기술 면접 질문을 생성해주세요.
-
-이력서:
-{resume_text}
-
-채용공고:
-{job_posting_text}
-
-{portfolio_section}
-
-다음 JSON 형식으로 5개의 질문을 생성해주세요:
-{{
-    "questions": [
-        {{
-            "id": 1,
-            "category": "cs_fundamentals|programming|system_design|problem_solving|experience",
-            "question": "질문 내용"
-        }},
-        ...
-    ]
-}}
-
-질문 생성 시 고려사항:
-1. 이력서의 기술 스택과 경험을 기반으로 질문
-2. 채용공고의 요구사항에 맞는 질문
-3. 기초부터 심화까지 난이도 조절
-4. 실무 경험을 물어보는 질문 포함"""
-
-TECH_FOLLOWUP_PROMPT = """당신은 기술 면접관입니다. 지원자의 답변을 듣고 꼬리질문을 생성해주세요.
-
-원래 질문: {original_question}
-지원자 답변: {user_answer}
-현재 꼬리질문 깊이: {current_depth}/3
-
-다음 중 하나를 선택하세요:
-1. 답변이 충분히 깊이 있다면 "다음 질문으로 넘어갑니다"라고 말하세요.
-2. 더 깊은 이해가 필요하다면 관련 꼬리질문을 생성하세요.
-
-응답 형식:
-- 꼬리질문을 할 경우: 바로 질문만 작성
-- 다음 질문으로 넘어갈 경우: "NEXT_QUESTION" 태그를 포함"""
-
-INTERVIEW_REPORT_PROMPT = """당신은 기술 면접 평가자입니다. 면접 내용을 분석하고 평가 리포트를 작성해주세요.
-
-면접 대화 내용:
-{conversation}
-
-다음 항목을 포함한 평가 리포트를 작성해주세요:
-1. 전체적인 평가 (점수: 1-10)
-2. 강점 분석
-3. 개선이 필요한 부분
-4. 질문별 상세 피드백
-5. 향후 학습 추천
-
-리포트는 한국어로 작성하고, 구체적이고 건설적인 피드백을 제공해주세요."""
+QUESTION_HISTORY_KEY_PREFIX = "question_history:"
+QUESTION_HISTORY_TTL_SEC = 24 * 3600  # 24시간
 
 
 def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
@@ -91,14 +46,11 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
         """Generate 5 interview questions based on resume/job posting."""
         logger.info("Generating interview questions...")
 
-        portfolio_section = ""
-        if state.get("portfolio_text"):
-            portfolio_section = f"\n포트폴리오:\n{state['portfolio_text']}"
-
-        prompt = TECH_INTERVIEW_INIT_PROMPT.format(
+        prompt = create_tech_interview_init_prompt(
             resume_text=state.get("resume_text", ""),
             job_posting_text=state.get("job_posting_text", ""),
-            portfolio_section=portfolio_section,
+            portfolio_text=state.get("portfolio_text", "") or "",
+            previous_questions=state.get("previous_questions", []),
         )
 
         response = await llm_gateway.generate(
@@ -106,27 +58,56 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
             temperature=0.7,
         )
 
-        # Parse JSON response
         questions = []
         try:
             start = response.find("{")
             end = response.rfind("}") + 1
             if start != -1 and end > start:
                 data = json.loads(response[start:end])
-                questions = data.get("questions", [])
+                raw = data.get("questions", [])
+                for q in raw:
+                    questions.append(
+                        {
+                            "id": q.get("id", len(questions) + 1),
+                            "category": q.get("category", q.get("category_name", "general")),
+                            "category_name": q.get("category_name", q.get("category", "일반")),
+                            "question": q.get("question", ""),
+                            "is_completed": False,
+                            "current_depth": 0,
+                            "max_depth": 3,
+                            "conversation": [],
+                        }
+                    )
         except Exception as e:
             logger.error(f"Failed to parse questions JSON: {e}")
-            # Fallback: create default questions
             questions = [
-                {"id": i + 1, "category": "general", "question": f"질문 {i + 1}"} for i in range(5)
+                {
+                    "id": i + 1,
+                    "category": "general",
+                    "category_name": "일반",
+                    "question": f"질문 {i + 1}",
+                    "is_completed": False,
+                    "current_depth": 0,
+                    "max_depth": 3,
+                    "conversation": [],
+                }
+                for i in range(5)
             ]
 
-        # Add state fields to questions
-        for q in questions:
-            q["is_completed"] = False
-            q["current_depth"] = 0
-            q["max_depth"] = 3
-            q["conversation"] = []
+        if len(questions) < 5:
+            for i in range(len(questions), 5):
+                questions.append(
+                    {
+                        "id": i + 1,
+                        "category": "general",
+                        "category_name": "일반",
+                        "question": f"질문 {i + 1}",
+                        "is_completed": False,
+                        "current_depth": 0,
+                        "max_depth": 3,
+                        "conversation": [],
+                    }
+                )
 
         logger.info(f"Generated {len(questions)} questions")
 
@@ -196,10 +177,14 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
                 "phase": "next_question",
             }
 
-        # Generate follow-up decision
-        prompt = TECH_FOLLOWUP_PROMPT.format(
+        conversation_history = format_conversation_history(question.get("conversation", []))
+        category_name = question.get("category_name") or question.get("category") or "일반"
+        prompt = create_tech_followup_prompt(
+            question_id=question.get("id", idx + 1),
+            category_name=category_name,
             original_question=question["question"],
-            user_answer=user_answer,
+            conversation_history=conversation_history,
+            last_answer=user_answer,
             current_depth=current_depth,
         )
 
@@ -208,8 +193,21 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
             temperature=0.7,
         )
 
-        # Check if should move to next question
-        if "NEXT_QUESTION" in response:
+        should_continue = True
+        followup_question = response
+        try:
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start != -1 and end > start:
+                data = json.loads(response[start:end])
+                should_continue = data.get("should_continue", True)
+                followup = data.get("followup")
+                if followup and isinstance(followup, dict):
+                    followup_question = followup.get("question", response)
+        except Exception:
+            pass
+
+        if not should_continue:
             question["is_completed"] = True
             return {
                 "questions": questions,
@@ -217,11 +215,10 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
                 "phase": "next_question",
             }
 
-        # Continue with follow-up
         return {
             "questions": questions,
             "messages": messages,
-            "response": response,
+            "response": followup_question,
             "phase": "followup",
             "current_depth": current_depth + 1,
         }
@@ -277,23 +274,24 @@ def create_interview_graph(llm_gateway: LangChainLLMGateway) -> StateGraph:
         logger.info("Generating interview report...")
 
         messages = state.get("messages", [])
-
-        # Format conversation
-        conversation_text = "\n".join(
+        qa_history = "\n".join(
             [
                 f"{'면접관' if m['role'] == 'interviewer' else '지원자'}: {m['content']}"
                 for m in messages
             ]
         )
 
-        prompt = INTERVIEW_REPORT_PROMPT.format(conversation=conversation_text)
+        prompt = create_interview_report_prompt(
+            qa_history=qa_history,
+            resume_text=state.get("resume_text", ""),
+            job_posting_text=state.get("job_posting_text", ""),
+        )
 
         response = await llm_gateway.generate(
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,  # Lower temperature for evaluation
+            temperature=0.3,
         )
 
-        # Parse evaluation if JSON
         evaluation = None
         try:
             start = response.find("{")
@@ -383,15 +381,52 @@ class InterviewWorkflow:
     def __init__(
         self,
         llm_gateway: LangChainLLMGateway,
+        session_store: "BaseSessionStore | None" = None,
     ):
         """Initialize interview workflow.
 
         Args:
             llm_gateway: LangChain LLM Gateway instance.
+            session_store: Optional session store for question history (중복 방지).
         """
         self._llm_gateway = llm_gateway
         self._graph = create_interview_graph(llm_gateway)
+        self._session_store = session_store
         logger.info("InterviewWorkflow initialized")
+
+    def _question_history_key(self, user_id: str) -> str:
+        return f"{QUESTION_HISTORY_KEY_PREFIX}{user_id}"
+
+    async def _load_previous_questions(self, user_id: str) -> list[str]:
+        if not self._session_store:
+            return []
+        key = self._question_history_key(user_id)
+        try:
+            data = await self._session_store.get(key)
+            if data and isinstance(data.get("questions"), list):
+                return list(data["questions"])
+        except Exception as e:
+            logger.warning("Failed to load question history for %s: %s", user_id, e)
+        return []
+
+    async def _save_question_history(self, user_id: str, new_questions: list[str]) -> None:
+        if not self._session_store or not new_questions:
+            return
+        key = self._question_history_key(user_id)
+        try:
+            existing = await self._session_store.get(key)
+            questions = (
+                list(existing["questions"]) if existing and existing.get("questions") else []
+            )
+            questions.extend(new_questions)
+            await self._session_store.set(
+                key,
+                {"questions": questions},
+                ttl=QUESTION_HISTORY_TTL_SEC,
+            )
+            logger.debug("Saved %d questions to history for user %s", len(new_questions), user_id)
+        except Exception as e:
+            logger.warning("Failed to save question history for %s: %s", user_id, e)
 
     async def start_interview(
         self,
@@ -401,6 +436,7 @@ class InterviewWorkflow:
         resume_text: str,
         job_posting_text: str,
         portfolio_text: str = "",
+        previous_questions: list[str] | None = None,
     ) -> InterviewState:
         """Start a new interview session.
 
@@ -411,10 +447,15 @@ class InterviewWorkflow:
             resume_text: Resume content.
             job_posting_text: Job posting content.
             portfolio_text: Portfolio content (optional).
+            previous_questions: Optional override; if None and session_store set, loads from store.
 
         Returns:
             Initial interview state with generated questions.
         """
+        if previous_questions is None and self._session_store:
+            previous_questions = await self._load_previous_questions(user_id)
+        previous_questions = previous_questions or []
+
         initial_state: InterviewState = {
             "session_id": session_id,
             "user_id": user_id,
@@ -430,9 +471,9 @@ class InterviewWorkflow:
             "response": "",
             "user_answer": "",
             "evaluation": None,
+            "previous_questions": previous_questions,
         }
 
-        # Run workflow until first question is asked
         config = {"configurable": {"thread_id": session_id}}
         result = await self._graph.ainvoke(initial_state, config)
 
@@ -452,15 +493,17 @@ class InterviewWorkflow:
         Returns:
             Updated interview state.
         """
-        # Update state with answer
         state["user_answer"] = user_answer
         state["phase"] = "questioning"
 
-        # Run evaluation and get next step
         config = {"configurable": {"thread_id": state["session_id"]}}
-
-        # Manually invoke evaluate_answer and follow the workflow
         result = await self._graph.ainvoke(state, config)
+
+        if result.get("phase") == "completed":
+            questions = result.get("questions") or []
+            question_texts = [q.get("question", "").strip() for q in questions if q.get("question")]
+            if question_texts and state.get("user_id"):
+                await self._save_question_history(state["user_id"], question_texts)
 
         return result
 
