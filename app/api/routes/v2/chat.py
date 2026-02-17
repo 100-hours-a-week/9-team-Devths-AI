@@ -483,6 +483,33 @@ async def generate_chat_stream(
 
                         questions_data = json.loads(json_str)
 
+                        # 인성 면접: Q1·Q2 고정 (LLM 출력과 무관하게 강제 적용)
+                        if interview_type == "behavior":
+                            fixed_q1_q2 = [
+                                {
+                                    "id": 1,
+                                    "category": "intro_self",
+                                    "category_name": "자기소개",
+                                    "question": "자기소개 해보세요.",
+                                    "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                                    "keywords": ["자기소개", "경력", "역량"],
+                                },
+                                {
+                                    "id": 2,
+                                    "category": "intro_motivation",
+                                    "category_name": "지원동기",
+                                    "question": "우리 회사를 지원하는 이유가 뭔가요?",
+                                    "intent": "지원 동기와 회사/직무 이해도 확인",
+                                    "keywords": ["지원동기", "회사이해", "직무"],
+                                },
+                            ]
+                            llm_questions = [
+                                q
+                                for q in questions_data.get("questions", [])
+                                if q.get("id", 0) >= 3
+                            ]
+                            questions_data["questions"] = fixed_q1_q2 + llm_questions
+
                         new_session = InterviewSession(
                             session_id=str(uuid.uuid4()),
                             interview_type=interview_type,
