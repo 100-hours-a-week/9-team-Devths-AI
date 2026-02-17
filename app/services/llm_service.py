@@ -133,6 +133,32 @@ class LLMService:
             # Langfuse 오류로 본 서비스가 죽지 않게 방어
             return
 
+    @staticmethod
+    def _to_langfuse_usage_details(usage_metadata: Any | None) -> dict[str, int] | None:
+        """Gemini usage_metadata -> Langfuse usage_details 변환.
+
+        Langfuse v3의 generation observation은 `usage_details={"prompt_tokens": int, "completion_tokens": int, ...}`
+        형태를 지원합니다.
+        """
+        if usage_metadata is None:
+            return None
+        try:
+            prompt_tokens = int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
+            completion_tokens = int(getattr(usage_metadata, "candidates_token_count", 0) or 0)
+            total_tokens = int(
+                getattr(usage_metadata, "total_token_count", 0)
+                or (prompt_tokens + completion_tokens)
+            )
+            if prompt_tokens <= 0 and completion_tokens <= 0 and total_tokens <= 0:
+                return None
+            return {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+        except Exception:
+            return None
+
     def _record_token_usage(self, response: Any, model_name: str) -> None:
         """CloudWatch에 토큰 사용량 기록"""
         try:
@@ -256,12 +282,22 @@ class LLMService:
                     response = client.models.generate_content_stream(
                         model=self.model_name, contents=contents, config=config
                     )
+                    last_chunk: Any | None = None
                     for chunk in response:
+                        last_chunk = chunk
                         if hasattr(chunk, "text") and chunk.text:
                             full_response += chunk.text
                             yield chunk.text
-                    self._record_token_usage(response, self.model_name)
+                    if last_chunk is not None:
+                        self._record_token_usage(last_chunk, self.model_name)
                     if trace is not None:
+                        usage_details = (
+                            self._to_langfuse_usage_details(
+                                getattr(last_chunk, "usage_metadata", None)
+                            )
+                            if last_chunk is not None
+                            else None
+                        )
                         create_generation(
                             trace=trace,
                             name="gemini_stream",
@@ -269,6 +305,7 @@ class LLMService:
                             input_text=final_message_for_trace,
                             output_text=full_response,
                             metadata={"streaming": True},
+                            usage_details=usage_details,
                         )
                     return
                 except Exception as e:
@@ -385,6 +422,9 @@ class LLMService:
 
             # Langfuse generation 기록
             if trace is not None:
+                usage_details = self._to_langfuse_usage_details(
+                    getattr(response, "usage_metadata", None)
+                )
                 create_generation(
                     trace=trace,
                     name="gemini_non_stream",
@@ -392,6 +432,7 @@ class LLMService:
                     input_text=final_message,
                     output_text=result_text,
                     metadata={"streaming": False},
+                    usage_details=usage_details,
                 )
 
             return result_text
