@@ -54,6 +54,22 @@ class Settings(BaseSettings):
         description="Gemini embedding model name (VectorDB 문서 설계 최종 선정)",
     )
 
+    # ============================================
+    # RAG / MMR Retrieval (RAGChain.retrieve_context)
+    # ============================================
+    rag_retrieval_k: int = Field(
+        default=3,
+        description="Number of documents to retrieve per collection (MMR)",
+    )
+    rag_fetch_k: int = Field(
+        default=20,
+        description="MMR candidate pool size per collection",
+    )
+    rag_lambda_mult: float = Field(
+        default=0.5,
+        description="MMR diversity (0=diverse, 1=relevant). 0.5 balanced",
+    )
+
     @property
     def all_google_api_keys(self) -> list[str]:
         """Google API 키를 리스트로 반환 (쉼표 구분 분산 처리)."""

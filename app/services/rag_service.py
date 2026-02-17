@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.config.settings import get_settings
+from app.domain.chat.chains import RAGChain
 from app.prompts import (
     SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
@@ -125,6 +126,7 @@ class RAGService:
         vllm_service: VLLMService | None = None,
         ocr_service: OCRService | None = None,
         langchain_gateway: "LangChainLLMGateway | None" = None,
+        rag_chain: RAGChain | None = None,
     ):
         """
         Initialize RAG Service
@@ -135,11 +137,13 @@ class RAGService:
             vllm_service: vLLM service instance (optional)
             ocr_service: OCR service instance (EasyOCR + Gemini Fallback)
             langchain_gateway: LCEL 체인용 Gateway (있으면 면접에서 체인 사용)
+            rag_chain: RAGChain for MMR retrieval (optional; else VectorDB query fallback)
         """
         self.llm = llm_service
         self.vllm = vllm_service
         self.vectordb = vectordb_service
         self._langchain_gateway = langchain_gateway
+        self._rag_chain = rag_chain
         # OCRService: 전달받거나 자동 생성
         self.ocr = ocr_service or OCRService(llm_service=llm_service)
         # 템플릿 기반 면접 질문 서비스
@@ -218,19 +222,23 @@ class RAGService:
         self, query: str, user_id: str, context_types: list[str] = None, n_results: int = 3
     ) -> str:
         """
-        Retrieve relevant context from VectorDB
+        Retrieve relevant context from VectorDB (RAGChain MMR when available, else VectorDB query).
 
         Args:
             query: User's query
             user_id: User ID for filtering
             context_types: List of collection types to search
-            n_results: Number of results per collection
+            n_results: Number of results per collection (fallback path only)
 
         Returns:
             Formatted context string
         """
         if context_types is None:
             context_types = ["resume", "job_posting"]
+
+        if self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore):
+            return await self._rag_chain.retrieve_context(query, user_id, context_types)
+
         try:
 
             async def query_one(collection_type: str):

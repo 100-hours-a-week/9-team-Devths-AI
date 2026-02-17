@@ -2,19 +2,29 @@
 LangChain RAG Chain Implementation.
 
 Provides RAG (Retrieval-Augmented Generation) functionality using LangChain.
+Supports per-collection MMR (Maximal Marginal Relevance) retrieval.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
 
 logger = logging.getLogger(__name__)
+
+# 컬렉션 타입 -> Chroma 컬렉션 이름 (VectorDBService와 동일)
+COLLECTION_NAME_MAP = {
+    "resume": "resumes",
+    "job_posting": "job_postings",
+    "portfolio": "portfolios",
+}
 
 
 # RAG System Prompts
@@ -39,27 +49,37 @@ class RAGChain:
     """RAG Chain using LangChain.
 
     Provides context-aware chat functionality with document retrieval.
+    Supports per-collection MMR (Maximal Marginal Relevance) when vectorstores dict is provided.
     """
 
     def __init__(
         self,
         llm_gateway: LangChainLLMGateway,
         vectorstore: Chroma | None = None,
+        vectorstores: dict[str, Chroma] | None = None,
         max_context_length: int = 4000,
         retrieval_k: int = 3,
+        fetch_k: int = 20,
+        lambda_mult: float = 0.5,
     ):
         """Initialize RAG Chain.
 
         Args:
             llm_gateway: LangChain LLM Gateway instance.
-            vectorstore: LangChain Chroma vectorstore (optional).
+            vectorstore: LangChain Chroma vectorstore (optional, single collection).
+            vectorstores: Map collection_type -> Chroma (resume, job_posting, portfolio). Used for MMR.
             max_context_length: Maximum context length in characters.
-            retrieval_k: Number of documents to retrieve.
+            retrieval_k: Number of documents to retrieve per collection.
+            fetch_k: MMR candidate pool size per collection.
+            lambda_mult: MMR diversity (0=diverse, 1=relevant). 0.5 balanced.
         """
         self._llm_gateway = llm_gateway
         self._vectorstore = vectorstore
+        self._vectorstores = vectorstores or {}
         self._max_context_length = max_context_length
         self._retrieval_k = retrieval_k
+        self._fetch_k = fetch_k
+        self._lambda_mult = lambda_mult
         self._output_parser = StrOutputParser()
 
         # Create RAG prompt template
@@ -97,69 +117,106 @@ class RAGChain:
         """
         self._vectorstore = vectorstore
 
+    def _source_name(self, collection_type: str) -> str:
+        return {
+            "resume": "이력서",
+            "job_posting": "채용공고",
+            "portfolio": "포트폴리오",
+        }.get(collection_type, collection_type)
+
+    async def _mmr_search_one(
+        self,
+        collection_type: str,
+        store: Chroma,
+        query: str,
+        filter_dict: dict[str, Any] | None,
+    ) -> list[tuple[str, Document]]:
+        """Run MMR search on one collection (sync method in thread)."""
+        try:
+            docs = store.max_marginal_relevance_search(
+                query,
+                k=self._retrieval_k,
+                fetch_k=self._fetch_k,
+                lambda_mult=self._lambda_mult,
+                filter=filter_dict,
+            )
+            return [(collection_type, doc) for doc in docs]
+        except Exception as e:
+            logger.warning("MMR search failed for %s: %s", collection_type, e)
+            return []
+
     async def retrieve_context(
         self,
         query: str,
         user_id: str,
         collection_types: list[str] | None = None,
     ) -> str:
-        """Retrieve relevant context from vectorstore.
+        """Retrieve relevant context with per-collection MMR (or single vectorstore fallback).
 
         Args:
             query: Query text for retrieval.
-            user_id: User ID for filtering documents.
-            collection_types: Types of collections to search.
+            user_id: User ID for filtering documents (resume, job_posting only).
+            collection_types: Types of collections to search (resume, job_posting, portfolio).
 
         Returns:
             Formatted context string.
         """
-        if self._vectorstore is None:
-            return ""
-
         if collection_types is None:
             collection_types = ["resume", "job_posting"]
 
         try:
-            # Build retriever with user filter
-            retriever = self._vectorstore.as_retriever(
-                search_kwargs={
-                    "k": self._retrieval_k,
-                    "filter": {"user_id": user_id},
-                }
-            )
+            all_pairs: list[tuple[str, Document]] = []
 
-            # Retrieve documents
-            docs = await retriever.aget_relevant_documents(query)
+            if self._vectorstores:
+                # Per-collection MMR
+                for ct in collection_types:
+                    store = self._vectorstores.get(ct)
+                    if not store:
+                        continue
+                    filter_dict = None
+                    if ct != "portfolio" and user_id:
+                        filter_dict = {"user_id": user_id}
+                    pairs = await asyncio.to_thread(
+                        self._mmr_search_one,
+                        ct,
+                        store,
+                        query,
+                        filter_dict,
+                    )
+                    all_pairs.extend(pairs)
+            elif self._vectorstore:
+                # Legacy: single vectorstore, simple retriever (no MMR)
+                retriever = self._vectorstore.as_retriever(
+                    search_kwargs={
+                        "k": self._retrieval_k,
+                        "filter": {"user_id": user_id},
+                    }
+                )
+                docs = await retriever.aget_relevant_documents(query)
+                for doc in docs:
+                    source = doc.metadata.get("collection_type", "document")
+                    ct = source if source in COLLECTION_NAME_MAP else "resume"
+                    all_pairs.append((ct, doc))
+            else:
+                return ""
 
-            # Format context
+            # Format context with length limit
             context_parts = []
             total_length = 0
-
-            for doc in docs:
-                source = doc.metadata.get("collection_type", "document")
-                source_name = {
-                    "resume": "이력서",
-                    "job_posting": "채용공고",
-                    "portfolio": "포트폴리오",
-                }.get(source, source)
-
+            for collection_type, doc in all_pairs:
+                source_name = self._source_name(collection_type)
                 doc_text = doc.page_content
-
-                # Truncate if needed
                 remaining = self._max_context_length - total_length
                 if len(doc_text) > remaining:
                     doc_text = doc_text[:remaining] + "..."
-
-                context_parts.append(f"[{source_name}]\n{doc_text}")
+                context_parts.append(f"[출처: {source_name}]\n{doc_text}")
                 total_length += len(doc_text)
-
                 if total_length >= self._max_context_length:
                     break
-
             return "\n\n".join(context_parts)
 
         except Exception as e:
-            logger.error(f"Error retrieving context: {e}")
+            logger.error("Error retrieving context: %s", e)
             return ""
 
     async def chat(
