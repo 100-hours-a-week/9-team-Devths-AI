@@ -178,17 +178,30 @@ def create_tech_interview_init_prompt(
     resume_text: str,
     job_posting_text: str,
     portfolio_text: str = "",
+    previous_questions: list[str] | None = None,
 ) -> str:
     """
     기술 면접 초기 질문 세트 생성 프롬프트
     - 5개 카테고리별 질문 생성
     - JSON 형식으로 반환
+    - previous_questions가 있으면 해당 질문과 유사한 질문 회피 지시 포함
     """
     template = load_prompt("tech_interview_init")
+    if previous_questions:
+        lines = "\n".join(f"{i+1}. {q}" for i, q in enumerate(previous_questions))
+        previous_questions_section = (
+            "## 이전 면접에서 이미 물어본 질문 (중복 금지)\n\n"
+            f"{lines}\n\n"
+            "위에 나열된 질문과 **동일하거나 유사한 질문은 반드시 피하세요**.\n"
+            "같은 주제라도 다른 각도에서 질문하세요.\n\n"
+        )
+    else:
+        previous_questions_section = ""
     return template.format(
         resume_text=resume_text or "(이력서 정보 없음)",
         job_posting_text=job_posting_text or "(채용공고 정보 없음)",
         portfolio_text=portfolio_text or "(포트폴리오 정보 없음)",
+        previous_questions_text=previous_questions_section,
     )
 
 

@@ -9,6 +9,8 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
+from langchain_community.cache import InMemoryCache
+from langchain_core.globals import set_llm_cache
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -90,7 +92,10 @@ class LangChainLLMGateway:
         self._model_name = model_name
         self._output_parser = StrOutputParser()
 
-        logger.info(f"LangChainLLMGateway initialized with model: {model_name}")
+        set_llm_cache(InMemoryCache())
+        logger.info(
+            f"LangChainLLMGateway initialized with model: {model_name} (InMemoryCache enabled)"
+        )
 
     @property
     def llm(self) -> ChatGoogleGenerativeAI:

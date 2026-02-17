@@ -6,6 +6,7 @@ POST /ai/evaluation/analyze - 면접 평가 리포트 생성 (SSE 스트리밍)
   - retry=true:  Gemini×GPT-4o 토론 후 최종 리포트
 """
 
+import asyncio
 import json
 import logging
 
@@ -23,6 +24,8 @@ from app.domain.evaluation.debate_graph import DebateService
 from app.schemas.evaluation import (
     AnalyzeInterviewRequest,
 )
+from app.schemas.ingestion import InterviewIngestionInput, InterviewResultDocument
+from app.services.interview_ingestion_service import InterviewIngestionService
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +42,48 @@ def _validate_qa_list(qa_list: list[dict]) -> str | None:
         if "question" not in qa or "answer" not in qa:
             return f"context[{i}]에 question, answer 필드가 필요합니다."
     return None
+
+
+async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
+    """면접 Q&A 데이터를 VectorDB에 비동기 저장 (best-effort).
+
+    실패해도 평가 응답에 영향을 주지 않습니다.
+    """
+    try:
+        rag = get_services()
+        vectordb = rag.vectordb
+        ingestion_service = InterviewIngestionService(vectordb)
+
+        qa_results = []
+        for i, qa in enumerate(request.context or []):
+            qa_results.append(
+                InterviewResultDocument(
+                    question=qa.get("question", ""),
+                    answer=qa.get("answer", ""),
+                    question_index=i,
+                    interview_type=qa.get("category", "technical"),
+                )
+            )
+
+        if not qa_results:
+            return
+
+        input_data = InterviewIngestionInput(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            room_id=request.room_id,
+            interview_type="technical",
+            qa_results=qa_results,
+        )
+
+        result = await ingestion_service.ingest_session(input_data)
+        logger.info(
+            "📦 면접 Q&A VectorDB 자동 저장 완료: %d건 (session=%s)",
+            result["ingested_count"],
+            request.session_id,
+        )
+    except Exception as e:
+        logger.warning("면접 Q&A VectorDB 자동 저장 실패 (무시): %s", str(e), exc_info=True)
 
 
 # ============================================
@@ -139,6 +184,9 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
         logger.info("✅ 면접 평가 리포트 생성 완료 (응답 길이: %d자)", len(full_report))
+
+        # 면접 Q&A 데이터를 VectorDB에 비동기 저장 (best-effort)
+        asyncio.create_task(_ingest_interview_qa_best_effort(request))
 
     except ConnectionError as e:
         logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
