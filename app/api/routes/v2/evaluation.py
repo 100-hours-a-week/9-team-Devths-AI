@@ -77,11 +77,8 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
         )
 
         result = await ingestion_service.ingest_session(input_data)
-        logger.info(
-            "📦 면접 Q&A VectorDB 자동 저장 완료: %d건 (session=%s)",
-            result["ingested_count"],
-            request.session_id,
-        )
+        # SAST: request 기반 값은 로그에 넣지 않음 (Log Injection 방지)
+        logger.info("📦 면접 Q&A VectorDB 자동 저장 완료: %d건", result["ingested_count"])
     except Exception as e:
         logger.warning("면접 Q&A VectorDB 자동 저장 실패 (무시): %s", str(e), exc_info=True)
 
