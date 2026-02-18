@@ -60,6 +60,7 @@ def get_services():
                     google_api_keys=keys if len(keys) > 1 else None,
                     google_api_key=keys[0] if len(keys) == 1 else None,
                     model_name=settings.gemini_model,
+                    embedding_model=settings.gemini_embedding_model,
                 )
                 logger.info("✅ LangChain LCEL Gateway initialized")
             else:
