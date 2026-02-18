@@ -202,6 +202,18 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Text Splitting / Chunking (ADR-060)
+    # ============================================
+    chunk_size: int = Field(
+        default=2000,
+        description="텍스트 청크 크기 (문자 기준, 약 500 토큰). Gemini-embedding-001 제한 2,048 토큰 이내",
+    )
+    chunk_overlap: int = Field(
+        default=200,
+        description="청크 간 오버랩 크기 (문자 기준, 약 50 토큰)",
+    )
+
+    # ============================================
     # RAG Configuration
     # ============================================
     rag_max_context_length: int = Field(

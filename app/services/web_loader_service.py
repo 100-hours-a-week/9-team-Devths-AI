@@ -14,8 +14,6 @@ from asyncio import get_event_loop
 
 from langchain_community.document_loaders import WebBaseLoader
 
-from app.utils.log_sanitizer import sanitize_log_input
-
 logger = logging.getLogger(__name__)
 
 # URL 감지 정규식
@@ -43,14 +41,13 @@ class WebLoaderService:
             추출된 텍스트 (실패 시 빈 문자열)
         """
         try:
-            # SAST: url은 사용자 입력값이므로 로그에 직접 넣지 않음
-            safe_url = sanitize_log_input(url[:80])
-            logger.info("[WebLoader] URL 텍스트 추출 시작: %s", safe_url)
+            # SAST: url은 사용자 입력값이므로 로그에 넣지 않음
+            logger.info("[WebLoader] URL 텍스트 추출 시작")
             loop = get_event_loop()
             docs = await loop.run_in_executor(None, _load_url, url)
 
             if not docs:
-                logger.warning("[WebLoader] URL에서 문서를 추출할 수 없습니다: %s", safe_url)
+                logger.warning("[WebLoader] URL에서 문서를 추출할 수 없습니다")
                 return ""
 
             text = "\n".join(doc.page_content for doc in docs)

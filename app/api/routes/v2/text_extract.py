@@ -23,6 +23,7 @@ from app.schemas.text_extract import (
     TextExtractResult,
 )
 from app.services.cloudwatch_service import CloudWatchService
+from app.services.text_splitter_service import TextSplitterService
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, sanitize_log_input
 
@@ -276,18 +277,41 @@ async def text_extract(
 
                 if extracted_text:
                     document_id = f"{doc_type}_{uuid.uuid4().hex[:12]}"
-                    await rag.vectordb.add_document(
-                        document_id=document_id,
+                    doc_metadata = {
+                        "user_id": request.user_id,
+                        "file_id": doc_input.file_id,
+                        "created_at": datetime.now().isoformat(),
+                    }
+
+                    # 텍스트 분할 (ADR-060 Phase 1)
+                    splitter = TextSplitterService()
+                    batch_docs = splitter.split_to_batch_docs(
                         text=extracted_text,
-                        collection_type=doc_type,
-                        metadata={
-                            "user_id": request.user_id,
-                            "file_id": doc_input.file_id,
-                            "created_at": datetime.now().isoformat(),
-                        },
+                        document_id=document_id,
+                        metadata=doc_metadata,
                     )
+
+                    if len(batch_docs) == 1:
+                        # 단일 청크: 기존 add_document() 사용
+                        await rag.vectordb.add_document(
+                            document_id=batch_docs[0]["id"],
+                            text=batch_docs[0]["text"],
+                            collection_type=doc_type,
+                            metadata=batch_docs[0]["metadata"],
+                        )
+                    else:
+                        # 다중 청크: add_documents_batch() 사용
+                        await rag.vectordb.add_documents_batch(
+                            documents=batch_docs,
+                            collection_type=doc_type,
+                        )
+
                     safe_document_id = sanitize_log_input(document_id)
-                    logger.info("   ✅ VectorDB 저장 완료: %s", safe_document_id)
+                    logger.info(
+                        "   ✅ VectorDB 저장 완료: %s (%d 청크)",
+                        safe_document_id,
+                        len(batch_docs),
+                    )
 
                 return DocumentExtractResult(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
