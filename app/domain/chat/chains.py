@@ -124,7 +124,7 @@ class RAGChain:
             "portfolio": "포트폴리오",
         }.get(collection_type, collection_type)
 
-    async def _mmr_search_one(
+    def _mmr_search_one(
         self,
         collection_type: str,
         store: Chroma,
