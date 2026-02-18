@@ -56,8 +56,9 @@ class VectorDBService:
                 f"VectorDB Service initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
             )
         else:
-            self.chroma_client = chromadb.Client(
-                Settings(persist_directory=persist_directory, anonymized_telemetry=False)
+            self.chroma_client = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=Settings(anonymized_telemetry=False),
             )
             logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
