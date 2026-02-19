@@ -239,7 +239,7 @@ class VectorDBService:
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
             # Add to collection
-            collection.add(
+            collection.upsert(
                 ids=[document_id],
                 embeddings=[embedding],
                 documents=[text],
@@ -292,7 +292,7 @@ class VectorDBService:
             embeddings = await self.create_embeddings(texts)
 
             # Add batch to collection
-            collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+            collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
             return ids
@@ -307,6 +307,7 @@ class VectorDBService:
         collection_type: str,
         n_results: int = 5,
         where: dict[str, Any] | None = None,
+        max_distance: float | None = None,
     ) -> list[dict[str, Any]]:
         """
         Query VectorDB for similar documents
@@ -316,6 +317,9 @@ class VectorDBService:
             collection_type: "resume", "job_posting", "portfolio", "interview_feedback", "analysis_results", "chat_context"
             n_results: Number of results to return
             where: Metadata filter (optional)
+            max_distance: Maximum distance threshold (optional). Results with
+                distance > max_distance are filtered out. ChromaDB uses L2
+                distance by default (lower = more similar).
 
         Returns:
             List of results with text and metadata
@@ -338,16 +342,32 @@ class VectorDBService:
             formatted_results = []
             if results and results["ids"] and len(results["ids"]) > 0:
                 for i in range(len(results["ids"][0])):
+                    distance = results["distances"][0][i]
+                    # max_distance 필터: 임계값 초과 시 저품질 결과 제거
+                    if max_distance is not None and distance > max_distance:
+                        continue
                     formatted_results.append(
                         {
                             "id": results["ids"][0][i],
                             "text": results["documents"][0][i],
                             "metadata": results["metadatas"][0][i],
-                            "distance": results["distances"][0][i],
+                            "distance": distance,
                         }
                     )
 
-            logger.info(f"Query returned {len(formatted_results)} results from {collection_type}")
+            if max_distance is not None:
+                logger.info(
+                    "Query returned %d results from %s (max_distance=%.2f)",
+                    len(formatted_results),
+                    collection_type,
+                    max_distance,
+                )
+            else:
+                logger.info(
+                    "Query returned %d results from %s",
+                    len(formatted_results),
+                    collection_type,
+                )
             return formatted_results
 
         except Exception as e:
@@ -500,7 +520,7 @@ class VectorDBService:
                 filtered_metadatas.append(meta)
 
             # Add batch to collection
-            collection.add(
+            collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
                 documents=texts,
