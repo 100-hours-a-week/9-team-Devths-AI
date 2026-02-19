@@ -6,6 +6,7 @@ Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
 
 import logging
 import os
+import random
 from typing import Any
 
 import chromadb
@@ -35,12 +36,15 @@ class VectorDBService:
             chroma_server_port: ChromaDB server port
         """
         # Configure Gemini API for embeddings
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
-        # Initialize Gemini Client for embeddings
-        self.genai_client = genai.Client(api_key=api_key)
+        # 쉼표 구분 다중 키 → 각 키별 클라이언트 생성 (분산 처리)
+        api_keys = [k.strip() for k in api_key.split(",") if k.strip()]
+        self._genai_clients = [genai.Client(api_key=k) for k in api_keys]
+        self.genai_client = self._genai_clients[0]  # 하위 호환
+        logger.info(f"VectorDB 임베딩: {len(self._genai_clients)}개 API 키 로드")
 
         # Initialize ChromaDB: server mode (v2) or embedded mode
         if chroma_server_host:
@@ -116,9 +120,8 @@ class VectorDBService:
             Embedding vector
         """
         try:
-            result = self.genai_client.models.embed_content(
-                model="gemini-embedding-001", contents=text
-            )
+            client = random.choice(self._genai_clients)
+            result = client.models.embed_content(model="gemini-embedding-001", contents=text)
             # Extract embedding from EmbedContentResponse
             # result.embeddings is a list of Embedding objects
             if hasattr(result, "embeddings") and len(result.embeddings) > 0:
@@ -127,6 +130,31 @@ class VectorDBService:
                 raise ValueError(f"Unexpected embedding result format: {type(result)}")
         except Exception as e:
             logger.error(f"Error creating embedding: {e}")
+            raise
+
+    async def create_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """
+        Create embeddings for multiple texts in one batch API call.
+
+        Args:
+            texts: List of texts to embed.
+
+        Returns:
+            List of embedding vectors (same order as texts).
+        """
+        if not texts:
+            return []
+        try:
+            client = random.choice(self._genai_clients)
+            result = client.models.embed_content(
+                model="gemini-embedding-001",
+                contents=texts,
+            )
+            if hasattr(result, "embeddings") and result.embeddings:
+                return [e.values for e in result.embeddings]
+            raise ValueError(f"Unexpected embedding result format: {type(result)}")
+        except Exception as e:
+            logger.error(f"Error creating batch embeddings: {e}")
             raise
 
     async def add_document(
@@ -198,29 +226,22 @@ class VectorDBService:
             collection = self._get_collection(collection_type)
 
             ids = []
-            embeddings = []
             texts = []
             metadatas = []
 
             for doc in documents:
                 doc_id = doc["id"]
                 text = doc["text"]
-                metadata = doc.get("metadata", {})
-
-                # Create embedding
-                embedding = await self.create_embedding(text)
-
-                # Prepare metadata
+                metadata = doc.get("metadata", {}).copy()
                 metadata["document_id"] = doc_id
                 metadata["collection_type"] = collection_type
-
-                # ChromaDB는 None 값을 허용하지 않음 - 필터링
                 metadata = {k: v for k, v in metadata.items() if v is not None}
-
                 ids.append(doc_id)
-                embeddings.append(embedding)
                 texts.append(text)
                 metadatas.append(metadata)
+
+            # Batch embed all texts in one API call
+            embeddings = await self.create_embeddings(texts)
 
             # Add batch to collection
             collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
@@ -420,15 +441,11 @@ class VectorDBService:
         try:
             collection = self._get_collection(collection_name)
 
-            embeddings = []
+            # Batch embed all texts in one API call
+            embeddings = await self.create_embeddings(texts)
+
             filtered_metadatas = []
-
-            for i, text in enumerate(texts):
-                # Create embedding
-                embedding = await self.create_embedding(text)
-                embeddings.append(embedding)
-
-                # Prepare metadata (filter None values)
+            for i in range(len(texts)):
                 meta = metadatas[i].copy() if i < len(metadatas) else {}
                 meta["user_id"] = str(user_id)
                 meta = {k: v for k, v in meta.items() if v is not None}

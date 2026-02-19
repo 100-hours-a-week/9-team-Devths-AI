@@ -14,6 +14,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+from app.prompts.loader import load_prompt_yaml
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,39 +24,67 @@ class LangChainLLMGateway:
 
     Provides a standardized interface for different LLM providers
     through LangChain abstractions.
+    Supports multiple API keys with random selection + fallback for rate limit handling.
     """
 
     def __init__(
         self,
         google_api_key: str | None = None,
-        model_name: str = "gemini-2.0-flash",
+        google_api_keys: list[str] | None = None,
+        model_name: str = "gemini-3-flash-preview",
         embedding_model: str = "models/text-embedding-004",
         temperature: float = 0.7,
     ):
         """Initialize LangChain LLM Gateway.
 
         Args:
-            google_api_key: Google API key (uses GOOGLE_API_KEY env var if not provided).
+            google_api_key: Google API key (단일 키, 하위 호환).
+            google_api_keys: Google API keys (다중 키, 분산 처리용).
             model_name: Default model name for text generation.
             embedding_model: Model name for embeddings.
             temperature: Default temperature for generation.
         """
-        api_key = google_api_key or os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+        import random
 
-        # Initialize Gemini LLM
-        self._llm = ChatGoogleGenerativeAI(
-            model=model_name,
-            google_api_key=api_key,
-            temperature=temperature,
-            convert_system_message_to_human=True,
-        )
+        # API 키 수집
+        keys = []
+        if google_api_keys:
+            keys.extend(google_api_keys)
+        if google_api_key and google_api_key not in keys:
+            keys.append(google_api_key)
+        if not keys:
+            env_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if env_key:
+                keys.append(env_key)
 
-        # Initialize embeddings
+        if not keys:
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
+
+        # 랜덤 순서로 섞기 (분산 처리)
+        random.shuffle(keys)
+
+        # 각 키별 LLM 인스턴스 생성
+        llm_instances = [
+            ChatGoogleGenerativeAI(
+                model=model_name,
+                google_api_key=k,
+                temperature=temperature,
+                convert_system_message_to_human=True,
+            )
+            for k in keys
+        ]
+
+        # Primary LLM + fallbacks 설정
+        if len(llm_instances) > 1:
+            self._llm = llm_instances[0].with_fallbacks(llm_instances[1:])
+            logger.info(f"LangChain Gateway: {len(keys)}개 API 키 분산 처리 (with_fallbacks)")
+        else:
+            self._llm = llm_instances[0]
+
+        # Embeddings는 첫 번째 키로 (경량 호출이라 분산 불필요)
         self._embeddings = GoogleGenerativeAIEmbeddings(
             model=embedding_model,
-            google_api_key=api_key,
+            google_api_key=keys[0],
         )
 
         self._model_name = model_name
@@ -147,6 +177,41 @@ class LangChainLLMGateway:
         response = await llm.ainvoke(lc_messages)
         return response.content
 
+    async def generate_structured(
+        self,
+        messages: list[dict[str, str]],
+        output_schema: type,
+        *,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """구조화 출력을 강제하여 Pydantic 모델 인스턴스를 반환합니다.
+
+        Args:
+            messages: 메시지 딕셔너리 리스트.
+            output_schema: 출력 Pydantic 모델 클래스.
+            system_prompt: 선택적 시스템 프롬프트.
+            temperature: 샘플링 온도.
+            max_tokens: 최대 토큰 수.
+
+        Returns:
+            output_schema 타입의 Pydantic 모델 인스턴스.
+        """
+        lc_messages = self._convert_messages(messages, system_prompt)
+
+        llm = self._llm
+        bind_kwargs = {}
+        if temperature is not None:
+            bind_kwargs["temperature"] = temperature
+        if max_tokens is not None:
+            bind_kwargs["max_output_tokens"] = max_tokens
+        if bind_kwargs:
+            llm = llm.bind(**bind_kwargs)
+
+        structured_llm = llm.with_structured_output(output_schema)
+        return await structured_llm.ainvoke(lc_messages)
+
     async def generate_stream(
         self,
         messages: list[dict[str, str]],
@@ -212,16 +277,20 @@ class LangChainLLMGateway:
         *,
         input_variables: list[str] | None = None,  # noqa: ARG002
         system_prompt: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
-        """Create a simple LangChain chain.
+        """Create a simple LangChain chain (prompt | llm | StrOutputParser).
 
         Args:
-            prompt_template: Prompt template string.
-            input_variables: List of input variable names.
+            prompt_template: Prompt template string (e.g. with {resume}, {posting}).
+            input_variables: List of input variable names (inferred from template if not set).
             system_prompt: Optional system instructions.
+            temperature: Optional sampling temperature (binds to LLM).
+            max_tokens: Optional max output tokens (binds to LLM).
 
         Returns:
-            LangChain chain (Runnable).
+            LangChain chain (Runnable). ainvoke(input_dict) returns str.
         """
         messages = []
 
@@ -231,19 +300,77 @@ class LangChainLLMGateway:
         messages.append(("human", prompt_template))
 
         prompt = ChatPromptTemplate.from_messages(messages)
-        return prompt | self._llm | self._output_parser
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
+
+    def create_chain_from_yaml(
+        self,
+        domain: str,
+        name: str,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """Create a chain from a YAML prompt file (system + human, optional ai).
+
+        Loads templates/{domain}/{name}.yaml and builds ChatPromptTemplate
+        from system/human/ai keys. Variable substitution is done via ainvoke(input_dict).
+
+        Args:
+            domain: Subdirectory name (e.g. interview, chat).
+            name: File name without extension.
+            temperature: Optional sampling temperature.
+            max_tokens: Optional max output tokens.
+
+        Returns:
+            LangChain chain (Runnable). ainvoke(input_dict) returns str.
+        """
+        d = load_prompt_yaml(domain, name)
+        messages = []
+        if d.get("system"):
+            messages.append(("system", d["system"]))
+        messages.append(("human", d["human"]))
+        if d.get("ai"):
+            messages.append(("ai", d["ai"]))
+
+        prompt = ChatPromptTemplate.from_messages(messages)
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
 
     def create_chat_chain(
         self,
         system_prompt: str | None = None,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
         """Create a chat chain with message history support.
 
         Args:
             system_prompt: Optional system instructions.
+            temperature: Optional sampling temperature (binds to LLM).
+            max_tokens: Optional max output tokens (binds to LLM).
 
         Returns:
-            LangChain chat chain (Runnable).
+            LangChain chat chain (Runnable). ainvoke({"messages": [...]}) / astream({"messages": [...]}).
         """
         messages = []
 
@@ -253,7 +380,17 @@ class LangChainLLMGateway:
         messages.append(MessagesPlaceholder(variable_name="messages"))
 
         prompt = ChatPromptTemplate.from_messages(messages)
-        return prompt | self._llm | self._output_parser
+
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return prompt | llm | self._output_parser
 
     async def health_check(self) -> bool:
         """Check if the gateway is healthy.

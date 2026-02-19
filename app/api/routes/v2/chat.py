@@ -19,17 +19,21 @@ from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
     create_tech_followup_prompt,
-    create_tech_interview_init_prompt,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     get_extract_title_prompt,
     get_system_tech_interview,
+    load_prompt_yaml,
 )
+from app.prompts.interview import create_feedback_prompt
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
     InterviewQuestionState,
     InterviewSession,
 )
+from app.services.example_selector import get_few_shot_for_personality
 from app.utils.log_sanitizer import safe_info, safe_warning
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
@@ -280,30 +284,14 @@ async def generate_chat_stream(
                                     }
                                 )
 
-                        feedback_prompt = (
+                        evaluation_content = (
                             "다음 면접 Q&A에 대해 각 답변마다 피드백을 제공해주세요:\n\n"
                         )
                         for i, qa in enumerate(qa_pairs[:5], 1):
-                            feedback_prompt += (
+                            evaluation_content += (
                                 f"질문 {i}: {qa['question']}\n답변 {i}: {qa['answer']}\n\n"
                             )
-
-                        feedback_prompt += """각 답변에 대해 다음 형식으로 피드백해주세요:
-
-질문 1
-[질문 내용]
-
-답변 1
-[답변 내용]
-
-평가
-- 잘한 점: [구체적으로]
-- 개선점: [구체적으로]
-- 추천 답변: [더 나은 답변 예시]
-
-(질문 2~5도 같은 형식으로)
-
-마크다운 문법(#, **, ```)을 사용하지 마세요."""
+                        feedback_prompt = create_feedback_prompt(evaluation_content)
 
                         async for chunk in rag.llm.generate_response(
                             user_message=feedback_prompt,
@@ -405,7 +393,7 @@ async def generate_chat_stream(
                 if session:
                     safe_info(
                         logger,
-                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
+                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%s/5",
                         session_key,
                         session.phase,
                         session.current_question_id,
@@ -430,13 +418,37 @@ async def generate_chat_stream(
                 job_posting_ocr = request.context.job_posting_ocr if request.context else None
                 portfolio_text = request.context.portfolio_text if request.context else None
 
-                init_prompt = create_tech_interview_init_prompt(
+                yaml_name = (
+                    "personality_interview_init"
+                    if interview_type == "behavior"
+                    else "tech_interview_init"
+                )
+                init_prompts = load_prompt_yaml("interview", yaml_name)
+                system_prompt = init_prompts["system"]
+                init_prompt = init_prompts["human"].format(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
                     portfolio_text=portfolio_text or context or "정보 없음",
                 )
 
-                system_prompt = get_system_tech_interview()
+                # 인성 면접: SemanticSimilarityExampleSelector — interview_feedback에서 유사 Q&A 참고 예시 추가
+                if yaml_name == "personality_interview_init":
+                    try:
+                        few_shot = await get_few_shot_for_personality(
+                            rag.vectordb,
+                            query_text=f"{interview_type_kr} 면접 질문 답변 예시",
+                            k=2,
+                            interview_type_filter="personality",
+                        )
+                        if few_shot:
+                            system_prompt = (
+                                system_prompt.rstrip()
+                                + "\n\n## 참고 예시 (유사 Q&A)\n\n"
+                                + few_shot
+                                + "\n\n위 예시 톤을 참고하여 질문을 생성하세요."
+                            )
+                    except Exception as e:
+                        logger.debug("Few-shot personality selection skipped: %s", e)
 
                 if model_choice == "vllm" and rag.vllm:
                     full_response = ""
@@ -496,7 +508,7 @@ async def generate_chat_stream(
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
-                                f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
+                                f"{format_main_question_label(1)}{newline}{first_q.question}"
                             )
                             for char in question_text:
                                 yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
@@ -595,7 +607,9 @@ async def generate_chat_stream(
                                 )
                                 session.phase = "followup"
 
-                                followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
+                                followup_header = format_followup_question_label(
+                                    current_q_id, current_q.current_depth
+                                )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 for char in followup_text:
                                     yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
@@ -623,7 +637,7 @@ async def generate_chat_stream(
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
+                            question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
                             for char in question_text:
                                 yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
@@ -645,7 +659,7 @@ async def generate_chat_stream(
                 await session_store.set(session_key, session.model_dump())
                 safe_info(
                     logger,
-                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%d/5",
+                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%s/5",
                     session_key,
                     session.phase,
                     session.current_question_id,

@@ -27,6 +27,21 @@ def load_prompt(template_name: str) -> str:
 
 
 # ============================================================================
+# 질문 표기 형식 (사용자 노출용, 2/5 제거 → 1. / 1-1 형식)
+# ============================================================================
+
+
+def format_main_question_label(question_id: int) -> str:
+    """메인 질문 번호 표기. 예: 1 -> "1.", 2 -> "2." """
+    return f"{question_id}."
+
+
+def format_followup_question_label(question_id: int, depth: int) -> str:
+    """꼬리질문 번호 표기. 예: (1, 1) -> "1-1", (1, 2) -> "1-2" """
+    return f"{question_id}-{depth}"
+
+
+# ============================================================================
 # 시스템 프롬프트
 # ============================================================================
 
@@ -70,6 +85,14 @@ def load_question_examples(interview_type: str) -> str:
         return load_prompt("personality_questions")
 
 
+def load_good_bad_examples(interview_type: str) -> str:
+    """면접 유형에 맞는 좋은 질문 vs 피할 질문 퓨샷 로드"""
+    if interview_type == "technical":
+        return load_prompt("technical_good_bad")
+    else:
+        return load_prompt("personality_good_bad")
+
+
 def create_interview_question_prompt(
     resume_text: str,
     job_posting_text: str,
@@ -87,12 +110,14 @@ def create_interview_question_prompt(
         asked_questions_section = ""
     template = load_prompt("interview_question")
     question_examples = load_question_examples(interview_type)
+    good_bad_examples = load_good_bad_examples(interview_type)
     return template.format(
         resume_text=resume_text,
         job_posting_text=job_posting_text,
         interview_type=interview_type_kr,
         asked_questions_section=asked_questions_section,
         question_examples=question_examples,
+        good_bad_examples=good_bad_examples,
     )
 
 
@@ -129,6 +154,14 @@ def create_interview_report_prompt(
         resume_text=resume_text or "(이력서 정보 없음)",
         job_posting_text=job_posting_text or "(채용공고 정보 없음)",
     )
+
+
+def create_feedback_prompt(evaluation_content: str) -> str:
+    """면접 답변 평가/피드백 프롬프트 (질문-답변 퓨샷 포함).
+    evaluation_content: 단일 시 '질문: ...\\n답변: ...', 복수 시 '질문 1: ...\\n답변 1: ...\\n\\n...'
+    """
+    template = load_prompt("feedback_with_example")
+    return template.format(evaluation_content=evaluation_content)
 
 
 # ============================================================================

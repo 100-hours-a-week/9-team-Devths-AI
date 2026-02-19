@@ -93,6 +93,12 @@ else
     echo "   ❌ GOOGLE_API_KEY is not set"
 fi
 
+if [ -n "$GEMINI_API_KEY" ]; then
+    echo "   ✅ GEMINI_API_KEY is set"
+else
+    echo "   ❌ GEMINI_API_KEY is not set"
+fi
+
 if [ -n "$API_KEY" ]; then
     echo "   ✅ API_KEY is set"
 else

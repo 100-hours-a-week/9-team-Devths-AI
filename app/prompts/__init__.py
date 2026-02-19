@@ -34,9 +34,12 @@ from app.prompts.interview import (
     create_tech_next_question_prompt,
     format_completed_questions,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     # 기술 면접 5단계 프롬프트 (신규)
     get_system_tech_interview,
 )
+from app.prompts.loader import load_prompt_yaml
 
 __all__ = [
     # Interview prompts
@@ -59,6 +62,9 @@ __all__ = [
     "create_tech_next_question_prompt",
     "format_conversation_history",
     "format_completed_questions",
+    "format_main_question_label",
+    "format_followup_question_label",
+    "load_prompt_yaml",
     # Chat prompts
     "SYSTEM_GENERAL_CHAT",
     "SYSTEM_RAG_CHAT",

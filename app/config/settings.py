@@ -7,7 +7,7 @@ Centralized configuration management with environment variable support.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,16 +58,24 @@ class Settings(BaseSettings):
     # ============================================
     google_api_key: str | None = Field(
         default=None,
-        description="Google API key for Gemini",
+        description="Google API key for Gemini (쉼표 구분으로 여러 키 입력 가능)",
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
-        default="gemini-2.0-flash",
+        default="gemini-3-flash-preview",
         description="Gemini model name",
     )
     gemini_embedding_model: str = Field(
         default="gemini-embedding-001",
         description="Gemini embedding model name (VectorDB 문서 설계 최종 선정)",
     )
+
+    @property
+    def all_google_api_keys(self) -> list[str]:
+        """Google API 키를 리스트로 반환 (쉼표 구분 분산 처리)."""
+        if not self.google_api_key:
+            return []
+        return [k.strip() for k in self.google_api_key.split(",") if k.strip()]
 
     # ============================================
     # vLLM Configuration (GPU Servers)

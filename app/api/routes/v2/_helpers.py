@@ -19,22 +19,47 @@ logger = logging.getLogger(__name__)
 _llm_service = None
 _vllm_service = None
 _vectordb_service = None
+_langchain_gateway = None
 _rag_service = None
 
 
 def get_services():
     """Get or initialize AI services (설정은 config/settings 사용)"""
-    global _llm_service, _vllm_service, _vectordb_service, _rag_service
+    global _llm_service, _vllm_service, _vectordb_service, _langchain_gateway, _rag_service
 
     if _llm_service is None:
         settings = get_settings()
-        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
+        raw_key = (
+            settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        )
+        api_key = (raw_key.strip() if isinstance(raw_key, str) and raw_key else raw_key) or None
+        if api_key == "":
+            api_key = None
         _llm_service = LLMService(api_key=api_key)
         _vectordb_service = VectorDBService(
             api_key=api_key,
             chroma_server_host=settings.chroma_server_host,
             chroma_server_port=settings.chroma_server_port,
         )
+
+        # LangChain LCEL Gateway (면접/QnA 체인용, API 키 분산·폴백 지원)
+        try:
+            raw_keys = settings.all_google_api_keys or ([api_key] if api_key else [])
+            keys = [k.strip() for k in raw_keys if k and isinstance(k, str) and k.strip()]
+            if keys:
+                from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+
+                _langchain_gateway = LangChainLLMGateway(
+                    google_api_keys=keys if len(keys) > 1 else None,
+                    google_api_key=keys[0] if len(keys) == 1 else None,
+                    model_name=settings.gemini_model,
+                )
+                logger.info("✅ LangChain LCEL Gateway initialized")
+            else:
+                _langchain_gateway = None
+        except Exception as e:
+            logger.warning(f"LangChain Gateway initialization failed: {e}")
+            _langchain_gateway = None
 
         # Initialize vLLM service (GCP GPU server)
         gcp_vllm_url = settings.gcp_vllm_base_url or os.getenv("GCP_VLLM_BASE_URL")
@@ -53,7 +78,12 @@ def get_services():
             logger.warning(f"vLLM service initialization failed: {e}")
             _vllm_service = None
 
-        _rag_service = RAGService(_llm_service, _vectordb_service, _vllm_service)
+        _rag_service = RAGService(
+            _llm_service,
+            _vectordb_service,
+            _vllm_service,
+            langchain_gateway=_langchain_gateway,
+        )
 
     return _rag_service
 

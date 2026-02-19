@@ -76,8 +76,13 @@ done <<< "$PARAMS"
 echo "✅ Environment variables loaded from Parameter Store"
 
 # 필수 환경변수 검증
-REQUIRED_VARS=("GOOGLE_API_KEY" "API_KEY")
+REQUIRED_VARS=("API_KEY")
 MISSING_VARS=()
+
+# Google/Gemini API Key는 둘 중 하나만 있어도 됨
+if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
+    MISSING_VARS+=("GOOGLE_API_KEY or GEMINI_API_KEY")
+fi
 
 for var in "${REQUIRED_VARS[@]}"; do
     if [ -z "${!var}" ]; then
