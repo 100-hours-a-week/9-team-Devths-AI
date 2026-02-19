@@ -56,6 +56,8 @@ class VectorDBService:
                 f"VectorDB Service initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
             )
         else:
+            persist_directory = os.path.expanduser(persist_directory)
+            os.makedirs(persist_directory, exist_ok=True)
             self.chroma_client = chromadb.PersistentClient(
                 path=persist_directory,
                 settings=Settings(anonymized_telemetry=False),

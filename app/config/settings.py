@@ -58,12 +58,12 @@ class Settings(BaseSettings):
     # RAG / MMR Retrieval (RAGChain.retrieve_context)
     # ============================================
     rag_retrieval_k: int = Field(
-        default=3,
-        description="Number of documents to retrieve per collection (MMR)",
+        default=5,
+        description="Number of documents to retrieve per collection (MMR). Phase 2: 3→5 (청크 단위 검색에 맞춤)",
     )
     rag_fetch_k: int = Field(
-        default=20,
-        description="MMR candidate pool size per collection",
+        default=30,
+        description="MMR candidate pool size per collection. Phase 2: 20→30",
     )
     rag_lambda_mult: float = Field(
         default=0.5,
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     # ============================================
     chroma_persist_dir: str = Field(
         default="./chroma_db",
-        description="ChromaDB persistence directory",
+        description="ChromaDB persistence directory. 로컬 기본값 ./chroma_db. 배포 시 환경변수 CHROMA_PERSIST_DIR 로 주입.",
     )
     chroma_collection_resume: str = Field(
         default="resumes",
@@ -217,12 +217,8 @@ class Settings(BaseSettings):
     # RAG Configuration
     # ============================================
     rag_max_context_length: int = Field(
-        default=4000,
-        description="Maximum context length for RAG (characters)",
-    )
-    rag_retrieval_k: int = Field(
-        default=3,
-        description="Number of documents to retrieve",
+        default=6000,
+        description="Maximum context length for RAG (characters). Phase 2: 4000→6000 (청크 도입으로 확장)",
     )
 
     # ============================================
