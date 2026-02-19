@@ -239,7 +239,7 @@ class VectorDBService:
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
             # Add to collection
-            collection.add(
+            collection.upsert(
                 ids=[document_id],
                 embeddings=[embedding],
                 documents=[text],
@@ -292,7 +292,7 @@ class VectorDBService:
             embeddings = await self.create_embeddings(texts)
 
             # Add batch to collection
-            collection.add(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+            collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
             return ids
@@ -500,7 +500,7 @@ class VectorDBService:
                 filtered_metadatas.append(meta)
 
             # Add batch to collection
-            collection.add(
+            collection.upsert(
                 ids=ids,
                 embeddings=embeddings,
                 documents=texts,
