@@ -133,18 +133,52 @@ jobs:
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
             **🌍 환경**: 🚀 운영(PROD)
 
-            🚀 **모든 승인 완료! 배포가 1분 후, 자동으로 시작됩니다.**
+            🚀 **모든 승인 완료! 빌드가 즉시 시작되며, 빌드 완료 후 1분 대기(환경 설정)를 거쳐 배포됩니다.**
 
             **진행 상황**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})에서 확인 가능
           color: 3066993
           username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
-  # 운영 배포 (2차 승인 후 자동 실행)
+  # Docker 이미지 빌드 및 푸시 (2차 승인 후 실행)
+  build-and-push:
+    name: Build & Push Docker Image
+    needs: [second-approval]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/devths/ai-prod:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/devths/ai-prod:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 운영 배포 (빌드 완료 후 자동 실행)
   deploy-production:
     name: Production Deployment
     runs-on: ubuntu-22.04
-    needs: [second-approval]
+    needs: [second-approval, build-and-push]
     environment:
       name: production
       url: https://www.devths.com
