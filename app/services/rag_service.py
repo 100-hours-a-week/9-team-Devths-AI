@@ -186,9 +186,16 @@ class RAGService:
             if not all_results:
                 return ""
 
+            # 청크 정렬: 같은 문서의 청크를 원본 순서대로 배치 (ADR-060 Phase 2)
+            all_results.sort(key=lambda x: (
+                x[1].get("metadata", {}).get("parent_document_id", ""),
+                x[1].get("metadata", {}).get("chunk_index", 0),
+            ))
+
             context_parts = []
             total_length = 0
-            max_context_length = 4000  # ~1000 tokens (4 chars ≈ 1 token)
+            settings = get_settings()
+            max_context_length = settings.rag_max_context_length
 
             for collection_type, doc in all_results:
                 source = {

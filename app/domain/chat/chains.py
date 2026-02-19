@@ -57,9 +57,9 @@ class RAGChain:
         llm_gateway: LangChainLLMGateway,
         vectorstore: Chroma | None = None,
         vectorstores: dict[str, Chroma] | None = None,
-        max_context_length: int = 4000,
-        retrieval_k: int = 3,
-        fetch_k: int = 20,
+        max_context_length: int = 6000,
+        retrieval_k: int = 5,
+        fetch_k: int = 30,
         lambda_mult: float = 0.5,
     ):
         """Initialize RAG Chain.

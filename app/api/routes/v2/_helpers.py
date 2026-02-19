@@ -105,6 +105,7 @@ def get_services():
                 _rag_chain = RAGChain(
                     llm_gateway=_langchain_gateway,
                     vectorstores=vectorstores,
+                    max_context_length=settings.rag_max_context_length,
                     retrieval_k=settings.rag_retrieval_k,
                     fetch_k=settings.rag_fetch_k,
                     lambda_mult=settings.rag_lambda_mult,
