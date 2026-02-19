@@ -187,10 +187,12 @@ class RAGService:
                 return ""
 
             # 청크 정렬: 같은 문서의 청크를 원본 순서대로 배치 (ADR-060 Phase 2)
-            all_results.sort(key=lambda x: (
-                x[1].get("metadata", {}).get("parent_document_id", ""),
-                x[1].get("metadata", {}).get("chunk_index", 0),
-            ))
+            all_results.sort(
+                key=lambda x: (
+                    x[1].get("metadata", {}).get("parent_document_id", ""),
+                    x[1].get("metadata", {}).get("chunk_index", 0),
+                )
+            )
 
             context_parts = []
             total_length = 0
