@@ -185,12 +185,14 @@ class RAGChain:
                     )
                     all_pairs.extend(pairs)
             elif self._vectorstore:
-                # Legacy: single vectorstore, simple retriever (no MMR)
+                # Legacy: single vectorstore with score threshold filtering
                 retriever = self._vectorstore.as_retriever(
+                    search_type="similarity_score_threshold",
                     search_kwargs={
+                        "score_threshold": 0.3,
                         "k": self._retrieval_k,
                         "filter": {"user_id": user_id},
-                    }
+                    },
                 )
                 docs = await retriever.aget_relevant_documents(query)
                 for doc in docs:
