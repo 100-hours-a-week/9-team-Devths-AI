@@ -24,7 +24,7 @@ class GeminiProvider(BaseLLMProvider):
         self,
         api_key: str | None = None,
         model_name: str = "gemini-2.0-flash",
-        embedding_model: str = "text-embedding-004",
+        embedding_model: str = "gemini-embedding-001",
     ):
         """Initialize Gemini provider.
 
