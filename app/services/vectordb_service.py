@@ -2,8 +2,10 @@
 VectorDB Service using ChromaDB
 
 Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
+ADR-065: CacheBackedEmbeddings + LocalFileStore 도입으로 임베딩 캐시 적용.
 """
 
+import asyncio
 import logging
 import os
 import random
@@ -12,8 +14,14 @@ from typing import Any
 import chromadb
 import google.genai as genai
 from chromadb.config import Settings
+from langchain.embeddings import CacheBackedEmbeddings
+from langchain.storage import LocalFileStore
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 logger = logging.getLogger(__name__)
+
+# 임베딩 캐시 디렉터리 (ADR-065)
+EMBEDDING_CACHE_DIR = os.getenv("EMBEDDING_CACHE_DIR", "./embedding_cache")
 
 
 class VectorDBService:
@@ -40,11 +48,27 @@ class VectorDBService:
         if not api_key:
             raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
-        # 쉼표 구분 다중 키 → 각 키별 클라이언트 생성 (분산 처리)
+        # 쉼표 구분 다중 키 → 각 키별 클라이언트 생성 (분산 처리, 폴백용)
         api_keys = [k.strip() for k in api_key.split(",") if k.strip()]
         self._genai_clients = [genai.Client(api_key=k) for k in api_keys]
         self.genai_client = self._genai_clients[0]  # 하위 호환
         logger.info(f"VectorDB 임베딩: {len(self._genai_clients)}개 API 키 로드")
+
+        # --- ADR-065: CacheBackedEmbeddings + LocalFileStore ---
+        primary_key = api_keys[0]
+        self._underlying_embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/gemini-embedding-001",
+            google_api_key=primary_key,
+        )
+        cache_dir = os.path.expanduser(EMBEDDING_CACHE_DIR)
+        os.makedirs(cache_dir, exist_ok=True)
+        self._embedding_store = LocalFileStore(cache_dir)
+        self.cached_embedder = CacheBackedEmbeddings.from_bytes_store(
+            self._underlying_embeddings,
+            self._embedding_store,
+            namespace="gemini-embedding-001",
+        )
+        logger.info(f"임베딩 캐시 초기화: {cache_dir}")
 
         # Initialize ChromaDB: server mode (v2) or embedded mode
         if chroma_server_host:
@@ -114,7 +138,7 @@ class VectorDBService:
 
     async def create_embedding(self, text: str) -> list[float]:
         """
-        Create embedding using gemini-embedding-001
+        Create embedding using gemini-embedding-001 (ADR-065: 캐시 적용)
 
         Args:
             text: Text to embed
@@ -123,21 +147,30 @@ class VectorDBService:
             Embedding vector
         """
         try:
+            # CacheBackedEmbeddings: 캐시 히트 시 API 호출 생략 (asyncio.to_thread로 비동기 래핑)
+            vectors = await asyncio.to_thread(self.cached_embedder.embed_documents, [text])
+            return vectors[0]
+        except Exception:
+            # 캐시 실패 시 기존 genai.Client 폴백
+            logger.warning("캐시 임베딩 실패, genai.Client 폴백 사용")
+            return await self._create_embedding_fallback(text)
+
+    async def _create_embedding_fallback(self, text: str) -> list[float]:
+        """genai.Client 직접 호출 폴백 (다중 키 라운드로빈)"""
+        try:
             client = random.choice(self._genai_clients)
             result = client.models.embed_content(model="gemini-embedding-001", contents=text)
-            # Extract embedding from EmbedContentResponse
-            # result.embeddings is a list of Embedding objects
             if hasattr(result, "embeddings") and len(result.embeddings) > 0:
                 return result.embeddings[0].values
             else:
                 raise ValueError(f"Unexpected embedding result format: {type(result)}")
         except Exception as e:
-            logger.error(f"Error creating embedding: {e}")
+            logger.error(f"Error creating embedding (fallback): {e}")
             raise
 
     async def create_embeddings(self, texts: list[str]) -> list[list[float]]:
         """
-        Create embeddings for multiple texts in one batch API call.
+        Create embeddings for multiple texts (ADR-065: 캐시 적용)
 
         Args:
             texts: List of texts to embed.
@@ -145,6 +178,18 @@ class VectorDBService:
         Returns:
             List of embedding vectors (same order as texts).
         """
+        if not texts:
+            return []
+        try:
+            # CacheBackedEmbeddings: 개별 텍스트별 캐시 히트/미스 처리 (asyncio.to_thread로 비동기 래핑)
+            return await asyncio.to_thread(self.cached_embedder.embed_documents, texts)
+        except Exception:
+            # 캐시 실패 시 기존 genai.Client 폴백
+            logger.warning("캐시 배치 임베딩 실패, genai.Client 폴백 사용")
+            return await self._create_embeddings_fallback(texts)
+
+    async def _create_embeddings_fallback(self, texts: list[str]) -> list[list[float]]:
+        """genai.Client 직접 배치 호출 폴백 (다중 키 라운드로빈)"""
         if not texts:
             return []
         try:
@@ -157,7 +202,7 @@ class VectorDBService:
                 return [e.values for e in result.embeddings]
             raise ValueError(f"Unexpected embedding result format: {type(result)}")
         except Exception as e:
-            logger.error(f"Error creating batch embeddings: {e}")
+            logger.error(f"Error creating batch embeddings (fallback): {e}")
             raise
 
     async def add_document(
