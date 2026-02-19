@@ -128,6 +128,12 @@ class InterviewSession(BaseModel):
         description="전체 대화 이력",
     )
 
+    # ADR-066: 완벽히 답변된 질문 (유사 질문 중복 방지)
+    mastered_questions: list[dict] = Field(
+        default=[],
+        description="마스터한 질문 [{'question': str, 'embedding': list[float]}]",
+    )
+
 
 class QAItem(BaseModel):
     """Q&A 항목 (면접 리포트용)"""

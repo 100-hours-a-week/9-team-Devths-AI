@@ -18,15 +18,17 @@ from app.api.routes.v2._helpers import get_services, get_session_key
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
+    get_extract_title_prompt,
+)
+from app.prompts.interview import (
+    create_feedback_prompt,
     create_tech_followup_prompt,
     format_conversation_history,
     format_followup_question_label,
     format_main_question_label,
-    get_extract_title_prompt,
     get_system_tech_interview,
-    load_prompt_yaml,
 )
-from app.prompts.interview import create_feedback_prompt
+from app.prompts.loader import load_prompt_yaml
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
@@ -35,6 +37,7 @@ from app.schemas.chat import (
 )
 from app.services.cloudwatch_service import CloudWatchService
 from app.services.example_selector import get_few_shot_for_personality
+from app.services.interview_dedup import is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
@@ -652,6 +655,28 @@ async def generate_chat_stream(
                                     await asyncio.sleep(0.015)
                             else:
                                 current_q.is_completed = True
+
+                                # ADR-066: answer_quality 파싱 → 마스터한 질문 수집
+                                analysis = followup_data.get("analysis", {})
+                                answer_quality = analysis.get("answer_quality", "good")
+                                if interview_type == "tech" and is_mastered_quality(answer_quality):
+                                    try:
+                                        q_embedding = await rag.vectordb.create_embedding(
+                                            current_q.question
+                                        )
+                                        session.mastered_questions.append(
+                                            {
+                                                "question": current_q.question,
+                                                "embedding": q_embedding,
+                                            }
+                                        )
+                                        logger.info(
+                                            "ADR-066: 마스터 질문 등록 (quality=%s): %s",
+                                            answer_quality,
+                                            current_q.question[:50],
+                                        )
+                                    except Exception as e:
+                                        logger.debug("ADR-066: 마스터 임베딩 실패: %s", e)
                     except json.JSONDecodeError as e:
                         logger.error(f"꼬리질문 파싱 실패: {e}")
                         yield sse_error_event(
