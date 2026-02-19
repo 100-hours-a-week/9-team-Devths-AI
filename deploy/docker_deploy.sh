@@ -31,7 +31,25 @@ fi
 
 # Determine Environment (Dev/Stg/Prod) and ECR Repo
 # Reuse logic from start_server_deploy.sh for consistency
-if [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
+# PRIORITY 1: CodeDeploy Runtime Environment Variable (DEPLOYMENT_GROUP_NAME)
+if [ -n "$DEPLOYMENT_GROUP_NAME" ]; then
+    log "ℹ️  Detected CodeDeploy Deployment Group: $DEPLOYMENT_GROUP_NAME"
+    GROUP_LOWER=$(echo "$DEPLOYMENT_GROUP_NAME" | tr '[:upper:]' '[:lower:]')
+    
+    if [[ "$GROUP_LOWER" == *"prod"* ]]; then
+        ENV_TAG="prod"
+        ECR_REPO_NAME="devths/ai-prod"
+    elif [[ "$GROUP_LOWER" == *"stg"* ]] || [[ "$GROUP_LOWER" == *"staging"* ]]; then
+        ENV_TAG="stg"
+        ECR_REPO_NAME="devths/ai-stg"
+    else
+        ENV_TAG="dev"
+        ECR_REPO_NAME="devths/ai-dev"
+    fi
+
+# PRIORITY 2: Build-time Variable from .deploy-env (CODEDEPLOY_DEPLOYMENT_GROUP)
+elif [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
+    log "ℹ️  Using build-time CODEDEPLOY_DEPLOYMENT_GROUP: $CODEDEPLOY_DEPLOYMENT_GROUP"
     GROUP_LOWER=$(echo "$CODEDEPLOY_DEPLOYMENT_GROUP" | tr '[:upper:]' '[:lower:]')
     if [[ "$GROUP_LOWER" == *"prod"* ]]; then
         ENV_TAG="prod"
@@ -43,7 +61,10 @@ if [ -n "$CODEDEPLOY_DEPLOYMENT_GROUP" ]; then
         ENV_TAG="dev"
         ECR_REPO_NAME="devths/ai-dev"
     fi
+
+# PRIORITY 3: Branch Name (Fallback)
 elif [ -n "$DEPLOY_BRANCH" ]; then
+    log "ℹ️  Using branch name: $DEPLOY_BRANCH"
     if [[ "$DEPLOY_BRANCH" == "main" ]]; then
         ENV_TAG="prod"
         ECR_REPO_NAME="devths/ai-prod"
@@ -94,49 +115,66 @@ else
     log "ℹ️  No existing container found."
 fi
 
-# 5. Prepare Environment Variables for Container
-# We need to pass env vars to the container.
-# Strategy: Run load_env_from_parameter_store.sh and dump exports to a file.
+# 5. Prepare Environment Variables for Container (Memory Injection)
+# We need to pass env vars to the container without writing them to disk.
+# Strategy: Source load_env_from_parameter_store.sh and construct -e flags dynamically.
 
-ENV_FILE="$APP_DIR/.env.docker"
-echo "# Docker Env File" > "$ENV_FILE"
+log "📥 Loading vars from Parameter Store..."
+# Set helper vars for load_env script to know where to look
+if [[ "$ENV_TAG" == "prod" ]]; then export PARAMETER_STORE_PATH="/Prod/AI/"; fi
+if [[ "$ENV_TAG" == "stg" ]]; then export PARAMETER_STORE_PATH="/Stg/AI/"; fi
+if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 
-# If param store script exists, run it to set vars in current shell
+# Source the script to load variables into the current shell session
 if [ -f "$APP_DIR/deploy/load_env_from_parameter_store.sh" ]; then
-    log "📥 Loading vars from Parameter Store..."
-    # Set helper vars for load_env script to know where to look
-    if [[ "$ENV_TAG" == "prod" ]]; then export PARAMETER_STORE_PATH="/Prod/AI/"; fi
-    if [[ "$ENV_TAG" == "stg" ]]; then export PARAMETER_STORE_PATH="/Stg/AI/"; fi
-    if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
-    
-    # Run script and capture exported vars is tricky.
-    # Instead, let's just reuse the .env file if it exists (assuming load_env creates/updates it or we use it directly)
-    # The existing load_env script exports vars. 
-    # Let's run it and then dump current env to file, filtering for our app specific vars?
-    # Or better, just depend on .env file presence if load_env_from_parameter_store.sh generates one?
-    # Looking at load_env_from_parameter_store.sh (cached knowledge), it likely exports.
-    
-    # Simpler approach: Create env file from current shell env variables after sourcing
     source "$APP_DIR/deploy/load_env_from_parameter_store.sh"
-    
-    # Append key variables to ENV_FILE
-    # Added: GOOGLE_, GEMINI_, GCP_, VLLM_, CLOVA_, EASYOCR_, CHROMA_, CELERY_, LANGFUSE_, RAG_, EVAL_, INTERVIEW_, LLM_, ENVIRONMENT, DEBUG, LOG_LEVEL
-    env | grep -E "^(AWS_|DB_|REDIS_|S3_|OPENAI_|SLACK_|DISCORD_|JWT_|SECRET_|ALGORITHM|ACCESS_TOKEN|REFRESH_TOKEN|BACKEND_|FRONTEND_|VITE_|GOOGLE_|GEMINI_|GCP_|VLLM_|CLOVA_|EASYOCR_|CHROMA_|CELERY_|LANGFUSE_|RAG_|EVAL_|INTERVIEW_|LLM_|ENVIRONMENT|DEBUG|LOG_LEVEL)" >> "$ENV_FILE"
+else
+    log "⚠️  load_env_from_parameter_store.sh not found. Skipping Parameter Store load."
 fi
 
+# Load local .env if exists (for local testing or overrides)
 if [ -f "$APP_DIR/.env" ]; then
-    log "fq  Merging local .env file..."
-    cat "$APP_DIR/.env" >> "$ENV_FILE"
+    log "📄 Loading local .env file..."
+    set -a # Automatically export all variables
+    source "$APP_DIR/.env"
+    set +a
 fi
+
+# Construct Docker Environment Arguments
+log "🔨 Constructing Docker environment arguments..."
+DOCKER_ENV_ARGS=()
+
+# Filter and add variables to the array
+# We use the same grep pattern to identify relevant variables
+ENV_VARS=$(env | grep -E "^(AWS_|DB_|REDIS_|S3_|OPENAI_|SLACK_|DISCORD_|JWT_|SECRET_|ALGORITHM|ACCESS_TOKEN|REFRESH_TOKEN|BACKEND_|FRONTEND_|VITE_|GOOGLE_|GEMINI_|GCP_|VLLM_|CLOVA_|EASYOCR_|CHROMA_|CELERY_|LANGFUSE_|RAG_|EVAL_|INTERVIEW_|LLM_|ENVIRONMENT|DEBUG|LOG_LEVEL)" | cut -d= -f1)
+
+for var_name in $ENV_VARS; do
+    # Get the value of the variable indirectly
+    var_value="${!var_name}"
+    if [ -n "$var_value" ]; then
+        # Add to array in the format -e KEY=VALUE
+        # IMPORTANT: We verify the value is not empty to avoid empty strings if something went wrong
+        DOCKER_ENV_ARGS+=("-e" "$var_name=$var_value")
+    fi
+done
+
+log "✅ Prepared ${#DOCKER_ENV_ARGS[@]} environment variables for injection."
 
 # 6. Run New Container
 log "▶️  Starting new container..."
-docker run -d \
+# create a temporary array for the command to handle quoting correctly
+cmd=(docker run -d \
     --name "$CONTAINER_NAME" \
     --restart unless-stopped \
-    --env-file "$ENV_FILE" \
+    --log-driver json-file \
+    --log-opt max-size=10m \
+    --log-opt max-file=3 \
+    "${DOCKER_ENV_ARGS[@]}" \
     -p 8000:8000 \
-    "$IMAGE_URI"
+    "$IMAGE_URI")
+
+# Execute the command
+"${cmd[@]}"
 
 if [ $? -ne 0 ]; then
     log "❌ Failed to start container!"
