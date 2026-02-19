@@ -214,6 +214,14 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # PDF Text Extraction (ADR-063)
+    # ============================================
+    pdf_extract_priority: str = Field(
+        default="pdfplumber",
+        description="PDF 텍스트 추출 우선 순위: 'pdfplumber' (디지털 PDF 우선) 또는 'ocr' (항상 OCR)",
+    )
+
+    # ============================================
     # RAG Configuration
     # ============================================
     rag_max_context_length: int = Field(
