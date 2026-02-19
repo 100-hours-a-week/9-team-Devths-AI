@@ -118,7 +118,7 @@ class Settings(BaseSettings):
     # ============================================
     chroma_persist_dir: str = Field(
         default="./chroma_db",
-        description="ChromaDB persistence directory",
+        description="ChromaDB persistence directory. 로컬 기본값 ./chroma_db. 배포 시 환경변수 CHROMA_PERSIST_DIR 로 주입.",
     )
     chroma_collection_resume: str = Field(
         default="resumes",
