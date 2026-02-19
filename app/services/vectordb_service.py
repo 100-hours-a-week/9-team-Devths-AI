@@ -5,6 +5,7 @@ Provides vector storage and retrieval for RAG (Retrieval-Augmented Generation).
 ADR-065: CacheBackedEmbeddings + LocalFileStore 도입으로 임베딩 캐시 적용.
 """
 
+import asyncio
 import logging
 import os
 import random
@@ -146,8 +147,8 @@ class VectorDBService:
             Embedding vector
         """
         try:
-            # CacheBackedEmbeddings: 캐시 히트 시 API 호출 생략
-            vectors = self.cached_embedder.embed_documents([text])
+            # CacheBackedEmbeddings: 캐시 히트 시 API 호출 생략 (asyncio.to_thread로 비동기 래핑)
+            vectors = await asyncio.to_thread(self.cached_embedder.embed_documents, [text])
             return vectors[0]
         except Exception:
             # 캐시 실패 시 기존 genai.Client 폴백
@@ -180,8 +181,8 @@ class VectorDBService:
         if not texts:
             return []
         try:
-            # CacheBackedEmbeddings: 개별 텍스트별 캐시 히트/미스 처리
-            return self.cached_embedder.embed_documents(texts)
+            # CacheBackedEmbeddings: 개별 텍스트별 캐시 히트/미스 처리 (asyncio.to_thread로 비동기 래핑)
+            return await asyncio.to_thread(self.cached_embedder.embed_documents, texts)
         except Exception:
             # 캐시 실패 시 기존 genai.Client 폴백
             logger.warning("캐시 배치 임베딩 실패, genai.Client 폴백 사용")

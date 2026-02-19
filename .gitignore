@@ -72,3 +72,4 @@ data/interview_dataset_train.json
 data/interview_*
 !data/interview_dataset_valid.json
 
+embedding_cache/
