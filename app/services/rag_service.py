@@ -16,6 +16,8 @@ import logging
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 
 from app.config.settings import get_settings
@@ -75,6 +77,48 @@ RAG_QNA_PROMPT = """관련 정보:
 질문: {question}
 
 위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
+
+# RRF constant for ensemble retriever (ADR-069)
+_RRF_K = 60
+
+
+def _rrf_merge(
+    dense_pairs: list[tuple[str, Document]],
+    sparse_pairs: list[tuple[str, Document]],
+    dense_weight: float,
+    sparse_weight: float,
+    top_k: int = 0,
+) -> list[tuple[str, Document]]:
+    """Merge dense (MMR) and sparse (BM25) results with Reciprocal Rank Fusion.
+
+    top_k: max documents to return (0 = no limit).
+    """
+    def _key(doc: Document) -> str:
+        return (doc.page_content or "")[:500]
+
+    score_map: dict[str, tuple[str, Document, float]] = {}
+
+    for rank, (ct, doc) in enumerate(dense_pairs, start=1):
+        key = _key(doc)
+        rrf = dense_weight / (_RRF_K + rank)
+        if key not in score_map:
+            score_map[key] = (ct, doc, 0.0)
+        ct_cur, doc_cur, s_cur = score_map[key]
+        score_map[key] = (ct_cur, doc_cur, s_cur + rrf)
+
+    for rank, (ct, doc) in enumerate(sparse_pairs, start=1):
+        key = _key(doc)
+        rrf = sparse_weight / (_RRF_K + rank)
+        if key not in score_map:
+            score_map[key] = (ct, doc, 0.0)
+        ct_cur, doc_cur, s_cur = score_map[key]
+        score_map[key] = (ct_cur, doc_cur, s_cur + rrf)
+
+    merged = sorted(score_map.values(), key=lambda x: x[2], reverse=True)
+    pairs = [(ct, doc) for ct, doc, _ in merged]
+    if top_k > 0:
+        pairs = pairs[:top_k]
+    return pairs
 
 
 def _parse_interview_json(text: str) -> dict[str, Any] | None:
@@ -232,20 +276,71 @@ class RAGService:
     ) -> str:
         """
         Retrieve relevant context from VectorDB (RAGChain MMR when available, else VectorDB query).
-
-        Args:
-            query: User's query
-            user_id: User ID for filtering
-            context_types: List of collection types to search
-            n_results: Number of results per collection (fallback path only)
-
-        Returns:
-            Formatted context string
+        When rag_use_bm25 is True, uses dense (MMR) + sparse (BM25) ensemble with RRF (ADR-069).
         """
         if context_types is None:
             context_types = ["resume", "job_posting"]
 
-        if self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore):
+        settings = get_settings()
+        has_vectorstore = bool(
+            self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore)
+        )
+
+        # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF
+        if (
+            settings.rag_use_bm25
+            and has_vectorstore
+            and self.vectordb
+        ):
+            types_to_fetch = [ct for ct in context_types if ct != "portfolio"]
+            if not types_to_fetch:
+                return ""
+
+            dense_pairs = await self._rag_chain.retrieve_context_documents(
+                query, user_id, types_to_fetch
+            )
+
+            results_per_type = await asyncio.gather(
+                *[
+                    self.vectordb.get_all_documents_by_user(user_id=user_id, collection_type=ct)
+                    for ct in types_to_fetch
+                ]
+            )
+            bm25_docs: list[Document] = []
+            for ct, doc_list in zip(types_to_fetch, results_per_type, strict=True):
+                for r in doc_list:
+                    meta = dict(r.get("metadata") or {})
+                    meta["collection_type"] = ct
+                    bm25_docs.append(
+                        Document(page_content=r.get("text") or "", metadata=meta)
+                    )
+
+            sparse_pairs: list[tuple[str, Document]] = []
+            if bm25_docs and query.strip():
+                k_bm25 = max(10, min(50, len(bm25_docs)))
+                loop = asyncio.get_event_loop()
+
+                def _bm25_invoke() -> list[Document]:
+                    retriever = BM25Retriever.from_documents(bm25_docs, k=k_bm25)
+                    return retriever.invoke(query)
+
+                sparse_docs = await loop.run_in_executor(None, _bm25_invoke)
+                sparse_pairs = [
+                    (d.metadata.get("collection_type", ""), d) for d in sparse_docs
+                ]
+
+            merged = _rrf_merge(
+                dense_pairs,
+                sparse_pairs,
+                settings.rag_ensemble_dense_weight,
+                settings.rag_ensemble_sparse_weight,
+                top_k=settings.rag_rerank_top_k if settings.rag_rerank_top_k > 0 else 0,
+            )
+            if not merged:
+                return ""
+            return self._rag_chain._format_pairs_to_context(merged)
+
+        if has_vectorstore:
             return await self._rag_chain.retrieve_context(query, user_id, context_types)
 
         try:

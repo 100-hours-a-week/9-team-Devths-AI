@@ -145,6 +145,75 @@ class RAGChain:
             logger.warning("MMR search failed for %s: %s", collection_type, e)
             return []
 
+    async def retrieve_context_documents(
+        self,
+        query: str,
+        user_id: str,
+        collection_types: list[str] | None = None,
+    ) -> list[tuple[str, Document]]:
+        """Retrieve (collection_type, Document) pairs with MMR (for ensemble with BM25).
+
+        Returns:
+            List of (collection_type, Document). Empty if no vectorstore.
+        """
+        if collection_types is None:
+            collection_types = ["resume", "job_posting"]
+
+        all_pairs: list[tuple[str, Document]] = []
+
+        if self._vectorstores:
+            for ct in collection_types:
+                store = self._vectorstores.get(ct)
+                if not store:
+                    continue
+                filter_dict = None
+                if ct != "portfolio" and user_id:
+                    filter_dict = {"user_id": user_id}
+                pairs = await asyncio.to_thread(
+                    self._mmr_search_one,
+                    ct,
+                    store,
+                    query,
+                    filter_dict,
+                )
+                all_pairs.extend(pairs)
+        elif self._vectorstore:
+            retriever = self._vectorstore.as_retriever(
+                search_type="similarity_score_threshold",
+                search_kwargs={
+                    "score_threshold": 0.3,
+                    "k": self._retrieval_k,
+                    "filter": {"user_id": user_id},
+                },
+            )
+            docs = await retriever.aget_relevant_documents(query)
+            for doc in docs:
+                source = doc.metadata.get("collection_type", "document")
+                ct = source if source in COLLECTION_NAME_MAP else "resume"
+                all_pairs.append((ct, doc))
+
+        return all_pairs
+
+    def _format_pairs_to_context(
+        self, all_pairs: list[tuple[str, Document]]
+    ) -> str:
+        """Format (collection_type, Document) pairs to context string with length limit."""
+        if not all_pairs:
+            return ""
+        context_parts = []
+        total_length = 0
+        for collection_type, doc in all_pairs:
+            source_name = self._source_name(collection_type)
+            doc_text = doc.page_content
+            remaining = self._max_context_length - total_length
+            if len(doc_text) > remaining:
+                doc_text = doc_text[:remaining] + "..."
+            context_parts.append(f"[출처: {source_name}]\n{doc_text}")
+            total_length += len(doc_text)
+            if total_length >= self._max_context_length:
+                break
+        return "\n\n".join(context_parts)
+
     async def retrieve_context(
         self,
         query: str,
@@ -161,62 +230,11 @@ class RAGChain:
         Returns:
             Formatted context string.
         """
-        if collection_types is None:
-            collection_types = ["resume", "job_posting"]
-
         try:
-            all_pairs: list[tuple[str, Document]] = []
-
-            if self._vectorstores:
-                # Per-collection MMR
-                for ct in collection_types:
-                    store = self._vectorstores.get(ct)
-                    if not store:
-                        continue
-                    filter_dict = None
-                    if ct != "portfolio" and user_id:
-                        filter_dict = {"user_id": user_id}
-                    pairs = await asyncio.to_thread(
-                        self._mmr_search_one,
-                        ct,
-                        store,
-                        query,
-                        filter_dict,
-                    )
-                    all_pairs.extend(pairs)
-            elif self._vectorstore:
-                # Legacy: single vectorstore with score threshold filtering
-                retriever = self._vectorstore.as_retriever(
-                    search_type="similarity_score_threshold",
-                    search_kwargs={
-                        "score_threshold": 0.3,
-                        "k": self._retrieval_k,
-                        "filter": {"user_id": user_id},
-                    },
-                )
-                docs = await retriever.aget_relevant_documents(query)
-                for doc in docs:
-                    source = doc.metadata.get("collection_type", "document")
-                    ct = source if source in COLLECTION_NAME_MAP else "resume"
-                    all_pairs.append((ct, doc))
-            else:
-                return ""
-
-            # Format context with length limit
-            context_parts = []
-            total_length = 0
-            for collection_type, doc in all_pairs:
-                source_name = self._source_name(collection_type)
-                doc_text = doc.page_content
-                remaining = self._max_context_length - total_length
-                if len(doc_text) > remaining:
-                    doc_text = doc_text[:remaining] + "..."
-                context_parts.append(f"[출처: {source_name}]\n{doc_text}")
-                total_length += len(doc_text)
-                if total_length >= self._max_context_length:
-                    break
-            return "\n\n".join(context_parts)
-
+            all_pairs = await self.retrieve_context_documents(
+                query, user_id, collection_types
+            )
+            return self._format_pairs_to_context(all_pairs)
         except Exception as e:
             logger.error("Error retrieving context: %s", e)
             return ""
