@@ -1,8 +1,9 @@
 """
-SemanticSimilarity 기반 예제 선택 (평시 질의 응답, 인성 면접용).
+SemanticSimilarity 기반 예제 선택 (평시 질의 응답, 인성·기술 면접용).
 
 - 평시: 정적 예제 풀에서 사용자 질문과 유사한 예제 k개 선택해 프롬프트에 주입.
 - 인성: interview_feedback 컬렉션에서 유사 Q&A k개 조회해 프롬프트에 주입.
+- 기술: interview_feedback 컬렉션에서 유사 기술 Q&A k개 조회해 프롬프트에 주입.
 """
 
 import logging
@@ -47,24 +48,45 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
+# 정적 예제 임베딩 캐시 (첫 호출 시 생성, 이후 재사용)
+_GENERAL_CHAT_EMBEDDINGS: list[list[float]] | None = None
+
+
 async def get_few_shot_for_general(
     vectordb: Any,
     user_message: str,
     k: int = 2,
+    min_similarity: float = 0.3,
 ) -> str:
-    """평시 질의 응답용: 사용자 질문과 유사한 예제 k개를 선택해 문자열로 반환."""
+    """평시 질의 응답용: 사용자 질문과 유사한 예제 k개를 선택해 문자열로 반환.
+
+    Args:
+        vectordb: VectorDB 서비스 인스턴스.
+        user_message: 사용자 질문 텍스트.
+        k: 선택할 예제 수.
+        min_similarity: 최소 코사인 유사도 임계값 (미달 시 주입하지 않음).
+    """
+    global _GENERAL_CHAT_EMBEDDINGS  # noqa: PLW0603
     if k <= 0 or not GENERAL_CHAT_EXAMPLES:
         return ""
     try:
-        inputs = [ex["input"] for ex in GENERAL_CHAT_EXAMPLES]
-        embeddings = await vectordb.create_embeddings([user_message] + inputs)
-        if not embeddings or len(embeddings) < 2:
+        # 정적 예제 임베딩은 최초 1회만 생성 후 캐시
+        if _GENERAL_CHAT_EMBEDDINGS is None:
+            inputs = [ex["input"] for ex in GENERAL_CHAT_EXAMPLES]
+            _GENERAL_CHAT_EMBEDDINGS = await vectordb.create_embeddings(inputs)
+
+        # 사용자 질문만 임베딩 (정적 예제는 캐시 사용)
+        query_emb_list = await vectordb.create_embeddings([user_message])
+        if not query_emb_list:
             return ""
-        query_emb = embeddings[0]
-        sims = [_cosine_similarity(query_emb, embeddings[i + 1]) for i in range(len(inputs))]
-        indexed = list(zip(sims, range(len(sims)), strict=False))
-        indexed.sort(key=lambda x: -x[0])
-        top_indices = [idx for _, idx in indexed[:k]]
+        query_emb = query_emb_list[0]
+
+        sims = [_cosine_similarity(query_emb, emb) for emb in _GENERAL_CHAT_EMBEDDINGS]
+        indexed = sorted(enumerate(sims), key=lambda x: -x[1])
+
+        # 유사도 임계값 필터: 관련 없는 예시 주입 방지
+        top_indices = [idx for idx, sim in indexed[:k] if sim >= min_similarity]
+
         lines = []
         for idx in top_indices:
             ex = GENERAL_CHAT_EXAMPLES[idx]
@@ -81,8 +103,17 @@ async def get_few_shot_for_personality(
     query_text: str,
     k: int = 2,
     interview_type_filter: str | None = "personality",
+    max_distance: float = 1.5,
 ) -> str:
-    """인성 면접용: interview_feedback에서 유사 Q&A k개 조회해 문자열로 반환."""
+    """인성 면접용: interview_feedback에서 유사 Q&A k개 조회해 문자열로 반환.
+
+    Args:
+        vectordb: VectorDB 서비스 인스턴스.
+        query_text: 검색 쿼리 텍스트.
+        k: 조회할 예제 수.
+        interview_type_filter: 면접 유형 필터 (personality/technical).
+        max_distance: L2 거리 임계값 (초과 시 저품질 결과 제외).
+    """
     if k <= 0:
         return ""
     try:
@@ -94,12 +125,15 @@ async def get_few_shot_for_personality(
             collection_type="interview_feedback",
             n_results=k,
             where=where,
+            max_distance=max_distance,
         )
         if not results:
+            # 필터 결과 없으면 필터 없이 재시도
             results = await vectordb.query(
                 query_text=query_text[:500],
                 collection_type="interview_feedback",
                 n_results=k,
+                max_distance=max_distance,
             )
         lines = []
         for r in results:
@@ -122,3 +156,19 @@ async def get_few_shot_for_personality(
     except Exception as e:
         logger.warning("Few-shot personality selection failed: %s", e)
         return ""
+
+
+async def get_few_shot_for_technical(
+    vectordb: Any,
+    query_text: str,
+    k: int = 2,
+    max_distance: float = 1.5,
+) -> str:
+    """기술 면접용: interview_feedback에서 유사 기술 Q&A k개 조회해 문자열로 반환."""
+    return await get_few_shot_for_personality(
+        vectordb=vectordb,
+        query_text=query_text,
+        k=k,
+        interview_type_filter="technical",
+        max_distance=max_distance,
+    )

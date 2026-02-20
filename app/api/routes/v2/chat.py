@@ -36,7 +36,7 @@ from app.schemas.chat import (
     InterviewSession,
 )
 from app.services.cloudwatch_service import CloudWatchService
-from app.services.example_selector import get_few_shot_for_personality
+from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
 from app.services.interview_dedup import is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning
@@ -461,6 +461,24 @@ async def generate_chat_stream(
                             )
                     except Exception as e:
                         logger.debug("Few-shot personality selection skipped: %s", e)
+
+                # 기술 면접: interview_feedback에서 유사 기술 Q&A 참고 예시 추가
+                elif yaml_name == "tech_interview_init":
+                    try:
+                        few_shot = await get_few_shot_for_technical(
+                            rag.vectordb,
+                            query_text="기술 면접 질문 답변 예시",
+                            k=2,
+                        )
+                        if few_shot:
+                            system_prompt = (
+                                system_prompt.rstrip()
+                                + "\n\n## 참고 예시 (유사 기술 Q&A)\n\n"
+                                + few_shot
+                                + "\n\n위 예시의 깊이와 구체성을 참고하여 질문을 생성하세요."
+                            )
+                    except Exception as e:
+                        logger.debug("Few-shot tech selection skipped: %s", e)
 
                 if model_choice == "vllm" and rag.vllm:
                     full_response = ""
