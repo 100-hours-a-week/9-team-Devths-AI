@@ -86,6 +86,19 @@ class Settings(BaseSettings):
         default=10,
         description="Max number of documents after merge (0 = no limit). ADR-069 long-context rerank.",
     )
+    # ADR-069 후속: BM25 인덱스 상한(메모리·지연 완화), 문서 압축기
+    rag_bm25_max_docs: int = Field(
+        default=1000,
+        description="Max documents to build BM25 index from (0 = no limit). ADR-069 follow-up.",
+    )
+    rag_use_compressor: bool = Field(
+        default=False,
+        description="Use LLM document compressor on merged results (ADR-069 Phase 3). Increases latency/cost.",
+    )
+    rag_compressor_top_k: int = Field(
+        default=5,
+        description="Number of docs to compress when rag_use_compressor=True. Use smaller k to limit LLM calls.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:
