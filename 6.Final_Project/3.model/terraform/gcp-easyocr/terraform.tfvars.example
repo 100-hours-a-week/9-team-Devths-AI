@@ -1,0 +1,10 @@
+# 복사 후 terraform.tfvars 로 저장
+# cp terraform.tfvars.example terraform.tfvars
+
+project_id = "gen-lang-client-0124970927"
+zone       = "asia-northeast3-a"
+region     = "asia-northeast3"
+
+# true: VM 기동 시 wget → unzip → docker build → docker run 자동 수행
+# false: Docker+NVIDIA만 설치, SSH 접속 후 수동으로 빌드/실행
+startup_fetch_and_run_easyocr = true

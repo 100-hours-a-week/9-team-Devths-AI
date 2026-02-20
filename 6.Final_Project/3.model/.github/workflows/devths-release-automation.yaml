@@ -1,0 +1,172 @@
+name: Devths-FE Release 자동화
+
+on:
+  push:
+    branches:
+      - 'release/*'
+      - 'main'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # release/* 브랜치: RC Prerelease 생성/업데이트
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  release-candidate:
+    name: RC Prerelease 업데이트
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/release/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: RC Prerelease 생성/업데이트
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branchName = context.ref.replace('refs/heads/', '');
+            const versionMatch = branchName.match(/release\/(v\d+\.\d+\.\d+)/);
+
+            if (!versionMatch) {
+              core.setFailed(`❌ 브랜치명에서 버전을 추출할 수 없습니다: ${branchName}`);
+              return;
+            }
+
+            const version = versionMatch[1];
+            const rcTag = `${version}-rc`;
+
+            console.log(`📦 Release 버전: ${version}`);
+            console.log(`🏷️ RC 태그: ${rcTag}`);
+
+            let latestMainTag = null;
+            try {
+              const { data: tags } = await github.rest.repos.listTags({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              const mainTags = tags.filter(tag => /^v\d+\.\d+\.\d+$/.test(tag.name));
+              if (mainTags.length > 0) {
+                latestMainTag = mainTags[0].name;
+                console.log(`✅ main 최신 태그: ${latestMainTag}`);
+              }
+            } catch (error) {
+              console.log(`⚠️ 태그 조회 오류: ${error.message}`);
+            }
+
+            const generateNotesParams = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: rcTag,
+              target_commitish: branchName
+            };
+            if (latestMainTag) generateNotesParams.previous_tag_name = latestMainTag;
+
+            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes(generateNotesParams);
+
+            const rcBody = `> ⚠️ **주의: 이것은 릴리즈 후보(Release Candidate) 버전입니다.**\n` +
+                           `> 최종 릴리즈는 \`main\` 브랜치 머지 후 자동으로 생성됩니다.\n\n` +
+                           `${releaseNotes.body}\n\n` +
+                           `---\n` +
+                           `**📍 베이스 브랜치**: \`${branchName}\`\n` +
+                           `**📌 이전 태그**: \`${latestMainTag || 'N/A'}\`\n` +
+                           `**🔄 자동 생성**: GitHub Release Notes API`;
+
+            let existingRelease = null;
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: rcTag
+              });
+              existingRelease = release;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            if (existingRelease) {
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existingRelease.id,
+                name: `${version} (RC)`,
+                body: rcBody,
+                prerelease: true,
+                target_commitish: branchName
+              });
+            } else {
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: rcTag,
+                name: `${version} (RC)`,
+                body: rcBody,
+                prerelease: true,
+                target_commitish: branchName
+              });
+            }
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # main 브랜치: 정식 Release 배포
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  production-release:
+    name: 정식 Release 배포
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 정식 Release 생성
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commitMessage = context.payload.head_commit?.message || '';
+            const commitVersionMatch = commitMessage.match(/release\/(v\d+\.\d+\.\d+)/);
+
+            if (!commitVersionMatch) {
+              console.log("⚠️ 머지 커밋 메시지에서 버전을 찾을 수 없습니다. 배포를 건너뜁니다.");
+              return;
+            }
+
+            const newVersion = commitVersionMatch[1];
+            let latestMainTag = null;
+
+            try {
+              const { data: tags } = await github.rest.repos.listTags({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100
+              });
+              const mainTags = tags.filter(tag => /^v\d+\.\d+\.\d+$/.test(tag.name));
+              if (mainTags.length > 0) latestMainTag = mainTags[0].name;
+            } catch (error) {
+              console.log(`⚠️ 태그 조회 실패: ${error.message}`);
+            }
+
+            const { data: releaseNotes } = await github.rest.repos.generateReleaseNotes({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: newVersion,
+              target_commitish: 'main',
+              previous_tag_name: latestMainTag || undefined
+            });
+
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: newVersion,
+              name: newVersion,
+              body: releaseNotes.body,
+              draft: false,
+              prerelease: false,
+              target_commitish: 'main'
+            });
+
+            console.log(`✅ 정식 Release 생성 완료: ${release.html_url}`);

@@ -1,0 +1,15 @@
+b1576c1c7a866a5585831888b4e70fdaa541362d		branch 'feature/yaml-prompt-management' of github.com:100-hours-a-week/9-team-Devths-AI
+0853e6a3de342eef9c9023e861f7c155ba61e445	not-for-merge	branch 'chore/#95' of github.com:100-hours-a-week/9-team-Devths-AI
+0f2da6a017eef735569639154b4f959cbf35d1f1	not-for-merge	branch 'chore/config-llm-updates' of github.com:100-hours-a-week/9-team-Devths-AI
+265f75ad394a197af460c06795a8d5cb3eb17124	not-for-merge	branch 'chore/docker-cicd-파이프라인-구축' of github.com:100-hours-a-week/9-team-Devths-AI
+7504547f25c5ddd847097f309742d1a8a69a8b61	not-for-merge	branch 'develop' of github.com:100-hours-a-week/9-team-Devths-AI
+322decfbe86b69f12590041692d2142b4dd3f74a	not-for-merge	branch 'docs/readme-update' of github.com:100-hours-a-week/9-team-Devths-AI
+6af9627d6c77542491cdf160c039bf3ddaaaf0c2	not-for-merge	branch 'feature/api-updates' of github.com:100-hours-a-week/9-team-Devths-AI
+68ac9d72ddddde5b155d82289d8eeddcb821cf74	not-for-merge	branch 'feature/evaluation-api' of github.com:100-hours-a-week/9-team-Devths-AI
+d52d162ded4b1bd1568ac0ec2befde783d1302ca	not-for-merge	branch 'feature/langchain-enhancement' of github.com:100-hours-a-week/9-team-Devths-AI
+8fba481fbe09bfd526bb27fef2ab8e8d6dfdcefe	not-for-merge	branch 'feature/terraform' of github.com:100-hours-a-week/9-team-Devths-AI
+5631976171482ee0885d0d80ed1b0ef216a06dba	not-for-merge	branch 'fix/exception-handling' of github.com:100-hours-a-week/9-team-Devths-AI
+2291d5dd68a708eeeee9139eeb1d610c018edf41	not-for-merge	branch 'hotfix/revert-evaluation-schema' of github.com:100-hours-a-week/9-team-Devths-AI
+474ba172a9a2b03da99dbecbc6d64ef2ac01f413	not-for-merge	branch 'main' of github.com:100-hours-a-week/9-team-Devths-AI
+76b302f55d2bc53b6b4cb8c2add4fcd719d578f0	not-for-merge	branch 'release/v0.1.0' of github.com:100-hours-a-week/9-team-Devths-AI
+c2cfeca3cb151321f0b302d6f26d56248f99035c	not-for-merge	branch 'release/v1.0.0' of github.com:100-hours-a-week/9-team-Devths-AI

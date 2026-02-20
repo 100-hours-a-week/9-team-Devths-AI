@@ -1,0 +1,14 @@
+# vLLM 서버 전용 requirements.txt
+# GCP 서버에서 vLLM 실행을 위한 최소 패키지
+
+# vLLM (GPU 서버용)
+vllm>=0.6.0
+
+# 기본 패키지
+numpy>=1.24.0
+torch>=2.0.0
+transformers>=4.30.0
+
+# 선택사항 (성능 향상)
+# accelerate
+# flash-attn  # GPU 최적화 (선택사항)

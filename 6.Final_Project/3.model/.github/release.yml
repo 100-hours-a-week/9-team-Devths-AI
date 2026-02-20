@@ -1,0 +1,23 @@
+# .github/release.yml (GitHub 공식 API 규격)
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: '🚀 새로운 기능 (Features)'
+      labels:
+        - 'feat'
+        - 'feature'
+    - title: '✨ 기능 개선 (Improvements)'
+      labels:
+        - 'enhancement'
+        - 'refactor'
+    - title: '🐛 버그 수정 (Bug Fixes)'
+      labels:
+        - 'fix'
+        - 'bugfix'
+        - 'bug'
+    - title: '🛠️ 인프라 및 유지보수'
+      labels:
+        - 'infra'
+        - 'chore'

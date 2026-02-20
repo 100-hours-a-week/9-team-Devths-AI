@@ -1,0 +1,9 @@
+# 복사 후 terraform.tfvars 로 저장하고 project_id 등 수정
+# cp terraform.tfvars.example terraform.tfvars
+
+project_id = "gen-lang-client-0124970927"
+zone       = "asia-northeast3-a"
+region     = "asia-northeast3"
+
+# 서브넷을 직접 지정할 때만
+# subnet_self_link = "projects/gen-lang-client-0124970927/regions/asia-northeast3/subnetworks/default"

@@ -1,0 +1,48 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+[remote "origin"]
+	url = git@github.com:100-hours-a-week/9-team-Devths-AI.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+[branch "docs/readme-update"]
+	vscode-merge-base = origin/develop
+	remote = origin
+	merge = refs/heads/docs/readme-update
+[branch "fix/exception-handling"]
+	vscode-merge-base = origin/develop
+	remote = origin
+	merge = refs/heads/fix/exception-handling
+[branch "feature/evaluation-api"]
+	vscode-merge-base = origin/fix/exception-handling
+	remote = origin
+	merge = refs/heads/feature/evaluation-api
+[branch "chore/docker-v2-setup"]
+	vscode-merge-base = origin/develop
+	vscode-merge-base = origin/develop
+[branch "chore/config-llm-updates"]
+	remote = origin
+	vscode-merge-base = origin/develop
+	vscode-merge-base = origin/develop
+	merge = refs/heads/chore/config-llm-updates
+[branch "feature/terraform"]
+	remote = origin
+	merge = refs/heads/feature/terraform
+[branch "feature/langchain-enhancement"]
+	vscode-merge-base = origin/develop
+[branch "hotfix/revert-evaluation-schema"]
+	vscode-merge-base = origin/develop
+[branch "develop"]
+	remote = origin
+	merge = refs/heads/develop
+	vscode-merge-base = origin/develop
+[branch "feature/yaml-prompt-management"]
+	remote = origin
+	vscode-merge-base = origin/develop
+	merge = refs/heads/feature/yaml-prompt-management

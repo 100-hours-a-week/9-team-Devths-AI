@@ -1,0 +1,17 @@
+# CodeQL Data Extension - Custom Sanitizers
+# sanitize_log_input() 함수를 Log Injection에 대한 sanitizer로 등록
+
+extensions:
+  - addsTo:
+      pack: codeql/python-all
+      extensible: summaryModel
+    data:
+      # sanitize_log_input은 입력을 sanitize하여 반환
+      - ["app.utils.log_sanitizer", "sanitize_log_input", "Argument[0]", "ReturnValue", "taint"]
+
+  - addsTo:
+      pack: codeql/python-all
+      extensible: neutralModel
+    data:
+      # sanitize_log_input은 taint를 제거하는 neutralizer
+      - ["app.utils.log_sanitizer", "sanitize_log_input", "log-injection"]

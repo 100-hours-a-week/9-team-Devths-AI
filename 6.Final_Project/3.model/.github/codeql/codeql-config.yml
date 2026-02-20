@@ -1,0 +1,9 @@
+name: "Custom CodeQL Config"
+
+# 보안 쿼리 사용
+queries:
+  - uses: security-and-quality
+
+# 커스텀 데이터 확장 (sanitizer 등록)
+data-extensions:
+  - .github/codeql/extensions/custom-sanitizers.yml
