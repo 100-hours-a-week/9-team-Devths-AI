@@ -194,9 +194,7 @@ class RAGChain:
 
         return all_pairs
 
-    def _format_pairs_to_context(
-        self, all_pairs: list[tuple[str, Document]]
-    ) -> str:
+    def _format_pairs_to_context(self, all_pairs: list[tuple[str, Document]]) -> str:
         """Format (collection_type, Document) pairs to context string with length limit."""
         if not all_pairs:
             return ""
@@ -231,9 +229,7 @@ class RAGChain:
             Formatted context string.
         """
         try:
-            all_pairs = await self.retrieve_context_documents(
-                query, user_id, collection_types
-            )
+            all_pairs = await self.retrieve_context_documents(query, user_id, collection_types)
             return self._format_pairs_to_context(all_pairs)
         except Exception as e:
             logger.error("Error retrieving context: %s", e)

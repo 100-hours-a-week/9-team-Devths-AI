@@ -93,6 +93,7 @@ def _rrf_merge(
 
     top_k: max documents to return (0 = no limit).
     """
+
     def _key(doc: Document) -> str:
         return (doc.page_content or "")[:500]
 
@@ -287,11 +288,7 @@ class RAGService:
         )
 
         # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF
-        if (
-            settings.rag_use_bm25
-            and has_vectorstore
-            and self.vectordb
-        ):
+        if settings.rag_use_bm25 and has_vectorstore and self.vectordb:
             types_to_fetch = [ct for ct in context_types if ct != "portfolio"]
             if not types_to_fetch:
                 return ""
@@ -311,9 +308,7 @@ class RAGService:
                 for r in doc_list:
                     meta = dict(r.get("metadata") or {})
                     meta["collection_type"] = ct
-                    bm25_docs.append(
-                        Document(page_content=r.get("text") or "", metadata=meta)
-                    )
+                    bm25_docs.append(Document(page_content=r.get("text") or "", metadata=meta))
 
             sparse_pairs: list[tuple[str, Document]] = []
             if bm25_docs and query.strip():
@@ -325,9 +320,7 @@ class RAGService:
                     return retriever.invoke(query)
 
                 sparse_docs = await loop.run_in_executor(None, _bm25_invoke)
-                sparse_pairs = [
-                    (d.metadata.get("collection_type", ""), d) for d in sparse_docs
-                ]
+                sparse_pairs = [(d.metadata.get("collection_type", ""), d) for d in sparse_docs]
 
             merged = _rrf_merge(
                 dense_pairs,
