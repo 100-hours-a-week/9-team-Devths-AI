@@ -69,6 +69,23 @@ class Settings(BaseSettings):
         default=0.5,
         description="MMR diversity (0=diverse, 1=relevant). 0.5 balanced",
     )
+    # ADR-069: 앙상블 리트리버 (희소 BM25 + 밀집 MMR)
+    rag_use_bm25: bool = Field(
+        default=True,
+        description="Use BM25 sparse retriever in ensemble with MMR (ADR-069)",
+    )
+    rag_ensemble_dense_weight: float = Field(
+        default=0.7,
+        description="Weight for dense (MMR) retriever in ensemble (0~1). Sparse weight = 1 - this.",
+    )
+    rag_ensemble_sparse_weight: float = Field(
+        default=0.3,
+        description="Weight for sparse (BM25) retriever in ensemble (0~1)",
+    )
+    rag_rerank_top_k: int = Field(
+        default=10,
+        description="Max number of documents after merge (0 = no limit). ADR-069 long-context rerank.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:
