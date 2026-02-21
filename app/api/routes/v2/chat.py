@@ -35,7 +35,6 @@ from app.schemas.chat import (
     InterviewQuestionState,
     InterviewSession,
 )
-from app.services.cloudwatch_service import CloudWatchService
 from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
 from app.services.interview_dedup import is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
@@ -93,7 +92,6 @@ async def generate_chat_stream(
     start_time = time.time()
 
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
-    dims = {"Model": model, "Mode": str(mode)}
 
     logger.info("")
     logger.info(f"{'='*80}")
@@ -772,11 +770,10 @@ async def generate_chat_stream(
             )
             yield f"data: [DONE]{sse_end}"
 
-    # Latency 측정 종료 및 전송
+    # Latency 측정 및 로깅 (PLG 스택 로그 활용)
     try:
         duration = (time.time() - start_time) * 1000
-        cw = CloudWatchService.get_instance()
-        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+        safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration)
     except Exception as e:
         logger.error(f"Failed to record latency metric: {e}")
 
