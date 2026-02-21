@@ -4,6 +4,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔍 Validating deployed service..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# AWS CodeDeploy의 환경 변수(PATH) 초기화 문제 방지를 위해 명시적으로 PATH 추가
+export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+
 APP_DIR="/home/ubuntu/ai"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/fastapi-app.log"

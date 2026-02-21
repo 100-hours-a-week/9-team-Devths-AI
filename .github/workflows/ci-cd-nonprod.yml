@@ -258,11 +258,11 @@ jobs:
           
           # Determine Deployment Group
           if [[ "${{ github.ref }}" == "refs/heads/chore/docker-cicd" ]] || [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_DEV }}"
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_DEV }}"
           elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
-            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_STAGING }}"
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_STAGING }}"
           else
-            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_DEV }}"
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_DEV }}"
           fi
           
           DEPLOYMENT_ID=$(aws deploy create-deployment \
