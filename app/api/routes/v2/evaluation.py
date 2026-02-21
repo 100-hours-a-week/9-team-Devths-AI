@@ -49,6 +49,14 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
 
     실패해도 평가 응답에 영향을 주지 않습니다.
     """
+
+    try:
+        from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+        CELERY_TASK_WAIT_TIME.labels(task_name="ingest_qa").observe(0.0)
+        CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").inc()
+    except Exception:
+        pass
+
     try:
         rag = get_services()
         vectordb = rag.vectordb
@@ -81,6 +89,12 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
         logger.info("📦 면접 Q&A VectorDB 자동 저장 완료: %d건", result["ingested_count"])
     except Exception as e:
         logger.warning("면접 Q&A VectorDB 자동 저장 실패 (무시): %s", str(e), exc_info=True)
+    finally:
+        try:
+            from app.core.monitoring import CELERY_TASKS_ACTIVE
+            CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").dec()
+        except Exception:
+            pass
 
 
 # ============================================

@@ -6,7 +6,10 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_client import make_asgi_app
 
+import app.core.monitoring  # Register custom metrics
+from app.api.middleware.metrics import PrometheusMiddleware
 from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
@@ -88,6 +91,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus 모니터링 미들웨어 등록 (CORS 뒤에 붙여야 동작이 정확함)
+app.add_middleware(PrometheusMiddleware)
+
+# Prometheus Metrics 엔드포인트 마운트
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 # 422 에러 핸들러 (디버깅용 상세 로그)

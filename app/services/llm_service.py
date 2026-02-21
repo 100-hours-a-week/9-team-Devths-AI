@@ -180,9 +180,19 @@ class LLMService:
         """토큰 사용량 기록 (PLG 등으로 대체됨)"""
         pass
 
-    def _record_error(self, error: Exception, model_name: str) -> None:
+    def _record_error(self, error: Exception, model_name: str) -> None:  # noqa: ARG002
         """에러 기록"""
-        pass
+        try:
+            from app.core.monitoring import EXTERNAL_API_ERRORS
+            error_type = type(error).__name__
+
+            # API 상태 코드가 있는 HTTP 에러 등에 대한 처리 추가 가능 로직
+            if hasattr(error, "code"):
+                error_type = f"HTTP_{error.code}"
+
+            EXTERNAL_API_ERRORS.labels(provider="gemini", error_type=error_type).inc()
+        except Exception:
+            pass
 
     async def generate_response(
         self,

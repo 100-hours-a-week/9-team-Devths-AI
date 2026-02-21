@@ -65,6 +65,12 @@ async def generate_chat_stream(
             request.user_id,
             str(guard_result.matched_patterns),
         )
+        try:
+            from app.core.monitoring import AI_PROMPT_INJECTION_BLOCKED
+            AI_PROMPT_INJECTION_BLOCKED.labels(endpoint="/ai/chat").inc()
+        except Exception as e:
+            logger.error(f"Prompt Injection Metric Error: {e}")
+
         yield sse_error_event(
             code="PROMPT_BLOCKED",
             status=400,
@@ -90,6 +96,18 @@ async def generate_chat_stream(
 
     # 모니터링 시작
     start_time = time.time()
+    first_token_time = None
+
+    def record_ttft():
+        nonlocal first_token_time
+        if first_token_time is None:
+            first_token_time = time.time()
+            try:
+                ttft = first_token_time - start_time
+                from app.core.monitoring import AI_TIME_TO_FIRST_TOKEN
+                AI_TIME_TO_FIRST_TOKEN.labels(model=model, endpoint="/ai/chat").observe(ttft)
+            except Exception as e:
+                logger.error(f"TTFT Metric Error: {e}")
 
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
 
@@ -153,6 +171,7 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt="당신은 채용공고에서 회사명과 직무를 정확히 추출하는 AI입니다.",
                         ):
+                            record_ttft()
                             title_response += chunk
 
                         chat_title = title_response.strip()
@@ -241,6 +260,7 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt="당신은 채용 전문가입니다. 마크다운 문법(#, ##, **, ```)을 절대 사용하지 말고 일반 텍스트로만 응답하세요.",
                         ):
+                            record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -264,6 +284,7 @@ async def generate_chat_stream(
                         context_types=["resume", "job_posting"],
                         model="gemini",
                     ):
+                        record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -310,6 +331,7 @@ async def generate_chat_stream(
                             system_prompt="당신은 전문 면접관입니다. 지원자의 답변을 평가하고 구체적인 피드백을 제공합니다. 마크다운 문법을 사용하지 마세요.",
                             user_id=request.user_id,
                         ):
+                            record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -340,6 +362,7 @@ async def generate_chat_stream(
                             model=model,
                             user_id=request.user_id,
                         ):
+                            record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -368,6 +391,7 @@ async def generate_chat_stream(
                         context_types=context_types,
                         model=model,
                     ):
+                        record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -486,6 +510,7 @@ async def generate_chat_stream(
                         history=[],
                         system_prompt=system_prompt,
                     ):
+                        record_ttft()
                         full_response += chunk
                 else:
                     full_response = await rag.llm.generate_response_non_stream(
@@ -633,6 +658,7 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt=system_prompt,
                         ):
+                            record_ttft()
                             full_response += chunk
                     else:
                         async for chunk in rag.llm.generate_response(
@@ -642,6 +668,7 @@ async def generate_chat_stream(
                             system_prompt=system_prompt,
                             user_id=request.user_id,
                         ):
+                            record_ttft()
                             full_response += chunk
 
                     try:
@@ -772,8 +799,25 @@ async def generate_chat_stream(
 
     # Latency 측정 및 로깅 (PLG 스택 로그 활용)
     try:
-        duration = (time.time() - start_time) * 1000
-        safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration)
+        total_time = time.time() - start_time
+        duration_ms = total_time * 1000
+
+        ttft_str = "N/A"
+        gen_time_str = "N/A"
+
+        if first_token_time is not None:
+            ttft = first_token_time - start_time
+            gen_time = time.time() - first_token_time
+            ttft_str = f"{ttft:.2f}s"
+            gen_time_str = f"{gen_time:.2f}s"
+            try:
+                from app.core.monitoring import AI_GENERATION_DURATION
+                AI_GENERATION_DURATION.labels(model=model, endpoint="/ai/chat").observe(gen_time)
+            except Exception:
+                pass
+
+        safe_info(logger, f"📊 [LLM Stats] Mode={mode} | Model={model} | TTFT={ttft_str} | GenTime={gen_time_str} | TotalTime={total_time:.2f}s | UID={request.user_id}")
+        safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration_ms)
     except Exception as e:
         logger.error(f"Failed to record latency metric: {e}")
 

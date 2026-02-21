@@ -219,14 +219,29 @@ class VLLMService:
                 except httpx.ConnectError as e:
                     logger.error(f"vLLM 서버 연결 실패: {self.base_url}")
                     logger.error(f"연결 오류: {str(e)}")
+                    try:
+                        from app.core.monitoring import EXTERNAL_API_ERRORS
+                        EXTERNAL_API_ERRORS.labels(provider="vllm", error_type="ConnectError").inc()
+                    except Exception:
+                        pass
                     raise Exception(
                         f"vLLM 서버에 연결할 수 없습니다. URL을 확인하세요: {self.base_url}"
                     ) from e
                 except httpx.TimeoutException as e:
                     logger.error(f"vLLM 서버 응답 시간 초과: {self.base_url}")
+                    try:
+                        from app.core.monitoring import EXTERNAL_API_ERRORS
+                        EXTERNAL_API_ERRORS.labels(provider="vllm", error_type="TimeoutException").inc()
+                    except Exception:
+                        pass
                     raise Exception("vLLM 서버 응답 시간이 초과되었습니다.") from e
                 except httpx.HTTPStatusError as e:
                     logger.error(f"vLLM HTTP 오류: {e.response.status_code} - {e.response.text}")
+                    try:
+                        from app.core.monitoring import EXTERNAL_API_ERRORS
+                        EXTERNAL_API_ERRORS.labels(provider="vllm", error_type=f"HTTP_{e.response.status_code}").inc()
+                    except Exception:
+                        pass
                     raise Exception(f"vLLM 서버 오류: {e.response.status_code}") from e
 
         except Exception as e:

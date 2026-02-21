@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  # Promtail이 어디까지 읽었는지 저장하는 위치 (컨테이너 내부)
+  filename: /tmp/positions.yaml
+
+clients:
+  # LOKI_URL 환경 변수를 통해 모니터링 서버 주소를 동적으로 주입받습니다.
+  - url: ${LOKI_URL}
+
+scrape_configs:
+  # ============================================================================
+  # 1. Docker Container Logs (기본 json-file 로거 수집)
+  # 호스트의 /var/lib/docker/containers/가 마운트 됨.
+  # docker 데몬의 소켓(/var/run/docker.sock)을 마운트하여 컨테이너 이름 매핑 가능 
+  # ============================================================================
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # 컨테이너 이름을 추출하여 Loki 라벨(container_name)로 매핑
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container_name'
+      # 필요 시 ai_network 등 특정 라벨 설정
+      - target_label: 'service'
+        replacement: 'ai-backend'
+        
+    # Docker json-file 포맷에서 실제 로그 내용만 파싱
+    pipeline_stages:
+      - docker: {}
+
+  # ============================================================================
+  # 2. Host OS System logs (필요시 활성화)
+  # ============================================================================
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*log

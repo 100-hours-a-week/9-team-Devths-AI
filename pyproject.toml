@@ -75,6 +75,7 @@ langgraph = "^0.2.0"
 # ML Dependencies (선택적 - 모델 추론/학습용)
 # poetry install --with ml 로 설치
 # ============================================
+prometheus-client = "^0.24.1"
 [tool.poetry.group.ml]
 optional = true
 
