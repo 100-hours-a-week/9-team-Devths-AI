@@ -5071,6 +5071,23 @@ python-gdcm = ">=3.0.24.1"
 server = ["flask (>=1.1)", "gunicorn"]
 
 [[package]]
+name = "prometheus-client"
+version = "0.24.1"
+description = "Python client for the Prometheus monitoring system."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "prometheus_client-0.24.1-py3-none-any.whl", hash = "sha256:150db128af71a5c2482b36e588fc8a6b95e498750da4b17065947c16070f4055"},
+    {file = "prometheus_client-0.24.1.tar.gz", hash = "sha256:7e0ced7fbbd40f7b84962d5d2ab6f17ef88a72504dcf7c0b40737b43b2a461f9"},
+]
+
+[package.extras]
+aiohttp = ["aiohttp"]
+django = ["django"]
+twisted = ["twisted"]
+
+[[package]]
 name = "propcache"
 version = "0.4.1"
 description = "Accelerated property cache"
@@ -9032,4 +9049,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.10.19"
-content-hash = "ded3ff066e6a00a72cd476f43896be53f37693174db38ed5bb116d85d519735e"
+content-hash = "a8e7ce73585f47ee07bd62551fe1238be96fb71724ad4d3bb9634ffba5db9caf"
