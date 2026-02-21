@@ -1,4 +1,5 @@
 import time
+
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.routing import Match
@@ -9,6 +10,7 @@ from app.core.monitoring import (
     HTTP_REQUESTS_TOTAL,
 )
 
+
 class PrometheusMiddleware(BaseHTTPMiddleware):
     """
     FastAPI의 모든 HTTP 요청을 가로채서
@@ -17,7 +19,7 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         method = request.method
-        
+
         # FastAPI Router 패턴 매칭으로 Path 추출 (파라미터 분산을 막기 위함)
         # 예: /api/v2/chat/123 -> /api/v2/chat/{id}
         path, is_handled_path = self.get_path(request)
@@ -27,7 +29,7 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
 
         # 처리 중인 요청 수(Gauge) 증가
         HTTP_REQUESTS_IN_PROGRESS.labels(method=method, path=path).inc()
-        
+
         start_time = time.perf_counter()
         status_code = 500  # 예외 발생 시 기본값
 
@@ -38,16 +40,16 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
         finally:
             # 처리 중인 요청 수 감소
             HTTP_REQUESTS_IN_PROGRESS.labels(method=method, path=path).dec()
-            
+
             # 소요 시간 측정
             process_time = time.perf_counter() - start_time
-            
+
             # 메트릭 기록 (Counter & Histogram)
             # 상태 코드는 문자열 변환
             HTTP_REQUESTS_TOTAL.labels(
                 method=method, path=path, status=str(status_code)
             ).inc()
-            
+
             HTTP_REQUEST_DURATION.labels(
                 method=method, path=path, status=str(status_code)
             ).observe(process_time)
@@ -60,5 +62,5 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
             match, child_scope = route.matches(request.scope)
             if match == Match.FULL:
                 return route.path, True
-        
+
         return request.url.path, False

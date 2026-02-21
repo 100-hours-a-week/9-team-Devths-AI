@@ -49,8 +49,7 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
 
     실패해도 평가 응답에 영향을 주지 않습니다.
     """
-    import time
-    
+
     try:
         from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
         CELERY_TASK_WAIT_TIME.labels(task_name="ingest_qa").observe(0.0)

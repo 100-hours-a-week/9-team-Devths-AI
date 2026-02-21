@@ -97,7 +97,7 @@ async def masking_draft(
             CELERY_TASKS_ACTIVE.labels(task_name="masking_draft").inc()
         except Exception:
             pass
-            
+
         logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
         logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:

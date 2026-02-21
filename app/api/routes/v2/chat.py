@@ -70,7 +70,7 @@ async def generate_chat_stream(
             AI_PROMPT_INJECTION_BLOCKED.labels(endpoint="/ai/chat").inc()
         except Exception as e:
             logger.error(f"Prompt Injection Metric Error: {e}")
-            
+
         yield sse_error_event(
             code="PROMPT_BLOCKED",
             status=400,
@@ -801,10 +801,10 @@ async def generate_chat_stream(
     try:
         total_time = time.time() - start_time
         duration_ms = total_time * 1000
-        
+
         ttft_str = "N/A"
         gen_time_str = "N/A"
-        
+
         if first_token_time is not None:
             ttft = first_token_time - start_time
             gen_time = time.time() - first_token_time
@@ -815,7 +815,7 @@ async def generate_chat_stream(
                 AI_GENERATION_DURATION.labels(model=model, endpoint="/ai/chat").observe(gen_time)
             except Exception:
                 pass
-        
+
         safe_info(logger, f"📊 [LLM Stats] Mode={mode} | Model={model} | TTFT={ttft_str} | GenTime={gen_time_str} | TotalTime={total_time:.2f}s | UID={request.user_id}")
         safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration_ms)
     except Exception as e:
