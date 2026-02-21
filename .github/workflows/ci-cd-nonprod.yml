@@ -295,7 +295,10 @@ jobs:
       - name: Prepare Data
         id: prep
         run: |
-          echo "title=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "title<<$EOF" >> $GITHUB_OUTPUT
+          echo "${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
           echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
       - name: Send Discord Notification (CI/CD)
