@@ -16,7 +16,7 @@ ENV PYTHONUNBUFFERED=1 \
     CHROMA_PERSIST_DIR=/data/chroma_db
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl poppler-utils build-essential \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl poppler-utils build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -sSL https://install.python-poetry.org | python3 -

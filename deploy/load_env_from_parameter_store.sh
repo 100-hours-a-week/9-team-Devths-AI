@@ -66,18 +66,26 @@ fi
 
 # 파라미터를 환경변수로 export
 echo "📥 Exporting parameters as environment variables..."
+PARAM_KEYS=()
 while IFS=$'\t' read -r name value; do
     # 파라미터 이름에서 경로 제거 (예: /devths/ai/prod/API_KEY -> API_KEY)
     var_name=$(echo "$name" | sed "s|${PARAMETER_PATH}||")
     export "$var_name=$value"
+    PARAM_KEYS+=("$var_name")
     echo "   ✓ $var_name"
 done <<< "$PARAMS"
 
-echo "✅ Environment variables loaded from Parameter Store"
+export LOADED_PARAM_KEYS="${PARAM_KEYS[*]}"
+echo "✅ Environment variables loaded from Parameter Store (Exported keys: $LOADED_PARAM_KEYS)"
 
 # 필수 환경변수 검증
-REQUIRED_VARS=("GOOGLE_API_KEY" "API_KEY")
+REQUIRED_VARS=("API_KEY")
 MISSING_VARS=()
+
+# Google/Gemini API Key는 둘 중 하나만 있어도 됨
+if [ -z "$GOOGLE_API_KEY" ] && [ -z "$GEMINI_API_KEY" ]; then
+    MISSING_VARS+=("GOOGLE_API_KEY or GEMINI_API_KEY")
+fi
 
 for var in "${REQUIRED_VARS[@]}"; do
     if [ -z "${!var}" ]; then

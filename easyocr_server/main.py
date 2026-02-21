@@ -2,6 +2,7 @@
 EasyOCR Server (v2) - OCR 보조 서버.
 엔드포인트: POST /ocr/extract
 """
+
 import logging
 from typing import Any
 

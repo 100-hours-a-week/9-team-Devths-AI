@@ -19,7 +19,6 @@ from google.genai import types
 from PIL import Image
 
 from app.config.settings import get_settings
-from app.services.cloudwatch_service import CloudWatchService
 from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
@@ -178,49 +177,12 @@ class LLMService:
             return None
 
     def _record_token_usage(self, response: Any, model_name: str) -> None:
-        """CloudWatch에 토큰 사용량 기록"""
-        try:
-            usage = None
-            if hasattr(response, "usage_metadata"):
-                usage = response.usage_metadata
-
-            if usage:
-                cw = CloudWatchService.get_instance()
-                dims = {"Model": model_name, "Type": "Input"}
-                prompt_tokens = usage.prompt_token_count or 0
-                if prompt_tokens > 0:
-                    asyncio.create_task(
-                        cw.put_metric("LLM_Token_Usage", prompt_tokens, "Count", dims)
-                    )
-
-                dims["Type"] = "Output"
-                candidate_tokens = usage.candidates_token_count or 0
-                if candidate_tokens > 0:
-                    asyncio.create_task(
-                        cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims)
-                    )
-
-                # Total은 합산해서 기록
-                dims["Type"] = "Total"
-                total_tokens = usage.total_token_count or (prompt_tokens + candidate_tokens)
-                if total_tokens > 0:
-                    asyncio.create_task(
-                        cw.put_metric("LLM_Token_Usage", total_tokens, "Count", dims)
-                    )
-
-        except Exception as e:
-            logger.warning(f"Failed to record token usage: {e}")
+        """토큰 사용량 기록 (PLG 등으로 대체됨)"""
+        pass
 
     def _record_error(self, error: Exception, model_name: str) -> None:
-        """CloudWatch에 에러 기록"""
-        try:
-            cw = CloudWatchService.get_instance()
-            error_type = type(error).__name__
-            dims = {"Model": model_name, "ErrorType": error_type}
-            asyncio.create_task(cw.put_metric("LLM_Error_Count", 1, "Count", dims))
-        except Exception as e:
-            # CloudWatch 메트릭 기록 실패 시 본 서비스 동작에는 영향을 주지 않되, 원인 파악을 위해 로깅만 수행
-            logger.warning(f"Failed to record LLM error metric to CloudWatch: {e}")
+        """에러 기록"""
+        pass
 
     async def generate_response(
         self,
