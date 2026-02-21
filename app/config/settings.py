@@ -70,6 +70,52 @@ class Settings(BaseSettings):
         description="Gemini embedding model name (VectorDB 문서 설계 최종 선정)",
     )
 
+    # ============================================
+    # RAG / MMR Retrieval (RAGChain.retrieve_context)
+    # ============================================
+    rag_retrieval_k: int = Field(
+        default=5,
+        description="Number of documents to retrieve per collection (MMR). Phase 2: 3→5 (청크 단위 검색에 맞춤)",
+    )
+    rag_fetch_k: int = Field(
+        default=30,
+        description="MMR candidate pool size per collection. Phase 2: 20→30",
+    )
+    rag_lambda_mult: float = Field(
+        default=0.5,
+        description="MMR diversity (0=diverse, 1=relevant). 0.5 balanced",
+    )
+    # ADR-069: 앙상블 리트리버 (희소 BM25 + 밀집 MMR)
+    rag_use_bm25: bool = Field(
+        default=True,
+        description="Use BM25 sparse retriever in ensemble with MMR (ADR-069)",
+    )
+    rag_ensemble_dense_weight: float = Field(
+        default=0.7,
+        description="Weight for dense (MMR) retriever in ensemble (0~1). Sparse weight = 1 - this.",
+    )
+    rag_ensemble_sparse_weight: float = Field(
+        default=0.3,
+        description="Weight for sparse (BM25) retriever in ensemble (0~1)",
+    )
+    rag_rerank_top_k: int = Field(
+        default=10,
+        description="Max number of documents after merge (0 = no limit). ADR-069 long-context rerank.",
+    )
+    # ADR-069 후속: BM25 인덱스 상한(메모리·지연 완화), 문서 압축기
+    rag_bm25_max_docs: int = Field(
+        default=1000,
+        description="Max documents to build BM25 index from (0 = no limit). ADR-069 follow-up.",
+    )
+    rag_use_compressor: bool = Field(
+        default=False,
+        description="Use LLM document compressor on merged results (ADR-069 Phase 3). Increases latency/cost.",
+    )
+    rag_compressor_top_k: int = Field(
+        default=5,
+        description="Number of docs to compress when rag_use_compressor=True. Use smaller k to limit LLM calls.",
+    )
+
     @property
     def all_google_api_keys(self) -> list[str]:
         """Google API 키를 리스트로 반환 (쉼표 구분 분산 처리)."""
@@ -118,7 +164,7 @@ class Settings(BaseSettings):
     # ============================================
     chroma_persist_dir: str = Field(
         default="./chroma_db",
-        description="ChromaDB persistence directory",
+        description="ChromaDB persistence directory. 로컬 기본값 ./chroma_db. 배포 시 환경변수 CHROMA_PERSIST_DIR 로 주입.",
     )
     chroma_collection_resume: str = Field(
         default="resumes",
@@ -202,15 +248,31 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # Text Splitting / Chunking (ADR-060)
+    # ============================================
+    chunk_size: int = Field(
+        default=2000,
+        description="텍스트 청크 크기 (문자 기준, 약 500 토큰). Gemini-embedding-001 제한 2,048 토큰 이내",
+    )
+    chunk_overlap: int = Field(
+        default=200,
+        description="청크 간 오버랩 크기 (문자 기준, 약 50 토큰)",
+    )
+
+    # ============================================
+    # PDF Text Extraction (ADR-063)
+    # ============================================
+    pdf_extract_priority: str = Field(
+        default="pdfplumber",
+        description="PDF 텍스트 추출 우선 순위: 'pdfplumber' (디지털 PDF 우선) 또는 'ocr' (항상 OCR)",
+    )
+
+    # ============================================
     # RAG Configuration
     # ============================================
     rag_max_context_length: int = Field(
-        default=4000,
-        description="Maximum context length for RAG (characters)",
-    )
-    rag_retrieval_k: int = Field(
-        default=3,
-        description="Number of documents to retrieve",
+        default=6000,
+        description="Maximum context length for RAG (characters). Phase 2: 4000→6000 (청크 도입으로 확장)",
     )
 
     # ============================================

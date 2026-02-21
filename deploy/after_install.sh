@@ -1,4 +1,6 @@
 #!/bin/bash
+# 배포/서버 생성 시 클라우드 팀 또는 배포 파이프라인에서 한 번 실행하는 스크립트입니다.
+# 파이썬 앱이 기동될 때마다 자동 실행되는 것이 아닙니다.
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📦 Installing dependencies with Poetry..."
@@ -98,12 +100,15 @@ else
     exit 1
 fi
 
-# 7. 파일 권한 설정
+# 7. ChromaDB 영속 디렉터리: 클라우드 팀에서 CHROMA_PERSIST_DIR=/home/ubuntu/ai/chroma_db 로
+#    환경변수 주입. 미설정 시 기본값 ./chroma_db. 자세한 내용은 deploy/ENV_FOR_CLOUD.md 참고.
+
+# 8. 파일 권한 설정
 echo "🔐 Setting file permissions..."
 chown -R ubuntu:ubuntu "$APP_DIR"
 chmod +x "$APP_DIR/deploy/"*.sh
 
-# 8. Import 검증
+# 9. Import 검증
 echo "🧪 Validating Python imports..."
 if poetry run python -c "import app.main; print('✅ Main app imports successfully')" 2>/dev/null; then
     echo "✅ Import validation passed"
@@ -111,7 +116,7 @@ else
     echo "⚠️  Import validation failed, but continuing..."
 fi
 
-# 9. 캐시 정리 (Disk Space Optimization)
+# 10. 캐시 정리 (Disk Space Optimization)
 echo "🧹 Cleaning up caches to free up disk space..."
 rm -rf /home/ubuntu/.cache/pypoetry/cache
 rm -rf /home/ubuntu/.cache/pypoetry/artifacts

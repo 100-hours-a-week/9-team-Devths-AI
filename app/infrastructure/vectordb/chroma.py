@@ -70,11 +70,11 @@ class ChromaVectorStore(BaseVectorStore):
                 f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
             )
         else:
-            self.chroma_client = chromadb.Client(
-                Settings(
-                    persist_directory=persist_directory,
-                    anonymized_telemetry=False,
-                )
+            persist_directory = os.path.expanduser(persist_directory)
+            os.makedirs(persist_directory, exist_ok=True)
+            self.chroma_client = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=Settings(anonymized_telemetry=False),
             )
             logger.info(f"ChromaVectorStore initialized at {persist_directory}")
 

@@ -67,7 +67,9 @@ build/
 *.egg-info/
 .eggs/
 
-# Interview Dataset 파일 제외
-data/*.json
+# Interview Dataset: train 제외(대용량), valid만 커밋
+data/interview_dataset_train.json
 data/interview_*
+!data/interview_dataset_valid.json
 
+embedding_cache/

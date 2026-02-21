@@ -3,6 +3,7 @@ LLM Service using Gemini Flash API
 
 """
 
+import asyncio
 import contextlib
 import io
 import logging
@@ -18,6 +19,7 @@ from google.genai import types
 from PIL import Image
 
 from app.config.settings import get_settings
+from app.services.cloudwatch_service import CloudWatchService
 from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
@@ -92,6 +94,24 @@ class LLMService:
             or "API_KEY_INVALID" in err_str
         )
 
+    @staticmethod
+    def _is_retryable_with_next_key(exc: BaseException) -> bool:
+        """다른 API 키로 재시도 가능한 오류 여부 (키 거절, 503, 429)."""
+        err_str = str(exc)
+        return (
+            LLMService._is_api_key_error(exc)
+            or "503" in err_str
+            or "429" in err_str
+            or "UNAVAILABLE" in err_str
+            or "RESOURCE_EXHAUSTED" in err_str
+        )
+
+    @staticmethod
+    def _is_429_quota_error(exc: BaseException) -> bool:
+        """429 쿼터 초과 오류 여부 (재시도 전 대기 시 사용)."""
+        err_str = str(exc)
+        return "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
+
     def _langfuse_trace_and_generation(
         self,
         *,
@@ -131,13 +151,76 @@ class LLMService:
             # Langfuse 오류로 본 서비스가 죽지 않게 방어
             return
 
-    # Token usage recording (formerly CloudWatch)
-    def _record_token_usage(self, response: Any, model_name: str) -> None:
-        pass
+    @staticmethod
+    def _to_langfuse_usage_details(usage_metadata: Any | None) -> dict[str, int] | None:
+        """Gemini usage_metadata -> Langfuse usage_details 변환.
 
-    # Error recording (formerly CloudWatch)
+        Langfuse v3의 generation observation은 `usage_details={"prompt_tokens": int, "completion_tokens": int, ...}`
+        형태를 지원합니다.
+        """
+        if usage_metadata is None:
+            return None
+        try:
+            prompt_tokens = int(getattr(usage_metadata, "prompt_token_count", 0) or 0)
+            completion_tokens = int(getattr(usage_metadata, "candidates_token_count", 0) or 0)
+            total_tokens = int(
+                getattr(usage_metadata, "total_token_count", 0)
+                or (prompt_tokens + completion_tokens)
+            )
+            if prompt_tokens <= 0 and completion_tokens <= 0 and total_tokens <= 0:
+                return None
+            return {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+        except Exception:
+            return None
+
+    def _record_token_usage(self, response: Any, model_name: str) -> None:
+        """CloudWatch에 토큰 사용량 기록"""
+        try:
+            usage = None
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
+
+            if usage:
+                cw = CloudWatchService.get_instance()
+                dims = {"Model": model_name, "Type": "Input"}
+                prompt_tokens = usage.prompt_token_count or 0
+                if prompt_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", prompt_tokens, "Count", dims)
+                    )
+
+                dims["Type"] = "Output"
+                candidate_tokens = usage.candidates_token_count or 0
+                if candidate_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", candidate_tokens, "Count", dims)
+                    )
+
+                # Total은 합산해서 기록
+                dims["Type"] = "Total"
+                total_tokens = usage.total_token_count or (prompt_tokens + candidate_tokens)
+                if total_tokens > 0:
+                    asyncio.create_task(
+                        cw.put_metric("LLM_Token_Usage", total_tokens, "Count", dims)
+                    )
+
+        except Exception as e:
+            logger.warning(f"Failed to record token usage: {e}")
+
     def _record_error(self, error: Exception, model_name: str) -> None:
-        pass
+        """CloudWatch에 에러 기록"""
+        try:
+            cw = CloudWatchService.get_instance()
+            error_type = type(error).__name__
+            dims = {"Model": model_name, "ErrorType": error_type}
+            asyncio.create_task(cw.put_metric("LLM_Error_Count", 1, "Count", dims))
+        except Exception as e:
+            # CloudWatch 메트릭 기록 실패 시 본 서비스 동작에는 영향을 주지 않되, 원인 파악을 위해 로깅만 수행
+            logger.warning(f"Failed to record LLM error metric to CloudWatch: {e}")
 
     async def generate_response(
         self,
@@ -217,12 +300,22 @@ class LLMService:
                     response = client.models.generate_content_stream(
                         model=self.model_name, contents=contents, config=config
                     )
+                    last_chunk: Any | None = None
                     for chunk in response:
+                        last_chunk = chunk
                         if hasattr(chunk, "text") and chunk.text:
                             full_response += chunk.text
                             yield chunk.text
-                    self._record_token_usage(response, self.model_name)
+                    if last_chunk is not None:
+                        self._record_token_usage(last_chunk, self.model_name)
                     if trace is not None:
+                        usage_details = (
+                            self._to_langfuse_usage_details(
+                                getattr(last_chunk, "usage_metadata", None)
+                            )
+                            if last_chunk is not None
+                            else None
+                        )
                         create_generation(
                             trace=trace,
                             name="gemini_stream",
@@ -230,14 +323,16 @@ class LLMService:
                             input_text=final_message_for_trace,
                             output_text=full_response,
                             metadata={"streaming": True},
+                            usage_details=usage_details,
                         )
                     return
                 except Exception as e:
-                    if self._is_api_key_error(e):
+                    if self._is_retryable_with_next_key(e):
                         last_error = e
                         logger.warning(
-                            "Gemini API key rejected, trying next key if available: %s",
+                            "Gemini 호출 실패(다음 키로 재시도): %s - %s",
                             type(e).__name__,
+                            str(e)[:200],
                         )
                         continue
                     raise
@@ -254,14 +349,20 @@ class LLMService:
                             level="ERROR",
                             metadata={"error": str(last_error)},
                         )
-                yield (
-                    "죄송합니다. Gemini API 키 오류가 발생했습니다. "
-                    "배포 환경(서버/도커)의 GOOGLE_API_KEY 또는 GEMINI_API_KEY가 유효한지 확인해 주세요."
-                )
+                if self._is_api_key_error(last_error):
+                    yield (
+                        "죄송합니다. Gemini API 키 오류가 발생했습니다. "
+                        "배포 환경(서버/도커)의 GOOGLE_API_KEY 또는 GEMINI_API_KEY가 유효한지 확인해 주세요."
+                    )
+                else:
+                    yield (
+                        "죄송합니다. 일시적인 오류 또는 쿼터 초과로 응답을 생성하지 못했습니다. "
+                        "잠시 후 다시 시도해 주세요."
+                    )
             return
 
         except Exception as e:
-            if not self._is_api_key_error(e):
+            if not self._is_retryable_with_next_key(e):
                 logger.error(f"Error generating LLM response: {e}")
                 self._record_error(e, self.model_name)
             if trace is not None:
@@ -277,6 +378,11 @@ class LLMService:
                 yield (
                     "죄송합니다. Gemini API 키 오류가 발생했습니다. "
                     "배포 환경(서버/도커)의 GOOGLE_API_KEY 또는 GEMINI_API_KEY가 유효한지 확인해 주세요."
+                )
+            elif self._is_retryable_with_next_key(e):
+                yield (
+                    "죄송합니다. 일시적인 오류 또는 쿼터 초과로 응답을 생성하지 못했습니다. "
+                    "잠시 후 다시 시도해 주세요."
                 )
             else:
                 yield f"죄송합니다. 응답 생성 중 오류가 발생했습니다: {err_str}"
@@ -335,27 +441,67 @@ class LLMService:
                 system_instruction=system_prompt if system_prompt else None,
             )
 
-            # Generate non-streaming response
-            response = self._get_client().models.generate_content(
-                model=self.model_name, contents=contents, config=config
-            )
+            # 여러 API 키로 시도 (503/429/키 오류 시 다음 키로 재시도)
+            last_error: BaseException | None = None
+            for client in self._get_shuffled_clients():
+                try:
+                    response = client.models.generate_content(
+                        model=self.model_name, contents=contents, config=config
+                    )
+                    self._record_token_usage(response, self.model_name)  # 토큰 사용량 기록
+                    result_text = response.text if hasattr(response, "text") else ""
 
-            self._record_token_usage(response, self.model_name)  # 토큰 사용량 기록
+                    # Langfuse generation 기록
+                    if trace is not None:
+                        usage_details = self._to_langfuse_usage_details(
+                            getattr(response, "usage_metadata", None)
+                        )
+                        create_generation(
+                            trace=trace,
+                            name="gemini_non_stream",
+                            model=self.model_name,
+                            input_text=final_message,
+                            output_text=result_text,
+                            metadata={"streaming": False},
+                            usage_details=usage_details,
+                        )
+                    return result_text
+                except Exception as e:
+                    last_error = e
+                    if self._is_retryable_with_next_key(e):
+                        logger.warning(
+                            "Gemini non-stream 실패(다음 키로 재시도): %s - %s",
+                            type(e).__name__,
+                            str(e)[:200],
+                        )
+                        continue
+                    logger.error(f"Error generating LLM response (non-stream): {e}")
+                    self._record_error(e, self.model_name)
+                    if trace is not None:
+                        with contextlib.suppress(Exception):
+                            trace["client"].create_event(
+                                trace_context={"trace_id": trace["trace_id"]},
+                                name="error",
+                                level="ERROR",
+                                metadata={"error": str(e)},
+                            )
+                    raise
 
-            result_text = response.text if hasattr(response, "text") else ""
-
-            # Langfuse generation 기록
-            if trace is not None:
-                create_generation(
-                    trace=trace,
-                    name="gemini_non_stream",
-                    model=self.model_name,
-                    input_text=final_message,
-                    output_text=result_text,
-                    metadata={"streaming": False},
+            # 모든 키로 실패
+            if last_error is not None:
+                logger.error(
+                    "Error generating LLM response (non-stream, all keys failed): %s", last_error
                 )
-
-            return result_text
+                self._record_error(last_error, self.model_name)
+                if trace is not None:
+                    with contextlib.suppress(Exception):
+                        trace["client"].create_event(
+                            trace_context={"trace_id": trace["trace_id"]},
+                            name="error",
+                            level="ERROR",
+                            metadata={"error": str(last_error)},
+                        )
+                raise last_error
 
         except Exception as e:
             logger.error(f"Error generating LLM response (non-stream): {e}")
@@ -544,56 +690,70 @@ class LLMService:
         step_name: str,
         max_retries: int = 3,
     ) -> str | None:
-        """Gemini API 호출 (재시도 로직 포함)"""
+        """Gemini API 호출 (재시도 + 다중 API 키 폴백). 429 시 다음 시도 전 5초 대기."""
         contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+        last_was_429 = False
 
         for attempt in range(max_retries):
-            try:
-                response = self._get_client().models.generate_content(
-                    model=self.analysis_model, contents=contents, config=config
-                )
+            if last_was_429 and attempt > 0:
+                await asyncio.sleep(5)  # 429 쿼터 초과 후 다음 시도 전 대기
+            last_was_429 = False
 
-                # 응답 텍스트 추출
-                result_text = None
-
-                # candidates에서 추출 시도
-                if hasattr(response, "candidates") and response.candidates:
-                    candidate = response.candidates[0]
-
-                    # finish_reason 확인
-                    if hasattr(candidate, "finish_reason"):
-                        logger.debug(f"[{step_name}] finish_reason: {candidate.finish_reason}")
-
-                    # content.parts에서 텍스트 추출
-                    if (
-                        hasattr(candidate, "content")
-                        and candidate.content
-                        and hasattr(candidate.content, "parts")
-                        and candidate.content.parts
-                    ):
-                        result_text = candidate.content.parts[0].text
-
-                # response.text로 fallback
-                if not result_text:
-                    with contextlib.suppress(Exception):
-                        result_text = response.text
-
-                if result_text:
-                    logger.info(
-                        f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)"
+            for client in self._get_shuffled_clients():
+                try:
+                    response = client.models.generate_content(
+                        model=self.analysis_model, contents=contents, config=config
                     )
-                    self._record_token_usage(response, self.analysis_model)  # 토큰 사용량 기록
-                    return result_text
 
-                # 빈 응답 - 프롬프트 피드백 확인
-                if hasattr(response, "prompt_feedback"):
-                    logger.warning(f"[{step_name}] prompt_feedback: {response.prompt_feedback}")
+                    # 응답 텍스트 추출
+                    result_text = None
 
-                logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 실패 - 빈 응답")
+                    # candidates에서 추출 시도
+                    if hasattr(response, "candidates") and response.candidates:
+                        candidate = response.candidates[0]
 
-            except Exception as e:
-                logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 예외: {e}")
-                self._record_error(e, self.analysis_model)  # 에러 메트릭 기록
+                        # finish_reason 확인
+                        if hasattr(candidate, "finish_reason"):
+                            logger.debug(f"[{step_name}] finish_reason: {candidate.finish_reason}")
+
+                        # content.parts에서 텍스트 추출
+                        if (
+                            hasattr(candidate, "content")
+                            and candidate.content
+                            and hasattr(candidate.content, "parts")
+                            and candidate.content.parts
+                        ):
+                            result_text = candidate.content.parts[0].text
+
+                    # response.text로 fallback
+                    if not result_text:
+                        with contextlib.suppress(Exception):
+                            result_text = response.text
+
+                    if result_text:
+                        logger.info(
+                            f"[{step_name}] 응답 성공 (시도 {attempt + 1}/{max_retries}, {len(result_text)}자)"
+                        )
+                        self._record_token_usage(response, self.analysis_model)  # 토큰 사용량 기록
+                        return result_text
+
+                    # 빈 응답 - 프롬프트 피드백 확인
+                    if hasattr(response, "prompt_feedback"):
+                        logger.warning(f"[{step_name}] prompt_feedback: {response.prompt_feedback}")
+
+                    logger.warning(f"[{step_name}] 시도 {attempt + 1}/{max_retries} 실패 - 빈 응답")
+                    break  # 다음 클라이언트로 가도 동일할 수 있으므로 attempt만 증가
+
+                except Exception as e:
+                    logger.warning(
+                        f"[{step_name}] 시도 {attempt + 1}/{max_retries} 예외 (다음 키 시도): {e}"
+                    )
+                    self._record_error(e, self.analysis_model)
+                    if self._is_429_quota_error(e):
+                        last_was_429 = True
+                    if not self._is_retryable_with_next_key(e):
+                        raise
+                    continue
 
         logger.error(f"[{step_name}] {max_retries}회 재시도 후에도 실패")
         return None

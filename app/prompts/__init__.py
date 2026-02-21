@@ -26,6 +26,7 @@ from app.prompts.interview import (
     SYSTEM_INTERVIEW,
     # 헬퍼 함수
     create_analysis_prompt,
+    create_feedback_prompt,
     create_followup_prompt,
     create_interview_question_prompt,
     create_interview_report_prompt,
@@ -52,6 +53,7 @@ __all__ = [
     "FOLLOWUP_PROMPT",
     "INTERVIEW_REPORT_PROMPT",
     "create_analysis_prompt",
+    "create_feedback_prompt",
     "create_interview_question_prompt",
     "create_followup_prompt",
     "create_interview_report_prompt",

@@ -18,22 +18,27 @@ from app.api.routes.v2._helpers import get_services, get_session_key
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.prompts import (
+    get_extract_title_prompt,
+)
+from app.prompts.interview import (
+    create_feedback_prompt,
     create_tech_followup_prompt,
     format_conversation_history,
     format_followup_question_label,
     format_main_question_label,
-    get_extract_title_prompt,
     get_system_tech_interview,
-    load_prompt_yaml,
 )
-from app.prompts.interview import create_feedback_prompt
+from app.prompts.loader import load_prompt_yaml
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
     InterviewQuestionState,
     InterviewSession,
 )
-from app.services.example_selector import get_few_shot_for_personality
+from app.services.cloudwatch_service import CloudWatchService
+from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
+from app.services.interview_dedup import is_mastered_quality
+from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
@@ -88,7 +93,7 @@ async def generate_chat_stream(
     start_time = time.time()
 
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
-    # dims = {"Model": model, "Mode": str(mode)}
+    dims = {"Model": model, "Mode": str(mode)}
 
     logger.info("")
     logger.info(f"{'='*80}")
@@ -110,6 +115,13 @@ async def generate_chat_stream(
         try:
             history_dict = []
             user_message = request.message or ""
+
+            # URL 감지 및 웹 컨텍스트 추출 (ADR-059)
+            user_message, web_context = await WebLoaderService.extract_chat_context(user_message)
+            if web_context:
+                logger.info("🌐 URL 웹 컨텍스트 추출 완료: %d자", len(web_context))
+                user_message = f"참고 URL 내용:\n{web_context}\n\n사용자 질문: {user_message}"
+
             is_analysis = any(
                 keyword in user_message for keyword in ["분석", "매칭", "적합", "평가", "비교"]
             )
@@ -450,6 +462,24 @@ async def generate_chat_stream(
                     except Exception as e:
                         logger.debug("Few-shot personality selection skipped: %s", e)
 
+                # 기술 면접: interview_feedback에서 유사 기술 Q&A 참고 예시 추가
+                elif yaml_name == "tech_interview_init":
+                    try:
+                        few_shot = await get_few_shot_for_technical(
+                            rag.vectordb,
+                            query_text="기술 면접 질문 답변 예시",
+                            k=2,
+                        )
+                        if few_shot:
+                            system_prompt = (
+                                system_prompt.rstrip()
+                                + "\n\n## 참고 예시 (유사 기술 Q&A)\n\n"
+                                + few_shot
+                                + "\n\n위 예시의 깊이와 구체성을 참고하여 질문을 생성하세요."
+                            )
+                    except Exception as e:
+                        logger.debug("Few-shot tech selection skipped: %s", e)
+
                 if model_choice == "vllm" and rag.vllm:
                     full_response = ""
                     async for chunk in rag.vllm.generate_response(
@@ -481,6 +511,33 @@ async def generate_chat_stream(
                         logger.info(f"JSON 파싱 시도 (첫 200자): {json_str[:200]}")
 
                         questions_data = json.loads(json_str)
+
+                        # 인성 면접: Q1·Q2 고정 (LLM 출력과 무관하게 강제 적용)
+                        if interview_type == "behavior":
+                            fixed_q1_q2 = [
+                                {
+                                    "id": 1,
+                                    "category": "intro_self",
+                                    "category_name": "자기소개",
+                                    "question": "자기소개 해보세요.",
+                                    "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                                    "keywords": ["자기소개", "경력", "역량"],
+                                },
+                                {
+                                    "id": 2,
+                                    "category": "intro_motivation",
+                                    "category_name": "지원동기",
+                                    "question": "우리 회사를 지원하는 이유가 뭔가요?",
+                                    "intent": "지원 동기와 회사/직무 이해도 확인",
+                                    "keywords": ["지원동기", "회사이해", "직무"],
+                                },
+                            ]
+                            llm_questions = [
+                                q
+                                for q in questions_data.get("questions", [])
+                                if q.get("id", 0) >= 3
+                            ]
+                            questions_data["questions"] = fixed_q1_q2 + llm_questions
 
                         new_session = InterviewSession(
                             session_id=str(uuid.uuid4()),
@@ -616,6 +673,28 @@ async def generate_chat_stream(
                                     await asyncio.sleep(0.015)
                             else:
                                 current_q.is_completed = True
+
+                                # ADR-066: answer_quality 파싱 → 마스터한 질문 수집
+                                analysis = followup_data.get("analysis", {})
+                                answer_quality = analysis.get("answer_quality", "good")
+                                if interview_type == "tech" and is_mastered_quality(answer_quality):
+                                    try:
+                                        q_embedding = await rag.vectordb.create_embedding(
+                                            current_q.question
+                                        )
+                                        session.mastered_questions.append(
+                                            {
+                                                "question": current_q.question,
+                                                "embedding": q_embedding,
+                                            }
+                                        )
+                                        logger.info(
+                                            "ADR-066: 마스터 질문 등록 (quality=%s): %s",
+                                            answer_quality,
+                                            current_q.question[:50],
+                                        )
+                                    except Exception as e:
+                                        logger.debug("ADR-066: 마스터 임베딩 실패: %s", e)
                     except json.JSONDecodeError as e:
                         logger.error(f"꼬리질문 파싱 실패: {e}")
                         yield sse_error_event(
@@ -693,9 +772,13 @@ async def generate_chat_stream(
             )
             yield f"data: [DONE]{sse_end}"
 
-    # Latency measurement (Log based analysis for PLG)
-    duration = (time.time() - start_time) * 1000
-    safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration)
+    # Latency 측정 종료 및 전송
+    try:
+        duration = (time.time() - start_time) * 1000
+        cw = CloudWatchService.get_instance()
+        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
+    except Exception as e:
+        logger.error(f"Failed to record latency metric: {e}")
 
 
 @router.post(

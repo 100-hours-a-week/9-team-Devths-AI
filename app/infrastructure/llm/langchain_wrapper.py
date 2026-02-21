@@ -9,6 +9,9 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
+from langchain_community.cache import InMemoryCache
+from langchain_core.embeddings import Embeddings
+from langchain_core.globals import set_llm_cache
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -17,6 +20,56 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from app.prompts.loader import load_prompt_yaml
 
 logger = logging.getLogger(__name__)
+
+
+class _EmbeddingsWithKeyFallback(Embeddings):
+    """여러 API 키로 생성한 임베딩을 순서대로 시도 (실패 시 다음 키)."""
+
+    def __init__(
+        self,
+        embeddings_instances: list[GoogleGenerativeAIEmbeddings],
+    ):
+        self._instances = embeddings_instances
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        for i, emb in enumerate(self._instances):
+            try:
+                return emb.embed_documents(texts)
+            except Exception as e:
+                logger.warning("Embedding (documents) key %d failed: %s", i + 1, e)
+                if i == len(self._instances) - 1:
+                    raise
+        raise RuntimeError("No embedding instance succeeded")
+
+    def embed_query(self, text: str) -> list[float]:
+        for i, emb in enumerate(self._instances):
+            try:
+                return emb.embed_query(text)
+            except Exception as e:
+                logger.warning("Embedding (query) key %d failed: %s", i + 1, e)
+                if i == len(self._instances) - 1:
+                    raise
+        raise RuntimeError("No embedding instance succeeded")
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        for i, emb in enumerate(self._instances):
+            try:
+                return await emb.aembed_documents(texts)
+            except Exception as e:
+                logger.warning("Embedding (aembed_documents) key %d failed: %s", i + 1, e)
+                if i == len(self._instances) - 1:
+                    raise
+        raise RuntimeError("No embedding instance succeeded")
+
+    async def aembed_query(self, text: str) -> list[float]:
+        for i, emb in enumerate(self._instances):
+            try:
+                return await emb.aembed_query(text)
+            except Exception as e:
+                logger.warning("Embedding (aembed_query) key %d failed: %s", i + 1, e)
+                if i == len(self._instances) - 1:
+                    raise
+        raise RuntimeError("No embedding instance succeeded")
 
 
 class LangChainLLMGateway:
@@ -32,7 +85,7 @@ class LangChainLLMGateway:
         google_api_key: str | None = None,
         google_api_keys: list[str] | None = None,
         model_name: str = "gemini-3-flash-preview",
-        embedding_model: str = "models/text-embedding-004",
+        embedding_model: str = "gemini-embedding-001",
         temperature: float = 0.7,
     ):
         """Initialize LangChain LLM Gateway.
@@ -81,16 +134,26 @@ class LangChainLLMGateway:
         else:
             self._llm = llm_instances[0]
 
-        # Embeddings는 첫 번째 키로 (경량 호출이라 분산 불필요)
-        self._embeddings = GoogleGenerativeAIEmbeddings(
-            model=embedding_model,
-            google_api_key=keys[0],
-        )
+        # Embeddings: 설정된 동일 API 키 사용. 다중 키 시 실패하면 다음 키로 시도
+        if len(keys) > 1:
+            embedding_list = [
+                GoogleGenerativeAIEmbeddings(model=embedding_model, google_api_key=k) for k in keys
+            ]
+            self._embeddings = _EmbeddingsWithKeyFallback(embedding_list)
+            logger.info("Embeddings: %d개 API 키 (fallback 지원)", len(keys))
+        else:
+            self._embeddings = GoogleGenerativeAIEmbeddings(
+                model=embedding_model,
+                google_api_key=keys[0],
+            )
 
         self._model_name = model_name
         self._output_parser = StrOutputParser()
 
-        logger.info(f"LangChainLLMGateway initialized with model: {model_name}")
+        set_llm_cache(InMemoryCache())
+        logger.info(
+            f"LangChainLLMGateway initialized with model: {model_name} (InMemoryCache enabled)"
+        )
 
     @property
     def llm(self) -> ChatGoogleGenerativeAI:
@@ -98,8 +161,8 @@ class LangChainLLMGateway:
         return self._llm
 
     @property
-    def embeddings(self) -> GoogleGenerativeAIEmbeddings:
-        """Get the embeddings instance."""
+    def embeddings(self) -> Embeddings:
+        """Get the embeddings instance (단일 키 또는 다중 키 fallback)."""
         return self._embeddings
 
     @property

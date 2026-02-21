@@ -16,9 +16,17 @@ import logging
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from langchain_community.retrievers import BM25Retriever
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 
+try:
+    from langchain.retrievers.document_compressors.chain_extract import LLMChainExtractor
+except ImportError:
+    LLMChainExtractor = None  # type: ignore[misc, assignment]
+
 from app.config.settings import get_settings
+from app.domain.chat.chains import RAGChain
 from app.prompts import (
     SYSTEM_FOLLOWUP,
     SYSTEM_GENERAL_CHAT,
@@ -75,6 +83,77 @@ RAG_QNA_PROMPT = """관련 정보:
 
 위 관련 정보를 참고하여 질문에 답변해주세요. 관련 정보가 없으면 일반적인 지식으로 답변해주세요."""
 
+# RRF constant for ensemble retriever (ADR-069)
+_RRF_K = 60
+
+
+def _rrf_merge(
+    dense_pairs: list[tuple[str, Document]],
+    sparse_pairs: list[tuple[str, Document]],
+    dense_weight: float,
+    sparse_weight: float,
+    top_k: int = 0,
+) -> list[tuple[str, Document]]:
+    """Merge dense (MMR) and sparse (BM25) results with Reciprocal Rank Fusion.
+
+    top_k: max documents to return (0 = no limit).
+    """
+
+    def _key(doc: Document) -> str:
+        return (doc.page_content or "")[:500]
+
+    score_map: dict[str, tuple[str, Document, float]] = {}
+
+    for rank, (ct, doc) in enumerate(dense_pairs, start=1):
+        key = _key(doc)
+        rrf = dense_weight / (_RRF_K + rank)
+        if key not in score_map:
+            score_map[key] = (ct, doc, 0.0)
+        ct_cur, doc_cur, s_cur = score_map[key]
+        score_map[key] = (ct_cur, doc_cur, s_cur + rrf)
+
+    for rank, (ct, doc) in enumerate(sparse_pairs, start=1):
+        key = _key(doc)
+        rrf = sparse_weight / (_RRF_K + rank)
+        if key not in score_map:
+            score_map[key] = (ct, doc, 0.0)
+        ct_cur, doc_cur, s_cur = score_map[key]
+        score_map[key] = (ct_cur, doc_cur, s_cur + rrf)
+
+    merged = sorted(score_map.values(), key=lambda x: x[2], reverse=True)
+    pairs = [(ct, doc) for ct, doc, _ in merged]
+    if top_k > 0:
+        pairs = pairs[:top_k]
+    return pairs
+
+
+def _rerank(pairs: list[tuple[str, Document]], top_k: int) -> list[tuple[str, Document]]:
+    """ADR-069: 재정렬 단계. 현재는 top_k 자르기만 적용 (cross-encoder 등은 후속)."""
+    if top_k <= 0:
+        return pairs
+    return pairs[:top_k]
+
+
+async def _compress_pairs_with_llm(
+    query: str,
+    pairs: list[tuple[str, Document]],
+    top_k: int,
+    llm: Any,
+) -> list[tuple[str, Document]]:
+    """ADR-069 Phase 3: 질문 관련 문장만 추출해 컨텍스트 압축. top_k개만 압축해 LLM 호출 수 제한."""
+    if not pairs or LLMChainExtractor is None or llm is None:
+        return pairs
+    to_compress = pairs[:top_k]
+    docs_only = [doc for _, doc in to_compress]
+    try:
+        compressor = LLMChainExtractor.from_llm(llm)
+        compressed_docs = await asyncio.to_thread(compressor.compress_documents, docs_only, query)
+        if len(compressed_docs) == len(to_compress):
+            return list(zip([ct for ct, _ in to_compress], compressed_docs, strict=True))
+    except Exception as e:
+        logger.warning("Document compressor failed, using uncompressed: %s", e)
+    return pairs
+
 
 def _parse_interview_json(text: str) -> dict[str, Any] | None:
     """Parse single interview question JSON from LLM output."""
@@ -125,6 +204,7 @@ class RAGService:
         vllm_service: VLLMService | None = None,
         ocr_service: OCRService | None = None,
         langchain_gateway: "LangChainLLMGateway | None" = None,
+        rag_chain: RAGChain | None = None,
     ):
         """
         Initialize RAG Service
@@ -135,11 +215,13 @@ class RAGService:
             vllm_service: vLLM service instance (optional)
             ocr_service: OCR service instance (EasyOCR + Gemini Fallback)
             langchain_gateway: LCEL 체인용 Gateway (있으면 면접에서 체인 사용)
+            rag_chain: RAGChain for MMR retrieval (optional; else VectorDB query fallback)
         """
         self.llm = llm_service
         self.vllm = vllm_service
         self.vectordb = vectordb_service
         self._langchain_gateway = langchain_gateway
+        self._rag_chain = rag_chain
         # OCRService: 전달받거나 자동 생성
         self.ocr = ocr_service or OCRService(llm_service=llm_service)
         # 템플릿 기반 면접 질문 서비스
@@ -182,9 +264,18 @@ class RAGService:
             if not all_results:
                 return ""
 
+            # 청크 정렬: 같은 문서의 청크를 원본 순서대로 배치 (ADR-060 Phase 2)
+            all_results.sort(
+                key=lambda x: (
+                    x[1].get("metadata", {}).get("parent_document_id", ""),
+                    x[1].get("metadata", {}).get("chunk_index", 0),
+                )
+            )
+
             context_parts = []
             total_length = 0
-            max_context_length = 4000  # ~1000 tokens (4 chars ≈ 1 token)
+            settings = get_settings()
+            max_context_length = settings.rag_max_context_length
 
             for collection_type, doc in all_results:
                 source = {
@@ -215,22 +306,102 @@ class RAGService:
             return ""
 
     async def retrieve_context(
-        self, query: str, user_id: str, context_types: list[str] = None, n_results: int = 3
+        self,
+        query: str,
+        user_id: str,
+        context_types: list[str] = None,
+        n_results: int = 3,
+        *,
+        dense_weight: float | None = None,
+        sparse_weight: float | None = None,
     ) -> str:
         """
-        Retrieve relevant context from VectorDB
-
-        Args:
-            query: User's query
-            user_id: User ID for filtering
-            context_types: List of collection types to search
-            n_results: Number of results per collection
-
-        Returns:
-            Formatted context string
+        Retrieve relevant context: question → retriever (dense+sparse) → RRF merge → rerank → [compressor] → context.
+        When rag_use_bm25 is True, uses dense (MMR) + sparse (BM25) ensemble with RRF (ADR-069).
+        dense_weight/sparse_weight override settings at invoke time (ConfigurableField-style A/B test).
         """
         if context_types is None:
             context_types = ["resume", "job_posting"]
+
+        settings = get_settings()
+        has_vectorstore = bool(
+            self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore)
+        )
+
+        # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF → rerank → optional compressor
+        if settings.rag_use_bm25 and has_vectorstore and self.vectordb:
+            try:
+                types_to_fetch = [ct for ct in context_types if ct != "portfolio"]
+                if not types_to_fetch:
+                    return ""
+
+                dense_pairs = await self._rag_chain.retrieve_context_documents(
+                    query, user_id, types_to_fetch
+                )
+
+                results_per_type = await asyncio.gather(
+                    *[
+                        self.vectordb.get_all_documents_by_user(user_id=user_id, collection_type=ct)
+                        for ct in types_to_fetch
+                    ]
+                )
+                bm25_docs: list[Document] = []
+                for ct, doc_list in zip(types_to_fetch, results_per_type, strict=True):
+                    for r in doc_list:
+                        meta = dict(r.get("metadata") or {})
+                        meta["collection_type"] = ct
+                        bm25_docs.append(Document(page_content=r.get("text") or "", metadata=meta))
+
+                # BM25 인덱스 상한 (ADR-069 후속: 메모리·지연 완화)
+                if settings.rag_bm25_max_docs > 0 and len(bm25_docs) > settings.rag_bm25_max_docs:
+                    bm25_docs = bm25_docs[: settings.rag_bm25_max_docs]
+
+                sparse_pairs: list[tuple[str, Document]] = []
+                if bm25_docs and query.strip():
+                    k_bm25 = max(10, min(50, len(bm25_docs)))
+                    loop = asyncio.get_running_loop()
+
+                    def _bm25_invoke() -> list[Document]:
+                        retriever = BM25Retriever.from_documents(bm25_docs, k=k_bm25)
+                        return retriever.invoke(query)
+
+                    sparse_docs = await loop.run_in_executor(None, _bm25_invoke)
+                    sparse_pairs = [(d.metadata.get("collection_type", ""), d) for d in sparse_docs]
+
+                dw = (
+                    dense_weight if dense_weight is not None else settings.rag_ensemble_dense_weight
+                )
+                sw = (
+                    sparse_weight
+                    if sparse_weight is not None
+                    else settings.rag_ensemble_sparse_weight
+                )
+                merged = _rrf_merge(dense_pairs, sparse_pairs, dw, sw, top_k=0)
+                # 재정렬: top_k 적용 (ADR-069 question → retriever → rerank → context)
+                rerank_k = settings.rag_rerank_top_k if settings.rag_rerank_top_k > 0 else 0
+                merged = _rerank(merged, rerank_k)
+
+                if settings.rag_use_compressor and merged:
+                    llm = getattr(getattr(self._rag_chain, "_llm_gateway", None), "llm", None)
+                    merged = await _compress_pairs_with_llm(
+                        query,
+                        merged,
+                        settings.rag_compressor_top_k,
+                        llm,
+                    )
+
+                if not merged:
+                    return ""
+                return self._rag_chain._format_pairs_to_context(merged)
+            except Exception as e:
+                logger.warning("RAG ensemble failed, fallback to dense-only: %s", e)
+                if has_vectorstore:
+                    return await self._rag_chain.retrieve_context(query, user_id, context_types)
+                return ""
+
+        if has_vectorstore:
+            return await self._rag_chain.retrieve_context(query, user_id, context_types)
+
         try:
 
             async def query_one(collection_type: str):

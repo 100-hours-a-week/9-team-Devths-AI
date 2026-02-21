@@ -22,6 +22,9 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
+from app.services.cloudwatch_service import CloudWatchService
+from app.services.text_splitter_service import TextSplitterService
+from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, sanitize_log_input
 
 logger = logging.getLogger(__name__)
@@ -185,6 +188,13 @@ async def text_extract(
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id
 
+    # 모니터링 메트릭 전송
+    try:
+        cw = CloudWatchService.get_instance()
+        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
+    except Exception:
+        pass
+
     # 비동기 작업 시작
     task_key = str(task_id)
     task_storage.save(
@@ -249,6 +259,17 @@ async def text_extract(
                             f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료: "
                             f"{len(extracted_text)}자 (페이지: {len(pages)})"
                         )
+                elif doc_input.url:
+                    logger.info("   → URL 입력: %s", doc_input.url[:80])
+                    extracted_text = await WebLoaderService.extract_text_from_url(doc_input.url)
+                    pages = None
+                    if extracted_text:
+                        logger.info(
+                            "   ✅ [WebLoader] URL 텍스트 추출 완료: %d자",
+                            len(extracted_text),
+                        )
+                    else:
+                        logger.warning("   ⚠️ URL에서 텍스트를 추출할 수 없습니다")
                 else:
                     extracted_text = doc_input.text or ""
                     pages = None
@@ -256,18 +277,41 @@ async def text_extract(
 
                 if extracted_text:
                     document_id = f"{doc_type}_{uuid.uuid4().hex[:12]}"
-                    await rag.vectordb.add_document(
-                        document_id=document_id,
+                    doc_metadata = {
+                        "user_id": request.user_id,
+                        "file_id": doc_input.file_id,
+                        "created_at": datetime.now().isoformat(),
+                    }
+
+                    # 텍스트 분할 (ADR-060 Phase 1)
+                    splitter = TextSplitterService()
+                    batch_docs = splitter.split_to_batch_docs(
                         text=extracted_text,
-                        collection_type=doc_type,
-                        metadata={
-                            "user_id": request.user_id,
-                            "file_id": doc_input.file_id,
-                            "created_at": datetime.now().isoformat(),
-                        },
+                        document_id=document_id,
+                        metadata=doc_metadata,
                     )
+
+                    if len(batch_docs) == 1:
+                        # 단일 청크: 기존 add_document() 사용
+                        await rag.vectordb.add_document(
+                            document_id=batch_docs[0]["id"],
+                            text=batch_docs[0]["text"],
+                            collection_type=doc_type,
+                            metadata=batch_docs[0]["metadata"],
+                        )
+                    else:
+                        # 다중 청크: add_documents_batch() 사용
+                        await rag.vectordb.add_documents_batch(
+                            documents=batch_docs,
+                            collection_type=doc_type,
+                        )
+
                     safe_document_id = sanitize_log_input(document_id)
-                    logger.info("   ✅ VectorDB 저장 완료: %s", safe_document_id)
+                    logger.info(
+                        "   ✅ VectorDB 저장 완료: %s (%d 청크)",
+                        safe_document_id,
+                        len(batch_docs),
+                    )
 
                 return DocumentExtractResult(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages

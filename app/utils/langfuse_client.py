@@ -4,6 +4,7 @@ Langfuse 클라이언트 유틸리티
 Langfuse를 사용하여 LLM 호출을 추적하고 모니터링합니다.
 """
 
+import contextlib
 import logging
 import os
 from typing import Any, TypedDict
@@ -117,6 +118,7 @@ def create_generation(
     input_text: str,
     output_text: str | None = None,
     metadata: dict | None = None,
+    usage_details: dict[str, int] | None = None,
 ):
     """
     Generation 생성 (LLM 호출 기록)
@@ -128,6 +130,7 @@ def create_generation(
         input_text: 입력 텍스트
         output_text: 출력 텍스트 (선택)
         metadata: 추가 메타데이터 (선택)
+        usage_details: 토큰 사용량 (선택) - Langfuse v3 `usage_details` 형식
 
     Returns:
         Langfuse generation 객체 또는 None
@@ -139,21 +142,47 @@ def create_generation(
         client = trace["client"]
         trace_id = trace["trace_id"]
 
-        generation = client.start_generation(
-            name=name,
-            trace_context={"trace_id": trace_id},
-            model=model,
-            input=input_text,
-            output=output_text,
-            metadata=metadata or {},
-        )
+        # Langfuse SDK v3에서는 start_observation(as_type="generation", usage_details=...) 사용을 권장.
+        # 하위 호환을 위해 start_observation이 없거나 실패하면 start_generation로 fallback.
+        generation = None
+        if hasattr(client, "start_observation"):
+            try:
+                generation = client.start_observation(
+                    name=name,
+                    as_type="generation",
+                    trace_context={"trace_id": trace_id},
+                    model=model,
+                    input=input_text,
+                    output=output_text,
+                    metadata=metadata or {},
+                    usage_details=usage_details,
+                )
+            except TypeError:
+                # 일부 버전에서 usage_details 시그니처가 다를 수 있어 fallback
+                generation = None
+
+        if generation is None:
+            generation = client.start_generation(
+                name=name,
+                trace_context={"trace_id": trace_id},
+                model=model,
+                input=input_text,
+                output=output_text,
+                metadata=metadata or {},
+            )
+            # start_generation 경로에서도 update()가 지원되면 usage_details를 반영
+            if usage_details and hasattr(generation, "update"):
+                with contextlib.suppress(Exception):
+                    generation.update(usage_details=usage_details)
         # trace 메타/유저 정보 업데이트
-        generation.update_trace(
-            name=trace.get("trace_name"),
-            user_id=trace.get("user_id"),
-            metadata=trace.get("metadata") or {},
-        )
-        generation.end()
+        if hasattr(generation, "update_trace"):
+            generation.update_trace(
+                name=trace.get("trace_name"),
+                user_id=trace.get("user_id"),
+                metadata=trace.get("metadata") or {},
+            )
+        if hasattr(generation, "end"):
+            generation.end()
         return generation
     except Exception as e:
         logger.error(f"Failed to create Langfuse generation: {e}")
