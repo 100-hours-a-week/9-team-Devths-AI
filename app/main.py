@@ -14,6 +14,7 @@ from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
 from app.api.middleware.metrics import PrometheusMiddleware
 from app.config.settings import get_settings
+import app.core.monitoring  # Register custom metrics
 
 # ============================================================================
 # 로깅 설정 (운영 서버 호환)

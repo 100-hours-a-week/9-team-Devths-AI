@@ -65,6 +65,12 @@ async def generate_chat_stream(
             request.user_id,
             str(guard_result.matched_patterns),
         )
+        try:
+            from app.core.monitoring import AI_PROMPT_INJECTION_BLOCKED
+            AI_PROMPT_INJECTION_BLOCKED.labels(endpoint="/ai/chat").inc()
+        except Exception as e:
+            logger.error(f"Prompt Injection Metric Error: {e}")
+            
         yield sse_error_event(
             code="PROMPT_BLOCKED",
             status=400,

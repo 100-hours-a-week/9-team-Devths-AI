@@ -43,3 +43,37 @@ AI_BACKGROUND_JOB_COUNT = Counter(
     "백그라운드 AI 작업 누적 처리 건수",
     ["job_type", "status"]
 )
+
+# ============================================================================
+# 3. 추가 커스텀 인프라/API 통합 지표 (Custom Metrics)
+# ============================================================================
+
+VECTOR_DB_INSERT_DURATION = Histogram(
+    "vector_db_insert_duration_seconds",
+    "문서 파싱 후 VectorDB 인서트에 걸린 지연 시간",
+    ["collection_name"]
+)
+
+EXTERNAL_API_ERRORS = Counter(
+    "external_api_errors_total",
+    "외부 AI 연동 API 실패 횟수 (LLM, VQA 등)",
+    ["provider", "error_type"]
+)
+
+CELERY_TASK_WAIT_TIME = Histogram(
+    "celery_task_wait_time_seconds",
+    "Celery 작업이 큐에서 워커 실행까지 대기한 시간",
+    ["task_name"]
+)
+
+CELERY_TASKS_ACTIVE = Gauge(
+    "celery_tasks_active_gauge",
+    "동시에 실행 중인 Celery Task 개수",
+    ["task_name"]
+)
+
+AI_PROMPT_INJECTION_BLOCKED = Counter(
+    "ai_prompt_injection_blocked_total",
+    "가드레일에 의해 차단된 프롬프트 인젝션 횟수",
+    ["endpoint"]
+)
