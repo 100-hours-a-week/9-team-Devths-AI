@@ -16,8 +16,8 @@ def _sanitize(text: str) -> str:
     내부 sanitization 로직.
     개행 문자와 제어 문자를 제거합니다.
     """
-    # 개행 문자 제거 (CRLF Injection 방어)
-    result = re.sub(r"[\r\n]", " ", text)
+    # CodeQL 및 기타 정적 분석기가 명확히 인지할 수 있도록 명시적 replace 사용 (CRLF 방어)
+    result = text.replace("\r", " ").replace("\n", " ")
     # 제어 문자 제거 (추가 보안)
     result = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", result)
     return result
@@ -26,7 +26,7 @@ def _sanitize(text: str) -> str:
 def sanitize_log_input(input_value: str | int | None) -> str:
     """
     로그에 안전하게 기록할 수 있도록 문자열을 sanitize합니다.
-    개행 문자(\\n, \\r)를 공백으로 치환하여 CRLF Injection을 방어합니다.
+    개행 문자(\n, \r)를 공백으로 치환하여 CRLF Injection을 방어합니다.
 
     Args:
         input_value: sanitize할 값 (str, int, None)
@@ -58,9 +58,11 @@ def safe_log(
     Example:
         safe_log(logger, logging.INFO, "User ID: %s, Room: %s", user_id, room_id)
     """
+    # msg 파라미터 자체에 f-string 등으로 들어올 수 있는 오염된 입력 대비 (취약점 완화)
+    sanitized_msg = _sanitize(str(msg))
     # 모든 인자를 sanitize
     sanitized_args = tuple(_sanitize(str(arg)) if arg is not None else "None" for arg in args)
-    logger.log(level, msg, *sanitized_args)
+    logger.log(level, sanitized_msg, *sanitized_args)
 
 
 def safe_info(logger: logging.Logger, msg: str, *args: str | int | None) -> None:
