@@ -3,9 +3,9 @@ name: AI Service CI/CD
 
 on:
   push:
-    branches: [ "chore/docker-cicd", "develop", "release/*" ]
+    branches: [ "develop", "release/*" ]
   pull_request:
-    branches: [ "chore/docker-cicd", "develop", "release/*" ]
+    branches: [ "develop", "release/*" ]
   workflow_dispatch:
 
 jobs:
@@ -170,7 +170,7 @@ jobs:
       - name: Determine ECR Repository
         id: ecr-repo
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/chore/docker-cicd" ]] || [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
             echo "env_tag=dev" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
@@ -257,7 +257,7 @@ jobs:
           S3_KEY="${{ steps.upload.outputs.s3_key }}"
           
           # Determine Deployment Group
-          if [[ "${{ github.ref }}" == "refs/heads/chore/docker-cicd" ]] || [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_DEV }}"
           elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
             DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_STAGING }}"
@@ -295,7 +295,10 @@ jobs:
       - name: Prepare Data
         id: prep
         run: |
-          echo "title=${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "title<<$EOF" >> $GITHUB_OUTPUT
+          echo "${{ github.event.head_commit.message }}" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
           echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
       - name: Send Discord Notification (CI/CD)
