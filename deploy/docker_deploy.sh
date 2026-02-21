@@ -132,33 +132,22 @@ else
     log "⚠️  load_env_from_parameter_store.sh not found. Skipping Parameter Store load."
 fi
 
-# Load local .env if exists (for local testing or overrides)
-if [ -f "$APP_DIR/.env" ]; then
-    log "📄 Loading local .env file..."
-    set -a # Automatically export all variables
-    source "$APP_DIR/.env"
-    set +a
-fi
-
 # Construct Docker Environment Arguments
 log "🔨 Constructing Docker environment arguments..."
 DOCKER_ENV_ARGS=()
 
-# Filter and add variables to the array
-# We use the same grep pattern to identify relevant variables
-ENV_VARS=$(env | grep -E "^(AWS_|DB_|REDIS_|S3_|OPENAI_|SLACK_|DISCORD_|JWT_|SECRET_|ALGORITHM|ACCESS_TOKEN|REFRESH_TOKEN|BACKEND_|FRONTEND_|VITE_|GOOGLE_|GEMINI_|GCP_|VLLM_|CLOVA_|EASYOCR_|CHROMA_|CELERY_|LANGFUSE_|RAG_|EVAL_|INTERVIEW_|LLM_|ENVIRONMENT|DEBUG|LOG_LEVEL)" | cut -d= -f1)
+# 1. Parameter Store에서 로드된 변수 주입
+if [ -n "$LOADED_PARAM_KEYS" ]; then
+    log "ℹ️  Injecting variables from Parameter Store..."
+    for var_name in $LOADED_PARAM_KEYS; do
+        var_value="${!var_name}"
+        if [ -n "$var_value" ]; then
+            DOCKER_ENV_ARGS+=("-e" "$var_name=$var_value")
+        fi
+    done
+fi
 
-for var_name in $ENV_VARS; do
-    # Get the value of the variable indirectly
-    var_value="${!var_name}"
-    if [ -n "$var_value" ]; then
-        # Add to array in the format -e KEY=VALUE
-        # IMPORTANT: We verify the value is not empty to avoid empty strings if something went wrong
-        DOCKER_ENV_ARGS+=("-e" "$var_name=$var_value")
-    fi
-done
-
-log "✅ Prepared ${#DOCKER_ENV_ARGS[@]} environment variables for injection."
+log "✅ Prepared $(( ${#DOCKER_ENV_ARGS[@]} / 2 )) environment variables for injection."
 
 # 6. Run New Container
 log "▶️  Starting new container..."

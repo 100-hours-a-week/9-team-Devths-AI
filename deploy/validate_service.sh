@@ -77,12 +77,12 @@ echo ""
 
 # 프로세스 확인
 echo "2. Running processes:"
-pgrep -af "uvicorn" || echo "   No uvicorn processes found"
+docker ps -f name=ai-service || echo "   No ai-service container found"
 echo ""
 
 # 최근 로그
 echo "3. Last 50 lines of application log:"
-tail -n 50 "$LOG_FILE" 2>/dev/null || echo "   Log file not found at $LOG_FILE"
+docker logs --tail 50 ai-service 2>/dev/null || echo "   Could not retrieve docker logs for ai-service"
 echo ""
 
 # 환경변수 확인 (민감 정보 제외)
