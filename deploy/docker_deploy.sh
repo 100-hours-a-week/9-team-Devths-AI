@@ -177,6 +177,21 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+log "✅ Main container started successfully."
+
+# 6.5. Start Promtail Container
+log "🔄 Starting Promtail container..."
+if [ -x "$APP_DIR/deploy/monitoring/run_promtail.sh" ]; then
+    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" >> "$APP_DIR/promtail_deploy.log" 2>&1
+    if [ $? -eq 0 ]; then
+        log "✅ Promtail container started successfully."
+    else
+        log "⚠️  Failed to start Promtail container. Check promtail_deploy.log."
+    fi
+else
+    log "⚠️  run_promtail.sh not found or not executable at $APP_DIR/deploy/monitoring/run_promtail.sh"
+fi
+
 # 7. Health Check
 log "Hz  Health Checking..."
 for i in {1..12}; do
