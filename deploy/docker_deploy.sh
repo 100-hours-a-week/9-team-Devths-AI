@@ -16,6 +16,9 @@ export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 # 로그 디렉토리 권한 문제 방지 (ubuntu 홈 디렉토리 하위에 생성)
 mkdir -p "$LOG_DIR"
 
+# 디스크 용량 누적 방지를 위해 매 배포 시 이전 배포 로그를 빈 파일로 덮어쓰기(초기화)합니다.
+> "$LOG_FILE"
+
 # Logging helper
 log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
@@ -182,7 +185,7 @@ log "✅ Main container started successfully."
 # 6.5. Start Promtail Container
 log "🔄 Starting Promtail container..."
 if [ -x "$APP_DIR/deploy/monitoring/run_promtail.sh" ]; then
-    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" >> "$LOG_DIR/promtail_deploy.log" 2>&1
+    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" > "$LOG_DIR/promtail_deploy.log" 2>&1
     if [ $? -eq 0 ]; then
         log "✅ Promtail container started successfully."
     else
