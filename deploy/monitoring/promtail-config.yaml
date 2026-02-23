@@ -3,8 +3,7 @@ server:
   grpc_listen_port: 0
 
 positions:
-  # Promtail이 어디까지 읽었는지 저장하는 위치 (컨테이너 내부)
-  filename: /tmp/positions.yaml
+  filename: /promtail_data/positions.yaml
 
 clients:
   # LOKI_URL 환경 변수를 통해 모니터링 서버 주소를 동적으로 주입받습니다.

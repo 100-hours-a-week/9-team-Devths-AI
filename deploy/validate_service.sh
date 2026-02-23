@@ -40,8 +40,8 @@ for i in $(seq 1 $MAX_RETRIES); do
     echo -n "   Attempt $i/$MAX_RETRIES... "
 
     # HTTP 상태 코드와 응답 본문 가져오기
-    HTTP_CODE=$(curl -s -o /tmp/health_response.txt -w "%{http_code}" http://localhost:$PORT/health 2>/dev/null)
-    RESPONSE=$(cat /tmp/health_response.txt 2>/dev/null)
+    HTTP_CODE=$(curl -s -o "$LOG_DIR/health_response.txt" -w "%{http_code}" http://localhost:$PORT/health 2>/dev/null)
+    RESPONSE=$(cat "$LOG_DIR/health_response.txt" 2>/dev/null)
 
     if [ "$HTTP_CODE" = "200" ]; then
         echo "✅ Success (HTTP $HTTP_CODE)"
@@ -50,7 +50,7 @@ for i in $(seq 1 $MAX_RETRIES); do
         echo "✅ Service validation passed!"
         echo "🎉 Deployment successful!"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        rm -f /tmp/health_response.txt
+        rm -f "$LOG_DIR/health_response.txt"
         exit 0
     else
         echo "❌ Failed (HTTP $HTTP_CODE)"
@@ -114,5 +114,5 @@ echo "5. Disk space:"
 df -h "$APP_DIR" | tail -1
 echo ""
 
-rm -f /tmp/health_response.txt
+rm -f "$LOG_DIR/health_response.txt"
 exit 1
