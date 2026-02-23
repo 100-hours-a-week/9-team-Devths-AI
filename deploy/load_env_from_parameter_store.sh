@@ -43,14 +43,14 @@ if [ -z "$AWS_REGION" ] && [ -z "$AWS_DEFAULT_REGION" ]; then
     fi
 fi
 
-# Parameter Store에서 모든 파라미터 가져오기 (Recursive options added)
+# Parameter Store에서 모든 파라미터 가져오기 (Recursive 옵션 유지, 로그 숨김 해제)
 PARAMS=$(aws ssm get-parameters-by-path \
     --path "$PARAMETER_PATH" \
     --recursive \
     --with-decryption \
     --max-items 100 \
     --query 'Parameters[*].[Name,Value]' \
-    --output text 2>/dev/null)
+    --output text)
 
 if [ -z "$PARAMS" ]; then
     echo "⚠️  No parameters found at $PARAMETER_PATH"
