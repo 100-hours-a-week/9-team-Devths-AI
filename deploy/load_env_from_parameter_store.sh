@@ -26,25 +26,30 @@ if ! command -v aws &> /dev/null; then
     return 1 2>/dev/null || exit 1
 fi
 
-# AWS Region 자동 감지 (IMDSv2 지원)
+# AWS Region 자동 감지 (IMDSv2 지원) 및 Fallback
 if [ -z "$AWS_REGION" ] && [ -z "$AWS_DEFAULT_REGION" ]; then
-    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s)
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" -s --max-time 2)
     if [ -n "$TOKEN" ]; then
-        REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s http://169.254.169.254/latest/meta-data/placement/region)
+        REGION=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s --max-time 2 http://169.254.169.254/latest/meta-data/placement/region)
     else
         # Fallback for IMDSv1
-        REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+        REGION=$(curl -s --max-time 2 http://169.254.169.254/latest/meta-data/placement/region)
     fi
     
-    if [ -n "$REGION" ]; then
-        export AWS_REGION="$REGION"
-        export AWS_DEFAULT_REGION="$REGION"
-        echo "🌍 Auto-detected AWS Region: $REGION"
+    # 만약 Metadata 서버 접근에 실패했다면 기본값 주입
+    if [ -z "$REGION" ]; then
+        REGION="ap-northeast-2"
+        echo "⚠️  Failed to detect region from IMDS. Falling back to default: $REGION"
     fi
+
+    export AWS_REGION="$REGION"
+    export AWS_DEFAULT_REGION="$REGION"
+    echo "🌍 AWS Region set to: $REGION"
 fi
 
 # Parameter Store에서 모든 파라미터 가져오기 (Recursive 옵션 유지, 로그 숨김 해제)
 PARAMS=$(aws ssm get-parameters-by-path \
+    --region "${AWS_REGION:-ap-northeast-2}" \
     --path "$PARAMETER_PATH" \
     --recursive \
     --with-decryption \
