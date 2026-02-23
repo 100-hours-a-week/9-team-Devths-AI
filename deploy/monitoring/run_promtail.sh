@@ -32,6 +32,7 @@ if ! command -v aws &> /dev/null; then
 else
     # 상태가 'running'인 지정된 이름의 인스턴스 프라이빗 IP 추출
     MONITORING_PRIVATE_IP=$(aws ec2 describe-instances \
+        --region ap-northeast-2 \
         --filters "Name=tag:Name,Values=$TARGET_INSTANCE_NAME" "Name=instance-state-name,Values=running" \
         --query "Reservations[*].Instances[*].PrivateIpAddress" \
         --output text)
