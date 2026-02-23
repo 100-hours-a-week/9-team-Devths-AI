@@ -5,16 +5,16 @@
 # ----------------------------------------------------------------------
 
 APP_DIR="/home/ubuntu/ai"
-LOG_FILE="$APP_DIR/deploy.log"
+LOG_DIR="$APP_DIR/logs"
+LOG_FILE="$LOG_DIR/deploy.log"
 CONTAINER_NAME="ai-service"
 AWS_REGION="ap-northeast-2" # Default region
 
 # AWS CodeDeploy의 환경 변수(PATH) 초기화 문제 방지를 위해 명시적으로 PATH 추가
 export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 
-# 로그 파일 권한 문제 (Permission denied) 방지
-sudo touch "$LOG_FILE" 2>/dev/null || true
-sudo chown ubuntu:ubuntu "$LOG_FILE" 2>/dev/null || true
+# 로그 디렉토리 권한 문제 방지 (ubuntu 홈 디렉토리 하위에 생성)
+mkdir -p "$LOG_DIR"
 
 # Logging helper
 log() {
@@ -182,11 +182,11 @@ log "✅ Main container started successfully."
 # 6.5. Start Promtail Container
 log "🔄 Starting Promtail container..."
 if [ -x "$APP_DIR/deploy/monitoring/run_promtail.sh" ]; then
-    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" >> "$APP_DIR/promtail_deploy.log" 2>&1
+    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" >> "$LOG_DIR/promtail_deploy.log" 2>&1
     if [ $? -eq 0 ]; then
         log "✅ Promtail container started successfully."
     else
-        log "⚠️  Failed to start Promtail container. Check promtail_deploy.log."
+        log "⚠️  Failed to start Promtail container. Check logs/promtail_deploy.log."
     fi
 else
     log "⚠️  run_promtail.sh not found or not executable at $APP_DIR/deploy/monitoring/run_promtail.sh"
