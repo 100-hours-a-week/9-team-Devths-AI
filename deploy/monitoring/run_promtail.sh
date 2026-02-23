@@ -79,6 +79,7 @@ docker run -d \
     --name $CONTAINER_NAME \
     --restart unless-stopped \
     -e LOKI_URL="$LOKI_URL" \
+    -v ai_promtail_data:/promtail_data \
     -v ${CONFIG_FILE}:/etc/promtail/config.yml:ro \
     -v /var/lib/docker/containers:/var/lib/docker/containers:ro \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
