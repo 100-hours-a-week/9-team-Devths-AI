@@ -31,6 +31,10 @@ scrape_configs:
     # Docker json-file 포맷에서 실제 로그 내용만 파싱
     pipeline_stages:
       - docker: {}
+      # Docker 로그 중 일부가 잘렸거나 완벽한 JSON이 아닐 때 발생하는 JSONParserErr 무시
+      - labeldrop:
+          - __error__
+          - __error_details__
       # Python/FastAPI 표준 로그 및 Uvicorn 로그 포맷에서 level 추출
       - regex:
           expression: '(?i).*?(?P<level>(INFO|ERROR|WARN|WARNING|DEBUG|CRITICAL)).*'
