@@ -84,7 +84,7 @@ docker run -d \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
     -v /var/log:/var/log:ro \
     -p 9080:9080 \
-    grafana/promtail:2.9.3 \
+    grafana/promtail:3.2.1 \
     -config.file=/etc/promtail/config.yml \
     -config.expand-env=true
 
