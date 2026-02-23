@@ -136,10 +136,11 @@ if [[ "$ENV_TAG" == "stg" ]]; then export PARAMETER_STORE_PATH="/Stg/AI/"; fi
 if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 
 # Source the script to load variables into the current shell session
-if [ -f "$APP_DIR/deploy/load_env_from_parameter_store.sh" ]; then
-    source "$APP_DIR/deploy/load_env_from_parameter_store.sh"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+if [ -f "$SCRIPT_DIR/load_env_from_parameter_store.sh" ]; then
+    source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
 else
-    log "⚠️  load_env_from_parameter_store.sh not found. Skipping Parameter Store load."
+    log "⚠️  load_env_from_parameter_store.sh not found at $SCRIPT_DIR. Skipping Parameter Store load."
 fi
 
 # Construct Docker Environment Arguments
