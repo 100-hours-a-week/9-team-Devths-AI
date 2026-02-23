@@ -18,6 +18,12 @@ permissions:
     mode: 755
     type:
       - file
+  - object: /home/ubuntu/ai/deploy/monitoring/*.sh
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - file
 
 hooks:
   ApplicationStart:

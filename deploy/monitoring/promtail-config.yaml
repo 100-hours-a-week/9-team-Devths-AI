@@ -32,6 +32,12 @@ scrape_configs:
     # Docker json-file 포맷에서 실제 로그 내용만 파싱
     pipeline_stages:
       - docker: {}
+      # Python/FastAPI 표준 로그 및 Uvicorn 로그 포맷에서 level 추출
+      - regex:
+          expression: '(?i).*?(?P<level>(INFO|ERROR|WARN|WARNING|DEBUG|CRITICAL)).*'
+      # 추출된 level 변수를 Loki의 정식 Label로 승격
+      - labels:
+          level:
 
   # ============================================================================
   # 2. Host OS System logs (필요시 활성화)
