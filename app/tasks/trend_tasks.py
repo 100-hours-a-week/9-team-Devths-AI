@@ -1,26 +1,30 @@
 """
-Trend Crawling Tasks — ADR-094.
+Trend Crawling Tasks — ADR-094, ADR-096.
 
 Celery 태스크: 채용 트렌드 URL 크롤링 + VectorDB 적재.
+Redis를 통한 분산 태스크 처리.
 """
 
 import asyncio
 import logging
-import os
 
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# 환경변수에서 크롤링 URL 목록 로드 (쉼표 구분)
-TREND_CRAWL_URLS = os.getenv("TREND_CRAWL_URLS", "")
-
 
 def _get_trend_urls() -> list[str]:
-    """환경변수에서 트렌드 크롤링 URL 목록을 파싱."""
-    if not TREND_CRAWL_URLS:
+    """settings.py에서 트렌드 크롤링 URL 목록을 파싱.
+
+    태스크 실행 시점에 동적으로 로드하여 환경변수 변경 반영.
+    """
+    from app.config.settings import get_settings
+
+    settings = get_settings()
+    urls_str = settings.trend_crawl_urls
+    if not urls_str:
         return []
-    return [url.strip() for url in TREND_CRAWL_URLS.split(",") if url.strip()]
+    return [url.strip() for url in urls_str.split(",") if url.strip()]
 
 
 @celery_app.task(bind=True, name="app.tasks.trend_tasks.crawl_trend_urls_task")

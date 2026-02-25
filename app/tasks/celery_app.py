@@ -1,22 +1,25 @@
 """
-Celery Application Configuration — ADR-094.
+Celery Application Configuration — ADR-094, ADR-096.
 
 Celery Beat 스케줄러 설정 및 앱 초기화.
+Redis를 메시지 브로커 및 결과 저장소로 사용.
 """
-
-import os
 
 from celery import Celery
 from celery.schedules import crontab
 
-# 환경변수에서 설정 로드
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1")
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
+from app.config.settings import get_settings
 
-# 트렌드 크롤링 스케줄 (기본: 매주 월요일 오전 9시)
-TREND_CRAWL_CRON_MINUTE = os.getenv("TREND_CRAWL_CRON_MINUTE", "0")
-TREND_CRAWL_CRON_HOUR = os.getenv("TREND_CRAWL_CRON_HOUR", "9")
-TREND_CRAWL_CRON_DAY_OF_WEEK = os.getenv("TREND_CRAWL_CRON_DAY_OF_WEEK", "1")  # 월요일
+# settings.py에서 설정 로드 (ADR-096: 설정 일관성)
+_settings = get_settings()
+
+CELERY_BROKER_URL = _settings.celery_broker_url
+CELERY_RESULT_BACKEND = _settings.celery_result_backend
+
+# 트렌드 크롤링 스케줄 설정
+TREND_CRAWL_CRON_MINUTE = _settings.trend_crawl_cron_minute
+TREND_CRAWL_CRON_HOUR = _settings.trend_crawl_cron_hour
+TREND_CRAWL_CRON_DAY_OF_WEEK = _settings.trend_crawl_cron_day_of_week
 
 celery_app = Celery(
     "devths_ai",
