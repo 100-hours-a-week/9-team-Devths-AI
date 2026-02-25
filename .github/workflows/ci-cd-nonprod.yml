@@ -4,8 +4,12 @@ name: AI Service CI/CD
 on:
   push:
     branches: [ "develop", "release/*" ]
+    paths-ignore:
+      - 'easyocr_server/**'
   pull_request:
     branches: [ "develop", "release/*" ]
+    paths-ignore:
+      - 'easyocr_server/**'
   workflow_dispatch:
 
 jobs:

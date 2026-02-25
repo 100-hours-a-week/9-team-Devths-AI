@@ -1,0 +1,31 @@
+version: 0.0
+os: linux
+files:
+  - source: deploy/easyocr/
+    destination: /home/ubuntu/ai/deploy/easyocr
+    overwrite: yes
+
+permissions:
+  - object: /home/ubuntu/ai/deploy/easyocr
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
+  - object: /home/ubuntu/ai/deploy/easyocr/*.sh
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - file
+
+hooks:
+  ApplicationStart:
+    - location: deploy/easyocr/docker_deploy.sh
+      timeout: 300
+      runas: ubuntu
+
+  ValidateService:
+    - location: deploy/easyocr/validate_service.sh
+      timeout: 180
+      runas: ubuntu
