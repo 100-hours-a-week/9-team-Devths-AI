@@ -819,7 +819,7 @@ async def generate_chat_stream(
                 pass
 
         safe_info(logger, f"📊 [LLM Stats] Mode={mode} | Model={model} | TTFT={ttft_str} | GenTime={gen_time_str} | TotalTime={total_time:.2f}s | UID={request.user_id}")
-        safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration_ms)
+        safe_info(logger, "⏱️ 채팅 처리 완료: %sms", f"{duration_ms:.2f}")
     except Exception as e:
         logger.error(f"Failed to record latency metric: {e}")
 
