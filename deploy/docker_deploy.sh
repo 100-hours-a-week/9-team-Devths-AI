@@ -202,6 +202,19 @@ for i in {1..12}; do
     sleep 5
     if curl -s "http://localhost:8000/health" > /dev/null; then
         log "✅ Health check passed!"
+        
+        # 8. Trigger Auto-Embedding if flagged by CI/CD
+        if [ "$TRIGGER_DATA_EMBEDDING" = "true" ]; then
+            log "📂 Data directory change detected. Triggering auto-embedding..."
+            docker exec "$CONTAINER_NAME" python scripts/auto_embed_data.py >> "$LOG_FILE" 2>&1
+            if [ $? -eq 0 ]; then
+                log "✅ Auto-embedding completed successfully."
+            else
+                log "⚠️  Auto-embedding failed! Check the logs above."
+                # We don't exit 1 here because the main application is healthy
+            fi
+        fi
+
         log "🚀 Deployment Successful!"
         exit 0
     fi
