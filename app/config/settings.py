@@ -124,6 +124,23 @@ class Settings(BaseSettings):
         default=3,
         description="Number of perspective queries to generate for MultiQueryRetriever. ADR-077.",
     )
+    # ADR-080: 시간 가중 벡터 스토어 리트리버 (interview_feedback 최신성 반영)
+    rag_use_time_weighted: bool = Field(
+        default=False,
+        description="Apply time-decay scoring to interview_feedback retrieval. ADR-080.",
+    )
+    rag_decay_rate_technical: float = Field(
+        default=0.1,
+        description="Decay rate for technical questions (higher = faster decay). ADR-080.",
+    )
+    rag_decay_rate_personality: float = Field(
+        default=0.01,
+        description="Decay rate for personality questions (lower = slower decay). ADR-080.",
+    )
+    rag_decay_rate_general: float = Field(
+        default=0.05,
+        description="Decay rate for general queries. ADR-080.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:
