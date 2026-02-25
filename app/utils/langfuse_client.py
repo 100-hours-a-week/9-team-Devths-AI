@@ -189,6 +189,37 @@ def create_generation(
         return None
 
 
+def record_score(
+    trace: "LangfuseTraceContext | None",
+    name: str,
+    value: float,
+    comment: str | None = None,
+) -> None:
+    """ADR-091: Judge LLM이 채점한 점수를 Langfuse trace에 기록.
+
+    Langfuse 대시보드에서 모델/파이프라인 단계별 품질 점수를 확인할 수 있다.
+    Langfuse 미설정 또는 오류 시 no-op으로 동작 (서비스 중단 없음).
+
+    Args:
+        trace: trace_llm_call()로 생성한 컨텍스트
+        name: 채점 기준명 ("relevance", "accuracy", "fluency", "completeness", "overall")
+        value: 점수 (1.0 ~ 5.0)
+        comment: 채점 근거 텍스트 (선택)
+    """
+    if trace is None:
+        return
+    try:
+        client = trace["client"]
+        client.score(
+            trace_id=trace["trace_id"],
+            name=name,
+            value=value,
+            comment=comment,
+        )
+    except Exception as e:
+        logger.error("Langfuse score 기록 실패 (name=%s): %s", name, e)
+
+
 # 데코레이터를 사용한 간편한 추적
 def observe_llm_call(name: str | None = None):
     """

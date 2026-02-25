@@ -1,16 +1,18 @@
 """
 면접 답변 평가 API 엔드포인트 (통합).
 
-POST /ai/evaluation/analyze - 면접 평가 리포트 생성 (SSE 스트리밍)
+POST /ai/evaluation/analyze   - 면접 평가 리포트 생성 (SSE 스트리밍)
   - retry=false: Gemini 단독 분석
   - retry=true:  Gemini×GPT-4o 토론 후 최종 리포트
+
+POST /ai/evaluation/llm-judge - ADR-091 LLM-as-Judge 단건 채점 (내부 평가용)
 """
 
 import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.v2._helpers import get_services
@@ -25,7 +27,11 @@ from app.schemas.evaluation import (
     AnalyzeInterviewRequest,
 )
 from app.schemas.ingestion import InterviewIngestionInput, InterviewResultDocument
+from app.schemas.judge import JudgeRequest, JudgeResponse
 from app.services.interview_ingestion_service import InterviewIngestionService
+from app.services.judge_service import JudgeService
+from app.utils.langfuse_client import trace_llm_call
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +58,7 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
 
     try:
         from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+
         CELERY_TASK_WAIT_TIME.labels(task_name="ingest_qa").observe(0.0)
         CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").inc()
     except Exception:
@@ -92,6 +99,7 @@ async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
     finally:
         try:
             from app.core.monitoring import CELERY_TASKS_ACTIVE
+
             CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").dec()
         except Exception:
             pass
@@ -506,3 +514,67 @@ async def analyze_interview(
         media_type="text/event-stream",
         headers=sse_headers,
     )
+
+
+# ============================================
+# ADR-091: LLM-as-Judge 단건 채점 (내부 평가용)
+# ============================================
+
+
+@router.post(
+    "/llm-judge",
+    response_model=JudgeResponse,
+    summary="LLM-as-Judge 단건 채점 (ADR-091)",
+    description="""
+    AI 파이프라인 응답 품질을 Gemini Judge로 채점합니다.
+
+    **내부 평가용 엔드포인트** — 4단계(langchain_only / rag / vllm / sagemaker) 품질 비교에 활용.
+    채점 결과는 Langfuse에 자동 기록됩니다.
+
+    채점 기준 (각 1~5점):
+    - **relevance**: 질문과의 관련성
+    - **accuracy**: 정보 정확성
+    - **fluency**: 자연스러운 표현
+    - **completeness**: 답변 완전성
+    """,
+    responses={
+        200: {"description": "채점 결과 반환"},
+        500: {"description": "Judge LLM 호출 실패"},
+    },
+)
+async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
+    """단건 RAG 응답을 Gemini Judge LLM으로 채점 → Langfuse 기록."""
+    logger.info(
+        "LLM-as-Judge 요청: pipeline_stage=%s", sanitize_log_input(request.pipeline_stage)
+    )
+
+    try:
+        judge = JudgeService()
+        result = await judge.score(
+            question=request.question,
+            answer=request.answer,
+            pipeline_stage=request.pipeline_stage,
+            reference_answer=request.reference_answer,
+            user_id=request.user_id,
+        )
+
+        # Langfuse trace_id 추출 (기록용)
+        trace = trace_llm_call(
+            name=f"llm_judge_api_{request.pipeline_stage}",
+            user_id=request.user_id,
+        )
+        trace_id = trace["trace_id"] if trace else None
+
+        logger.info(
+            "LLM-as-Judge 완료: stage=%s overall=%.1f",
+            sanitize_log_input(request.pipeline_stage),
+            result.overall_score,
+        )
+        return JudgeResponse(result=result, langfuse_trace_id=trace_id)
+
+    except Exception as e:
+        logger.error("LLM-as-Judge 실패: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "JUDGE_ERROR", "message": f"Judge LLM 호출 실패: {str(e)}"},
+        ) from e
