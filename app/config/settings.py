@@ -160,6 +160,30 @@ class Settings(BaseSettings):
         description="Use SelfQueryRetriever for trend_data metadata filtering. ADR-079.",
     )
 
+    # ============================================
+    # ADR-094: Trend Crawling Configuration
+    # ============================================
+    trend_crawl_urls: str = Field(
+        default="",
+        description="Comma-separated list of URLs to crawl for trend data. ADR-094.",
+    )
+    trend_crawl_collection: str = Field(
+        default="trend_data",
+        description="ChromaDB collection name for trend data. ADR-094.",
+    )
+    trend_crawl_cron_minute: str = Field(
+        default="0",
+        description="Celery Beat cron minute for trend crawling. ADR-094.",
+    )
+    trend_crawl_cron_hour: str = Field(
+        default="9",
+        description="Celery Beat cron hour for trend crawling. ADR-094.",
+    )
+    trend_crawl_cron_day_of_week: str = Field(
+        default="1",
+        description="Celery Beat cron day of week (0=Sun, 1=Mon, ...). ADR-094.",
+    )
+
     @property
     def all_google_api_keys(self) -> list[str]:
         """Google API 키를 리스트로 반환 (쉼표 구분 분산 처리)."""
