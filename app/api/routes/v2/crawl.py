@@ -104,3 +104,74 @@ async def crawl_trend_data(request: CrawlRequest):
     except Exception as e:
         logger.error("[CrawlAPI] 크롤링 API 오류: %s", e)
         raise HTTPException(status_code=500, detail="크롤링 처리 중 오류가 발생했습니다.") from e
+
+
+class TriggerTaskResponse(BaseModel):
+    """Celery 태스크 트리거 응답."""
+
+    task_id: str
+    message: str
+
+
+class TaskStatusResponse(BaseModel):
+    """Celery 태스크 상태 응답."""
+
+    task_id: str
+    status: str
+    result: dict | None = None
+
+
+@router.post("/crawl/trigger", response_model=TriggerTaskResponse)
+async def trigger_trend_crawl():
+    """Celery 태스크를 수동으로 트리거하여 트렌드 크롤링 실행.
+
+    환경변수 TREND_CRAWL_URLS에 설정된 URL 목록을 크롤링합니다.
+    """
+    from app.services.trend_crawler_service import TrendCrawlerService
+
+    try:
+        service = TrendCrawlerService()
+        task_id = service.trigger_celery_task()
+
+        return TriggerTaskResponse(
+            task_id=task_id,
+            message="트렌드 크롤링 태스크가 시작되었습니다.",
+        )
+
+    except Exception as e:
+        logger.error("[CrawlAPI] 태스크 트리거 실패: %s", e)
+        raise HTTPException(status_code=500, detail="태스크 트리거에 실패했습니다.") from e
+
+
+@router.get("/crawl/task/{task_id}", response_model=TaskStatusResponse)
+async def get_crawl_task_status(task_id: str):
+    """Celery 태스크 상태 조회.
+
+    Args:
+        task_id: 태스크 ID
+    """
+    from app.services.trend_crawler_service import TrendCrawlerService
+
+    try:
+        service = TrendCrawlerService()
+        status = service.get_celery_task_status(task_id)
+
+        return TaskStatusResponse(**status)
+
+    except Exception as e:
+        logger.error("[CrawlAPI] 태스크 상태 조회 실패: %s", e)
+        raise HTTPException(status_code=500, detail="태스크 상태 조회에 실패했습니다.") from e
+
+
+@router.get("/crawl/urls")
+async def get_configured_urls():
+    """환경변수에 설정된 크롤링 URL 목록 조회."""
+    from app.services.trend_crawler_service import TrendCrawlerService
+
+    service = TrendCrawlerService()
+    urls = service.get_configured_urls()
+
+    return {
+        "total": len(urls),
+        "urls": urls,
+    }
