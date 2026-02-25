@@ -159,6 +159,19 @@ class Settings(BaseSettings):
         default=False,
         description="Use SelfQueryRetriever for trend_data metadata filtering. ADR-079.",
     )
+    # ADR-076: 부모 문서 리트리버 (자식 청크 정밀 검색 → 부모 청크 반환)
+    rag_use_parent_retriever: bool = Field(
+        default=False,
+        description="resumes/portfolios에서 자식 청크(400자)로 정밀 검색 후 부모 청크(2000자) 반환. ADR-076.",
+    )
+    rag_child_chunk_size: int = Field(
+        default=400,
+        description="ParentDocumentRetriever 자식 청크 크기(문자 기준). ADR-076.",
+    )
+    rag_child_chunk_overlap: int = Field(
+        default=50,
+        description="ParentDocumentRetriever 자식 청크 오버랩(문자 기준). ADR-076.",
+    )
 
     # ============================================
     # ADR-094: Trend Crawling Configuration
