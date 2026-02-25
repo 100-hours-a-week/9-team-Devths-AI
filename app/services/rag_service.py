@@ -549,6 +549,100 @@ class RAGService:
             return "\n\n".join(doc.page_content for doc in docs)
         return ""
 
+    async def ingest_trend_documents(
+        self,
+        documents: list[dict],
+    ) -> int:
+        """ADR-078: 트렌드 문서를 요약/가설 쿼리로 변환하여 MultiVector 구조로 적재.
+
+        Args:
+            documents: [{"id": str, "text": str, "metadata": dict}, ...]
+
+        Returns:
+            성공적으로 적재된 문서 수
+        """
+        import uuid
+
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import ChatPromptTemplate
+
+        settings = get_settings()
+        if not settings.rag_use_multi_vector or not self.vectordb:
+            logger.warning("ADR-078: MultiVector 미활성화 또는 vectordb 미설정")
+            return 0
+
+        llm = self._langchain_gateway.llm if self._langchain_gateway else None
+        if not llm:
+            logger.warning("ADR-078: LLM 미설정, 적재 불가")
+            return 0
+
+        strategy = settings.rag_multi_vector_strategy
+        count = 0
+
+        for doc in documents:
+            try:
+                doc_id = doc.get("id") or str(uuid.uuid4())
+                text = doc["text"]
+                metadata = doc.get("metadata", {})
+
+                if strategy == "summary":
+                    # 요약 임베딩 생성
+                    prompt = ChatPromptTemplate.from_template(_SUMMARY_FOR_EMBEDDING_TEMPLATE)
+                    chain = prompt | llm | StrOutputParser()
+                    summary = await chain.ainvoke({"doc": text[:5000]})
+
+                    # 요약을 trend_data 컬렉션에 저장 (doc_id 매핑)
+                    summary_meta = {**metadata, "doc_id": doc_id, "representation": "summary"}
+                    await self.vectordb.add_document(
+                        document_id=f"summary_{doc_id}",
+                        text=summary,
+                        collection_type="trend_data",
+                        metadata=summary_meta,
+                    )
+
+                elif strategy == "hypothetical":
+                    # 가설 쿼리 생성
+                    query_count = settings.rag_hypothetical_query_count
+                    prompt = ChatPromptTemplate.from_template(_HYPOTHETICAL_QUERIES_TEMPLATE)
+                    chain = prompt | llm | StrOutputParser()
+                    queries_text = await chain.ainvoke(
+                        {
+                            "doc": text[:5000],
+                            "count": query_count,
+                        }
+                    )
+
+                    # 각 가설 쿼리를 개별 문서로 저장
+                    queries = [q.strip() for q in queries_text.strip().split("\n") if q.strip()]
+                    for idx, q in enumerate(queries[:query_count]):
+                        q_meta = {**metadata, "doc_id": doc_id, "representation": "hypothetical"}
+                        await self.vectordb.add_document(
+                            document_id=f"hyp_{doc_id}_{idx}",
+                            text=q,
+                            collection_type="trend_data",
+                            metadata=q_meta,
+                        )
+
+                # 원본 문서도 저장 (검색 결과 반환용)
+                orig_meta = {**metadata, "representation": "original"}
+                await self.vectordb.add_document(
+                    document_id=doc_id,
+                    text=text,
+                    collection_type="trend_data",
+                    metadata=orig_meta,
+                )
+                count += 1
+                logger.info("ADR-078: 문서 적재 완료 (strategy=%s, doc_id=%s)", strategy, doc_id)
+
+            except Exception as e:
+                logger.error("ADR-078: 문서 적재 실패: %s", e)
+                continue
+
+        logger.info(
+            "ADR-078: 총 %d/%d 문서 적재 완료 (strategy=%s)", count, len(documents), strategy
+        )
+        return count
+
     async def retrieve_context(
         self,
         query: str,
