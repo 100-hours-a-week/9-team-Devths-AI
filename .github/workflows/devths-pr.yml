@@ -1,11 +1,13 @@
 name: Devths-AI CI 파이프라인
 
 on:
-  pull_request:
-    branches:
-      - develop
-      - release/**
-      - main
+  # [V2 Migration] Docker 기반 CI(ci-cd-nonprod.yml)로 대체됨
+  workflow_dispatch:
+  # pull_request:
+  #   branches:
+  #     - develop
+  #     - release/**
+  #     - main
 
 env:
   PYTHON_VERSION: '3.10'

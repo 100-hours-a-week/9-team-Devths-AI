@@ -22,7 +22,6 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
-from app.services.cloudwatch_service import CloudWatchService
 from app.services.text_splitter_service import TextSplitterService
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, sanitize_log_input
@@ -188,12 +187,7 @@ async def text_extract(
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id
 
-    # 모니터링 메트릭 전송
-    try:
-        cw = CloudWatchService.get_instance()
-        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
-    except Exception:
-        pass
+    # 모니터링 메트릭 전송 (PLG 적용 과정에서 CloudWatch 제거됨)
 
     # 비동기 작업 시작
     task_key = str(task_id)
@@ -208,7 +202,18 @@ async def text_extract(
         },
     )
 
+    import time
+    enqueued_time = time.time()
+
     async def process_text_extract(store):
+        try:
+            from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+            wait_time = time.time() - enqueued_time
+            CELERY_TASK_WAIT_TIME.labels(task_name="text_extract").observe(wait_time)
+            CELERY_TASKS_ACTIVE.labels(task_name="text_extract").inc()
+        except Exception:
+            pass
+
         try:
             rag = get_services()
 
@@ -460,6 +465,12 @@ async def text_extract(
             task_data["status"] = TaskStatus.FAILED
             task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
             store.save(task_key, task_data)
+        finally:
+            try:
+                from app.core.monitoring import CELERY_TASKS_ACTIVE
+                CELERY_TASKS_ACTIVE.labels(task_name="text_extract").dec()
+            except Exception:
+                pass
 
     asyncio.create_task(process_text_extract(task_storage))
 
