@@ -86,7 +86,18 @@ async def masking_draft(
     }
     task_storage.save(task_id, task_data)
 
+    import time
+    enqueued_time = time.time()
+
     async def process_masking(store):
+        try:
+            from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+            wait_time = time.time() - enqueued_time
+            CELERY_TASK_WAIT_TIME.labels(task_name="masking_draft").observe(wait_time)
+            CELERY_TASKS_ACTIVE.labels(task_name="masking_draft").inc()
+        except Exception:
+            pass
+
         logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
         logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
         try:
@@ -182,6 +193,12 @@ async def masking_draft(
             task_data["message"] = f"마스킹 작업 실패: {str(e)}"
             task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
             store.save(task_id, task_data)
+        finally:
+            try:
+                from app.core.monitoring import CELERY_TASKS_ACTIVE
+                CELERY_TASKS_ACTIVE.labels(task_name="masking_draft").dec()
+            except Exception:
+                pass
 
     task = asyncio.create_task(process_masking(task_storage))
     _background_tasks_set.add(task)

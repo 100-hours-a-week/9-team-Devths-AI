@@ -7,7 +7,7 @@ Centralized configuration management with environment variable support.
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,22 @@ class Settings(BaseSettings):
     )
     debug: bool = Field(default=False, description="Debug mode")
     log_level: str = Field(default="INFO", description="Logging level")
+
+    @model_validator(mode="after")
+    def set_defaults_by_env(self):
+        """Enforce defaults based on environment."""
+        if self.environment == "development":
+            # Dev: Debug True, Log Level DEBUG by default
+            if self.debug is False:  # Only override if default
+                self.debug = True
+            if self.log_level == "INFO":  # Only override if default
+                self.log_level = "DEBUG"
+        else:
+            # Non-Dev: Debug False, Log Level INFO (Safety)
+            self.debug = False
+            if self.log_level == "DEBUG":
+                self.log_level = "INFO"
+        return self
 
     # ============================================
     # API Configuration

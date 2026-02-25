@@ -244,6 +244,8 @@ class VectorDBService:
             # ChromaDB는 None 값을 허용하지 않음 - 필터링
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
+            import time
+            start_time = time.perf_counter()
             # Add to collection
             collection.upsert(
                 ids=[document_id],
@@ -251,6 +253,12 @@ class VectorDBService:
                 documents=[text],
                 metadatas=[doc_metadata],
             )
+            insert_duration = time.perf_counter() - start_time
+            try:
+                from app.core.monitoring import VECTOR_DB_INSERT_DURATION
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+            except Exception as e:
+                logger.error(f"VectorDB Metric Error: {e}")
 
             logger.info(f"Added document {document_id} to {collection_type} collection")
             return document_id
@@ -304,8 +312,16 @@ class VectorDBService:
             # Batch embed all texts in one API call
             embeddings = await self.create_embeddings(texts)
 
+            import time
+            start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
+            insert_duration = time.perf_counter() - start_time
+            try:
+                from app.core.monitoring import VECTOR_DB_INSERT_DURATION
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+            except Exception as e:
+                logger.error(f"VectorDB Metric Error: {e}")
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
             return ids
@@ -539,6 +555,8 @@ class VectorDBService:
                 meta = {k: v for k, v in meta.items() if v is not None}
                 filtered_metadatas.append(meta)
 
+            import time
+            start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(
                 ids=ids,
@@ -546,6 +564,12 @@ class VectorDBService:
                 documents=texts,
                 metadatas=filtered_metadatas,
             )
+            insert_duration = time.perf_counter() - start_time
+            try:
+                from app.core.monitoring import VECTOR_DB_INSERT_DURATION
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_name).observe(insert_duration)
+            except Exception as e:
+                logger.error(f"VectorDB Metric Error: {e}")
 
             logger.info(f"Added {len(ids)} texts to {collection_name} collection")
             return ids

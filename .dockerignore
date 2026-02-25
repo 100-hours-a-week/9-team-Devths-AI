@@ -47,3 +47,17 @@ scripts/
 # Logs
 logs/
 *.log
+
+# Orchestration & Config (Not needed inside container)
+docker-compose.yml
+appspec.yml
+.ruff.toml
+start_server.sh
+*.log
+
+
+# Terraform
+terraform/
+.terraform/
+*.tfstate
+*.tfstate.backup

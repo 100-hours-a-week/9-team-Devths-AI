@@ -4,6 +4,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🔍 Validating deployed service..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# AWS CodeDeploy의 환경 변수(PATH) 초기화 문제 방지를 위해 명시적으로 PATH 추가
+export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+
 APP_DIR="/home/ubuntu/ai"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/fastapi-app.log"
@@ -12,17 +15,16 @@ MAX_RETRIES=30
 RETRY_INTERVAL=2
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 1. 프로세스 확인
+# 1. 프로세스 확인 (Docker Container)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-echo "🔎 Checking if server process is running..."
-if pgrep -f "uvicorn app.main:app" > /dev/null; then
-    PID=$(pgrep -f "uvicorn app.main:app" | head -n 1)
-    echo "✅ Server process is running (PID: $PID)"
+echo "🔎 Checking if Docker container is running..."
+CONTAINER_NAME="ai-service"
+if docker ps --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+    echo "✅ Docker container '$CONTAINER_NAME' is running."
 else
-    echo "❌ Server process not found!"
-    echo "📋 Last 30 lines of log:"
-    tail -n 30 "$LOG_FILE" 2>/dev/null || echo "Log file not found"
+    echo "❌ Docker container '$CONTAINER_NAME' is NOT running!"
+    docker ps -a | grep "$CONTAINER_NAME"
     exit 1
 fi
 
@@ -38,8 +40,8 @@ for i in $(seq 1 $MAX_RETRIES); do
     echo -n "   Attempt $i/$MAX_RETRIES... "
 
     # HTTP 상태 코드와 응답 본문 가져오기
-    HTTP_CODE=$(curl -s -o /tmp/health_response.txt -w "%{http_code}" http://localhost:$PORT/health 2>/dev/null)
-    RESPONSE=$(cat /tmp/health_response.txt 2>/dev/null)
+    HTTP_CODE=$(curl -s -o "$LOG_DIR/health_response.txt" -w "%{http_code}" http://localhost:$PORT/health 2>/dev/null)
+    RESPONSE=$(cat "$LOG_DIR/health_response.txt" 2>/dev/null)
 
     if [ "$HTTP_CODE" = "200" ]; then
         echo "✅ Success (HTTP $HTTP_CODE)"
@@ -48,7 +50,7 @@ for i in $(seq 1 $MAX_RETRIES); do
         echo "✅ Service validation passed!"
         echo "🎉 Deployment successful!"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        rm -f /tmp/health_response.txt
+        rm -f "$LOG_DIR/health_response.txt"
         exit 0
     else
         echo "❌ Failed (HTTP $HTTP_CODE)"
@@ -78,12 +80,12 @@ echo ""
 
 # 프로세스 확인
 echo "2. Running processes:"
-pgrep -af "uvicorn" || echo "   No uvicorn processes found"
+docker ps -f name=ai-service || echo "   No ai-service container found"
 echo ""
 
 # 최근 로그
 echo "3. Last 50 lines of application log:"
-tail -n 50 "$LOG_FILE" 2>/dev/null || echo "   Log file not found at $LOG_FILE"
+docker logs --tail 50 ai-service 2>/dev/null || echo "   Could not retrieve docker logs for ai-service"
 echo ""
 
 # 환경변수 확인 (민감 정보 제외)
@@ -92,6 +94,12 @@ if [ -n "$GOOGLE_API_KEY" ]; then
     echo "   ✅ GOOGLE_API_KEY is set"
 else
     echo "   ❌ GOOGLE_API_KEY is not set"
+fi
+
+if [ -n "$GEMINI_API_KEY" ]; then
+    echo "   ✅ GEMINI_API_KEY is set"
+else
+    echo "   ❌ GEMINI_API_KEY is not set"
 fi
 
 if [ -n "$API_KEY" ]; then
@@ -106,5 +114,5 @@ echo "5. Disk space:"
 df -h "$APP_DIR" | tail -1
 echo ""
 
-rm -f /tmp/health_response.txt
+rm -f "$LOG_DIR/health_response.txt"
 exit 1
