@@ -10,6 +10,15 @@ class InterviewType(str, Enum):
     TECHNICAL = "technical"
 
 
+class InterviewStyle(str, Enum):
+    """면접 스타일 (ADR-098: 페르소나 강화)"""
+
+    FRIENDLY = "friendly"  # 친절형: 격려 중심, 편안한 분위기
+    STANDARD = "standard"  # 표준형: 균형 잡힌 질문과 피드백 (기본값)
+    CHALLENGING = "challenging"  # 도전형: 깊이 있는 꼬리질문, 압박 요소
+    PRACTICAL = "practical"  # 실무형: 실제 업무 시나리오 중심
+
+
 class EndedBy(str, Enum):
     """면접 종료 방식"""
 
@@ -23,6 +32,10 @@ class InterviewQuestionRequest(BaseModel):
     room_id: str = Field(..., description="채팅방 ID")
     session_id: str = Field(..., description="면접 세션 ID")
     interview_type: InterviewType = Field(..., description="면접 타입 (personality/technical)")
+    interview_style: InterviewStyle = Field(
+        default=InterviewStyle.STANDARD,
+        description="면접 스타일 (friendly/standard/challenging/practical)",
+    )
     resume_text: str = Field(..., description="이력서 텍스트")
     posting_text: str = Field(..., description="채용공고 텍스트")
 
@@ -32,6 +45,7 @@ class InterviewQuestionRequest(BaseModel):
                 "room_id": "room_001",
                 "session_id": "session_abc123",
                 "interview_type": "technical",
+                "interview_style": "standard",
                 "resume_text": "이력서 텍스트...",
                 "posting_text": "채용공고 텍스트...",
             }
