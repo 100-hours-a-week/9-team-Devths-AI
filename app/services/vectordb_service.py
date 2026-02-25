@@ -27,6 +27,10 @@ EMBEDDING_CACHE_DIR = os.getenv("EMBEDDING_CACHE_DIR", "./embedding_cache")
 class VectorDBService:
     """VectorDB Service for storing and retrieving embeddings"""
 
+    # ADR-076: 자식 컬렉션 이름 상수 — rag_service 등 외부에서도 참조 가능 (문자열 중복 제거)
+    RESUME_CHILD_COLLECTION: str = "resumes_child"
+    PORTFOLIO_CHILD_COLLECTION: str = "portfolios_child"
+
     def __init__(
         self,
         api_key: str | None = None,
@@ -124,6 +128,32 @@ class VectorDBService:
             name=self.TREND_DATA_COLLECTION,
             metadata={"description": "Employment trend data (ADR-078/094)"},
         )
+        # ADR-076: 자식 컬렉션 및 분할기 — rag_use_parent_retriever 활성화 시에만 생성
+        from app.config.settings import get_settings as _get_settings_init
+
+        _init_settings = _get_settings_init()
+        if _init_settings.rag_use_parent_retriever:
+            self.resume_child_collection = self.chroma_client.get_or_create_collection(
+                name=self.RESUME_CHILD_COLLECTION,
+                metadata={
+                    "description": "Resume child chunks for ParentDocumentRetriever (ADR-076)"
+                },
+            )
+            self.portfolio_child_collection = self.chroma_client.get_or_create_collection(
+                name=self.PORTFOLIO_CHILD_COLLECTION,
+                metadata={
+                    "description": "Portfolio child chunks for ParentDocumentRetriever (ADR-076)"
+                },
+            )
+            from app.services.text_splitter_service import TextSplitterService
+
+            self._child_splitter = TextSplitterService(
+                chunk_size=_init_settings.rag_child_chunk_size,
+                chunk_overlap=_init_settings.rag_child_chunk_overlap,
+            )
+            logger.info(
+                "ADR-076: ParentDocumentRetriever 활성화 — 자식 컬렉션 및 분할기 초기화 완료"
+            )
 
     def _get_collection(self, collection_type: str):
         """Get collection by type (문서 6개 컬렉션 + 별칭)"""
@@ -141,6 +171,10 @@ class VectorDBService:
             return self.chat_context_collection
         elif collection_type in ("trend_data", "trend"):  # ADR-078/094
             return self.trend_data_collection
+        elif collection_type in ("resumes_child", "resume_child"):  # ADR-076
+            return self.resume_child_collection
+        elif collection_type in ("portfolios_child", "portfolio_child"):  # ADR-076
+            return self.portfolio_child_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
 
@@ -351,11 +385,67 @@ class VectorDBService:
                 logger.error(f"VectorDB Metric Error: {e}")
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
+
+            # ADR-076: resumes/portfolios 적재 시 자식 청크도 함께 생성 (설정 활성화 시)
+            from app.config.settings import get_settings as _get_settings
+
+            _settings = _get_settings()
+            if _settings.rag_use_parent_retriever and collection_type in (
+                "resume",
+                "resumes",
+                "portfolio",
+                "portfolios",
+            ):
+                try:
+                    await self._add_child_chunks(documents, collection_type)
+                except Exception as child_err:
+                    # 자식 청크 생성 실패는 비치명적 — 부모 저장은 이미 완료됨
+                    logger.warning(
+                        "ADR-076: 자식 청크 생성 실패 (비치명적, 부모 저장 성공): %s", child_err
+                    )
+
             return ids
 
         except Exception as e:
             logger.error(f"Error adding documents batch to VectorDB: {e}")
             raise
+
+    async def _add_child_chunks(
+        self, parent_documents: list[dict[str, Any]], parent_collection_type: str
+    ) -> None:
+        """ADR-076: 부모 청크들을 400자 자식으로 분할 → 자식 컬렉션에 저장.
+
+        Args:
+            parent_documents: add_documents_batch()에 전달된 부모 청크 dict 목록
+            parent_collection_type: "resumes" 또는 "portfolios"
+        """
+        from app.services.text_splitter_service import TextChunk
+
+        child_collection_type = (
+            self.RESUME_CHILD_COLLECTION
+            if parent_collection_type in ("resume", "resumes")
+            else self.PORTFOLIO_CHILD_COLLECTION
+        )
+
+        child_docs: list[dict[str, Any]] = []
+        for parent_doc in parent_documents:
+            parent_chunk = TextChunk(
+                id=parent_doc["id"],
+                text=parent_doc["text"],
+                metadata=parent_doc.get("metadata", {}),
+            )
+            for child in self._child_splitter.split_parent_chunk_to_children(parent_chunk):
+                child_docs.append({"id": child.id, "text": child.text, "metadata": child.metadata})
+
+        if child_docs:
+            # add_documents_batch 재귀 방지: child_collection_type은 조건에 걸리지 않음
+            await self.add_documents_batch(child_docs, child_collection_type)
+            logger.info(
+                "ADR-076: Added %d child chunks to %s (from %d parent chunks)",
+                len(child_docs),
+                child_collection_type,
+                len(parent_documents),
+            )
 
     async def query(
         self,
@@ -469,6 +559,44 @@ class VectorDBService:
 
         except Exception as e:
             logger.error(f"Error retrieving documents for user: {e}")
+            return []
+
+    async def get_documents_by_ids(
+        self, ids: list[str], collection_type: str
+    ) -> list[dict[str, Any]]:
+        """ADR-076: 부모 청크 ID 목록으로 직접 fetch.
+
+        ParentDocumentRetriever 검색 2단계 — 자식 청크에서 추출한 parent_chunk_id로
+        부모 컬렉션에서 2000자 원본 청크를 반환한다.
+
+        Args:
+            ids: 조회할 문서 ID 목록
+            collection_type: "resumes", "portfolios" 등 부모 컬렉션
+
+        Returns:
+            [{"id": str, "text": str, "metadata": dict}, ...]
+        """
+        if not ids:
+            return []
+        try:
+            collection = self._get_collection(collection_type)
+            result = collection.get(ids=ids, include=["documents", "metadatas"])
+            formatted: list[dict[str, Any]] = []
+            if result and result["ids"]:
+                for i in range(len(result["ids"])):
+                    formatted.append(
+                        {
+                            "id": result["ids"][i],
+                            "text": result["documents"][i],
+                            "metadata": result["metadatas"][i],
+                        }
+                    )
+            logger.info(
+                "ADR-076: Fetched %d parent docs by ID from %s", len(formatted), collection_type
+            )
+            return formatted
+        except Exception as e:
+            logger.error("ADR-076: get_documents_by_ids failed: %s", e)
             return []
 
     async def get_document(self, document_id: str, collection_type: str) -> dict[str, Any] | None:

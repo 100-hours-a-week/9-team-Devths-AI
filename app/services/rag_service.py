@@ -252,6 +252,12 @@ def _parse_interview_json_list(text: str) -> list[dict[str, Any]]:
     return []
 
 
+# ADR-076: ParentDocumentRetriever 대상 컬렉션 타입 (모듈 레벨 상수 — 매 호출마다 재생성 방지)
+_PARENT_RETRIEVER_TYPES: frozenset[str] = frozenset(
+    {"resumes", "resume", "portfolios", "portfolio"}
+)
+
+
 class RAGService:
     """RAG Service for chatbot with VectorDB context retrieval"""
 
@@ -549,6 +555,81 @@ class RAGService:
             return "\n\n".join(doc.page_content for doc in docs)
         return ""
 
+    async def _search_with_parent_retriever(
+        self,
+        query: str,
+        user_id: str,
+        collection_type: str,
+        n_results: int | None = None,
+    ) -> list[tuple[str, Document]]:
+        """ADR-076: 자식 컬렉션(400자)으로 정밀 검색 → 부모 컬렉션(2000자) 반환.
+
+        1. resumes_child / portfolios_child 에서 400자 단위 정밀 검색
+        2. 결과 metadata 의 parent_chunk_id 추출
+        3. 부모 컬렉션에서 2000자 원본 청크를 ID 로 직접 fetch
+        4. (collection_type, Document) 쌍으로 반환
+
+        Args:
+            n_results: 자식 컬렉션 검색 수. None이면 settings.rag_retrieval_k * 4 사용. ADR-076.
+        """
+        _settings = get_settings()
+        effective_n = n_results if n_results is not None else _settings.rag_retrieval_k * 4
+
+        child_collection = (
+            self.vectordb.RESUME_CHILD_COLLECTION
+            if collection_type in ("resumes", "resume")
+            else self.vectordb.PORTFOLIO_CHILD_COLLECTION
+        )
+        try:
+            where = {"user_id": user_id} if user_id else None
+            child_results = await self.vectordb.query(
+                query_text=query,
+                collection_type=child_collection,
+                n_results=effective_n,
+                where=where,
+            )
+            if not child_results:
+                logger.info(
+                    "ADR-076: No child results for %s — skip parent retrieval", collection_type
+                )
+                return []
+
+            # 중복 제거하여 고유 parent_chunk_id 추출
+            parent_ids = list(
+                {
+                    r["metadata"].get("parent_chunk_id")
+                    for r in child_results
+                    if r["metadata"].get("parent_chunk_id")
+                }
+            )
+            if not parent_ids:
+                logger.warning(
+                    "ADR-076: child results found but no parent_chunk_id in metadata (%s)",
+                    collection_type,
+                )
+                return []
+
+            parent_docs = await self.vectordb.get_documents_by_ids(
+                ids=parent_ids,
+                collection_type=collection_type,
+            )
+            results = [
+                (collection_type, Document(page_content=d["text"], metadata=d["metadata"]))
+                for d in parent_docs
+            ]
+            logger.info(
+                "ADR-076: ParentRetriever — %d child hits → %d parent docs (%s)",
+                len(child_results),
+                len(results),
+                collection_type,
+            )
+            return results
+        except Exception as e:
+            logger.warning(
+                "ADR-076: _search_with_parent_retriever failed (%s): %s", collection_type, e
+            )
+            return []
+
     async def ingest_trend_documents(
         self,
         documents: list[dict],
@@ -706,12 +787,36 @@ class RAGService:
                     return ""
 
                 # ADR-077: 각 쿼리별 dense 검색 후 병합
+                # ADR-076: resumes/portfolios는 ParentDocumentRetriever 경로로 분기
                 all_dense_pairs: list[tuple[str, Document]] = []
-                for mq in queries:
-                    pairs = await self._rag_chain.retrieve_context_documents(
-                        mq, user_id, types_to_fetch
-                    )
-                    all_dense_pairs.extend(pairs)
+                if settings.rag_use_parent_retriever and self.vectordb:
+                    _parent_cts = [ct for ct in types_to_fetch if ct in _PARENT_RETRIEVER_TYPES]
+                    _other_cts = [ct for ct in types_to_fetch if ct not in _PARENT_RETRIEVER_TYPES]
+                    for mq in queries:
+                        for ct in _parent_cts:
+                            pairs = await self._search_with_parent_retriever(mq, user_id, ct)
+                            if not pairs:
+                                # 자식 컬렉션 미적재 또는 검색 실패 시 기존 MMR으로 fallback
+                                logger.info(
+                                    "ADR-076: parent retriever 결과 없음 (%s) — MMR fallback ('%s'...)",
+                                    ct,
+                                    mq[:40],
+                                )
+                                pairs = await self._rag_chain.retrieve_context_documents(
+                                    mq, user_id, [ct]
+                                )
+                            all_dense_pairs.extend(pairs)
+                        if _other_cts:
+                            pairs = await self._rag_chain.retrieve_context_documents(
+                                mq, user_id, _other_cts
+                            )
+                            all_dense_pairs.extend(pairs)
+                else:
+                    for mq in queries:
+                        pairs = await self._rag_chain.retrieve_context_documents(
+                            mq, user_id, types_to_fetch
+                        )
+                        all_dense_pairs.extend(pairs)
 
                 # 다중 쿼리 결과 중복 제거 (page_content 해시 기준)
                 if len(queries) > 1:
