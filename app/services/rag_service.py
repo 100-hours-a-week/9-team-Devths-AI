@@ -34,6 +34,7 @@ from app.prompts import (
     create_followup_prompt,
 )
 from app.prompts.interview import create_feedback_prompt
+from app.utils.log_sanitizer import sanitize_log_input
 
 from .example_selector import get_few_shot_for_general
 from .interview_templates import InterviewTemplateService
@@ -800,7 +801,7 @@ class RAGService:
                                 logger.info(
                                     "ADR-076: parent retriever 결과 없음 (%s) — MMR fallback ('%s'...)",
                                     ct,
-                                    mq[:40],
+                                    sanitize_log_input(mq[:40]),
                                 )
                                 pairs = await self._rag_chain.retrieve_context_documents(
                                     mq, user_id, [ct]

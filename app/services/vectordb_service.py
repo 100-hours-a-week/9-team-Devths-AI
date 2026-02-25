@@ -18,6 +18,9 @@ from langchain.embeddings import CacheBackedEmbeddings
 from langchain.storage import LocalFileStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+from app.config.settings import get_settings
+from app.services.text_splitter_service import TextChunk, TextSplitterService
+
 logger = logging.getLogger(__name__)
 
 # 임베딩 캐시 디렉터리 (ADR-065)
@@ -129,9 +132,7 @@ class VectorDBService:
             metadata={"description": "Employment trend data (ADR-078/094)"},
         )
         # ADR-076: 자식 컬렉션 및 분할기 — rag_use_parent_retriever 활성화 시에만 생성
-        from app.config.settings import get_settings as _get_settings_init
-
-        _init_settings = _get_settings_init()
+        _init_settings = get_settings()
         if _init_settings.rag_use_parent_retriever:
             self.resume_child_collection = self.chroma_client.get_or_create_collection(
                 name=self.RESUME_CHILD_COLLECTION,
@@ -145,8 +146,6 @@ class VectorDBService:
                     "description": "Portfolio child chunks for ParentDocumentRetriever (ADR-076)"
                 },
             )
-            from app.services.text_splitter_service import TextSplitterService
-
             self._child_splitter = TextSplitterService(
                 chunk_size=_init_settings.rag_child_chunk_size,
                 chunk_overlap=_init_settings.rag_child_chunk_overlap,
@@ -172,8 +171,16 @@ class VectorDBService:
         elif collection_type in ("trend_data", "trend"):  # ADR-078/094
             return self.trend_data_collection
         elif collection_type in ("resumes_child", "resume_child"):  # ADR-076
+            if not hasattr(self, "resume_child_collection"):
+                raise ValueError(
+                    "resume_child_collection 미초기화 — rag_use_parent_retriever=True 설정 필요 (ADR-076)"
+                )
             return self.resume_child_collection
         elif collection_type in ("portfolios_child", "portfolio_child"):  # ADR-076
+            if not hasattr(self, "portfolio_child_collection"):
+                raise ValueError(
+                    "portfolio_child_collection 미초기화 — rag_use_parent_retriever=True 설정 필요 (ADR-076)"
+                )
             return self.portfolio_child_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
@@ -387,9 +394,7 @@ class VectorDBService:
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
 
             # ADR-076: resumes/portfolios 적재 시 자식 청크도 함께 생성 (설정 활성화 시)
-            from app.config.settings import get_settings as _get_settings
-
-            _settings = _get_settings()
+            _settings = get_settings()
             if _settings.rag_use_parent_retriever and collection_type in (
                 "resume",
                 "resumes",
@@ -419,8 +424,6 @@ class VectorDBService:
             parent_documents: add_documents_batch()에 전달된 부모 청크 dict 목록
             parent_collection_type: "resumes" 또는 "portfolios"
         """
-        from app.services.text_splitter_service import TextChunk
-
         child_collection_type = (
             self.RESUME_CHILD_COLLECTION
             if parent_collection_type in ("resume", "resumes")
