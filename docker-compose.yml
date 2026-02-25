@@ -1,6 +1,7 @@
-# v2 5서버 구성 (로컬 테스트)
-# CPU만: docker-compose up -d
+# v2 서버 구성
+# 로컬 테스트: docker-compose up -d
 # GPU 포함: docker-compose --profile gpu up -d
+# 프로덕션: Redis는 AWS ElastiCache 사용 (환경변수로 주입)
 services:
   # -----------------------------------------
   # 1. AI Endpoint Server (CPU)
@@ -33,41 +34,23 @@ services:
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_REGION=${S3_REGION:-ap-northeast-2}
       - S3_BUCKET=${S3_BUCKET:-devths-dev}
-      # Redis (세션/태스크 저장소) — ADR-096
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # Redis/ElastiCache (세션/태스크 저장소) — ADR-096
+      # 프로덕션: AWS ElastiCache URL로 환경변수 주입
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/2}
       # Langfuse (모니터링)
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
     depends_on:
       - vectordb
-      - redis
     networks:
       - ai_network
 
   # -----------------------------------------
-  # 2. Redis (세션/태스크 저장소) — ADR-096
-  # -----------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: ai_redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - ai_network
-
-  # -----------------------------------------
-  # 2-1. Celery Worker (트렌드 크롤링 태스크 처리) — ADR-094/096
+  # 2. Celery Worker (트렌드 크롤링 태스크 처리) — ADR-094/096
+  # Redis/ElastiCache 연결은 환경변수로 주입
   # -----------------------------------------
   celery-worker:
     build:
@@ -78,23 +61,21 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
     environment:
       - ENVIRONMENT=production
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/2}
       - CHROMA_SERVER_HOST=vectordb
       - CHROMA_SERVER_PORT=8000
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - TREND_CRAWL_URLS=${TREND_CRAWL_URLS:-}
     depends_on:
-      redis:
-        condition: service_healthy
-      vectordb:
-        condition: service_started
+      - vectordb
     networks:
       - ai_network
 
   # -----------------------------------------
-  # 2-2. Celery Beat (스케줄러) — ADR-094/096
+  # 3. Celery Beat (스케줄러) — ADR-094/096
+  # Redis/ElastiCache 연결은 환경변수로 주입
   # -----------------------------------------
   celery-beat:
     build:
@@ -105,20 +86,17 @@ services:
     command: celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       - ENVIRONMENT=production
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/2}
       - TREND_CRAWL_CRON_MINUTE=${TREND_CRAWL_CRON_MINUTE:-0}
       - TREND_CRAWL_CRON_HOUR=${TREND_CRAWL_CRON_HOUR:-9}
       - TREND_CRAWL_CRON_DAY_OF_WEEK=${TREND_CRAWL_CRON_DAY_OF_WEEK:-1}
-    depends_on:
-      redis:
-        condition: service_healthy
     networks:
       - ai_network
 
   # -----------------------------------------
-  # 3. VectorDB (ChromaDB, CPU)
+  # 4. VectorDB (ChromaDB, CPU)
   # -----------------------------------------
   vectordb:
     image: chromadb/chroma:latest
@@ -133,7 +111,7 @@ services:
       - ai_network
 
   # -----------------------------------------
-  # 4. Exaone 8B (vLLM, GPU) - profile: gpu
+  # 5. Exaone 8B (vLLM, GPU) - profile: gpu
   # -----------------------------------------
   exaone-8b:
     image: vllm/vllm-openai:latest
@@ -159,7 +137,7 @@ services:
       - ai_network
 
   # -----------------------------------------
-  # 5. EasyOCR (GPU) - profile: gpu
+  # 6. EasyOCR (GPU) - profile: gpu
   # -----------------------------------------
   easyocr-server:
     build:
@@ -182,7 +160,7 @@ services:
       - ai_network
 
   # -----------------------------------------
-  # 6. Exaone 32B (vLLM, GPU) - profile: gpu
+  # 7. Exaone 32B (vLLM, GPU) - profile: gpu
   # 로컬 테스트용. 프로덕션에서는 RunPod 서버리스 사용.
   # 프로덕션 시 VLLM_32B_BASE_URL을 RunPod 엔드포인트로 변경.
   # -----------------------------------------
@@ -214,5 +192,4 @@ networks:
     driver: bridge
 
 volumes:
-  redis_data:
   chroma_data:
