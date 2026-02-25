@@ -31,6 +31,7 @@ from app.schemas.judge import JudgeRequest, JudgeResponse
 from app.services.interview_ingestion_service import InterviewIngestionService
 from app.services.judge_service import JudgeService
 from app.utils.langfuse_client import trace_llm_call
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -544,7 +545,7 @@ async def analyze_interview(
 async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
     """단건 RAG 응답을 Gemini Judge LLM으로 채점 → Langfuse 기록."""
     logger.info(
-        "LLM-as-Judge 요청: pipeline_stage=%s", request.pipeline_stage
+        "LLM-as-Judge 요청: pipeline_stage=%s", sanitize_log_input(request.pipeline_stage)
     )
 
     try:
@@ -566,7 +567,7 @@ async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
 
         logger.info(
             "LLM-as-Judge 완료: stage=%s overall=%.1f",
-            request.pipeline_stage,
+            sanitize_log_input(request.pipeline_stage),
             result.overall_score,
         )
         return JudgeResponse(result=result, langfuse_trace_id=trace_id)
