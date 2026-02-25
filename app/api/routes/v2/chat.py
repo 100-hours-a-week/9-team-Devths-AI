@@ -465,17 +465,20 @@ async def generate_chat_stream(
                 init_prompts = load_prompt_yaml("interview", yaml_name)
 
                 # ADR-098: 면접 스타일 프롬프트 적용
-                interview_style = (
+                # 허용된 스타일만 사용 (Log Injection 방지)
+                allowed_styles = {"friendly", "standard", "challenging", "practical"}
+                raw_style = (
                     request.context.interview_style
                     if request.context and request.context.interview_style
                     else "standard"
                 )
+                interview_style = raw_style if raw_style in allowed_styles else "standard"
                 if interview_type == "behavior":
                     style_prompt = get_personality_style_prompt(interview_style)
                 else:
                     style_prompt = get_tech_style_prompt(interview_style)
 
-                logger.info(f"🎭 [면접] 스타일 적용: {interview_style}")
+                safe_info(logger, "🎭 [면접] 스타일 적용: %s", interview_style)
 
                 system_prompt = init_prompts["system"].format(style_prompt=style_prompt)
                 init_prompt = init_prompts["human"].format(
