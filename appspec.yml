@@ -1,0 +1,58 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /home/ubuntu/ai
+    overwrite: yes
+
+permissions:
+  - object: /home/ubuntu/ai
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
+  - object: /home/ubuntu/ai/deploy
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
+  - object: /home/ubuntu/ai/deploy/*.sh
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - file
+  - object: /home/ubuntu/ai/logs
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
+
+hooks:
+  ApplicationStop:
+    - location: deploy/stop_server.sh
+      timeout: 60
+      runas: ubuntu
+
+  BeforeInstall:
+    - location: deploy/before_install.sh
+      timeout: 120
+      runas: ubuntu
+
+  AfterInstall:
+    - location: deploy/after_install.sh
+      timeout: 300
+      runas: ubuntu
+
+  ApplicationStart:
+    - location: deploy/start_server_deploy.sh
+      timeout: 120
+      runas: ubuntu
+
+  ValidateService:
+    - location: deploy/validate_service.sh
+      timeout: 180
+      runas: ubuntu
