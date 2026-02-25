@@ -98,6 +98,13 @@ _MULTI_QUERY_SYSTEM = """당신은 면접 준비 도우미입니다.
 
 _MULTI_QUERY_HUMAN = "원래 질문: {question}"
 
+# ADR-080: 질문 유형별 시간 감쇠율 (interview_feedback 최신성 반영)
+_DECAY_RATES = {
+    "technical": 0.1,  # 기술 질문: 최신 정보 우선 (반감기 ~6.6시간)
+    "personality": 0.01,  # 인성 질문: 시간 거의 무관 (반감기 ~69시간)
+    "general": 0.05,  # 일반: 중간 (반감기 ~13.5시간)
+}
+
 
 def _rrf_merge(
     dense_pairs: list[tuple[str, Document]],
@@ -358,6 +365,59 @@ class RAGService:
         except Exception as e:
             logger.warning("ADR-077: MultiQuery generation failed, using original query: %s", e)
             return [query]
+
+    @staticmethod
+    def _apply_time_weighting(
+        results: list[dict],
+        interview_type: str = "general",
+    ) -> list[dict]:
+        """ADR-080: 시간 감쇠 점수 적용 후 재정렬.
+
+        공식: score = semantic_similarity + (1.0 - decay_rate) ^ hours_passed
+        created_at 메타데이터가 없는 기존 문서는 시간 점수 0으로 처리 (의미 유사도만 사용).
+        """
+        from datetime import datetime, timezone
+
+        settings = get_settings()
+        decay_rate = getattr(
+            settings, f"rag_decay_rate_{interview_type}", settings.rag_decay_rate_general
+        )
+
+        now = datetime.now(timezone.utc)
+        scored: list[tuple[float, dict]] = []
+
+        for r in results:
+            # ChromaDB distance는 L2 거리 (lower = more similar)
+            # similarity = 1 / (1 + distance) 으로 변환
+            distance = r.get("distance", 0.0)
+            similarity = 1.0 / (1.0 + distance)
+
+            # 시간 점수 계산
+            created_at_str = (r.get("metadata") or {}).get("created_at")
+            if created_at_str:
+                try:
+                    created_at = datetime.fromisoformat(created_at_str)
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    hours_passed = (now - created_at).total_seconds() / 3600.0
+                    time_score = (1.0 - decay_rate) ** max(hours_passed, 0)
+                except (ValueError, TypeError):
+                    time_score = 0.0
+            else:
+                time_score = 0.0  # created_at 없는 기존 문서
+
+            total_score = similarity + time_score
+            scored.append((total_score, r))
+
+        # 점수 내림차순 정렬
+        scored.sort(key=lambda x: x[0], reverse=True)
+        logger.info(
+            "ADR-080: TimeWeighted re-scored %d results (type=%s, decay=%.3f)",
+            len(scored),
+            interview_type,
+            decay_rate,
+        )
+        return [r for _, r in scored]
 
     async def retrieve_context(
         self,
@@ -735,9 +795,16 @@ class RAGService:
                     feedback_results = await self.vectordb.query(
                         query_text=f"{interview_type} 면접 약점 피드백",
                         collection_type="interview_feedback",
-                        n_results=2,
+                        n_results=5
+                        if settings.rag_use_time_weighted
+                        else 2,  # ADR-080: 시간 가중 시 더 많이 가져와서 re-score
                         where={"user_id": user_id, "interview_type": interview_type},
                     )
+                    # ADR-080: 시간 가중 적용 후 상위 2건만 사용
+                    if settings.rag_use_time_weighted and feedback_results:
+                        feedback_results = self._apply_time_weighting(
+                            feedback_results, interview_type
+                        )
                     if feedback_results:
                         return "\n".join(r["text"] for r in feedback_results[:2])
                 except Exception:
@@ -840,9 +907,14 @@ class RAGService:
                     feedback_results = await self.vectordb.query(
                         query_text=f"{interview_type} 면접 약점 피드백",
                         collection_type="interview_feedback",
-                        n_results=2,
+                        n_results=5 if settings.rag_use_time_weighted else 2,  # ADR-080
                         where={"user_id": user_id, "interview_type": interview_type},
                     )
+                    # ADR-080: 시간 가중 적용 후 상위 2건만 사용
+                    if settings.rag_use_time_weighted and feedback_results:
+                        feedback_results = self._apply_time_weighting(
+                            feedback_results, interview_type
+                        )
                     if feedback_results:
                         return "\n".join(r["text"] for r in feedback_results[:2])
                 except Exception:

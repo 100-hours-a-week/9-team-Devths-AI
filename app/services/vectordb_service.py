@@ -235,6 +235,12 @@ class VectorDBService:
             doc_metadata["document_id"] = document_id
             doc_metadata["collection_type"] = collection_type
 
+            # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+            if "created_at" not in doc_metadata:
+                from datetime import datetime, timezone
+
+                doc_metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
             # ChromaDB는 None 값을 허용하지 않음 - 필터링
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
@@ -283,6 +289,13 @@ class VectorDBService:
                 metadata = doc.get("metadata", {}).copy()
                 metadata["document_id"] = doc_id
                 metadata["collection_type"] = collection_type
+
+                # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+                if "created_at" not in metadata:
+                    from datetime import datetime, timezone
+
+                    metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
                 metadata = {k: v for k, v in metadata.items() if v is not None}
                 ids.append(doc_id)
                 texts.append(text)
@@ -516,6 +529,13 @@ class VectorDBService:
             for i in range(len(texts)):
                 meta = metadatas[i].copy() if i < len(metadatas) else {}
                 meta["user_id"] = str(user_id)
+
+                # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+                if "created_at" not in meta:
+                    from datetime import datetime, timezone
+
+                    meta["created_at"] = datetime.now(timezone.utc).isoformat()
+
                 meta = {k: v for k, v in meta.items() if v is not None}
                 filtered_metadatas.append(meta)
 
