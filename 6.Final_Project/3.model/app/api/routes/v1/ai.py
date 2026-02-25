@@ -735,6 +735,9 @@ async def generate_chat_stream(
                         use_rag=True,
                         context_types=["resume", "job_posting"],
                         model="gemini",
+                        chat_mode=mode.value
+                        if hasattr(mode, "value")
+                        else str(mode),  # ADR-077: MultiQuery 활성화용
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -873,6 +876,9 @@ async def generate_chat_stream(
                         use_rag=True,  # RAG 활성화
                         context_types=context_types,
                         model=model,
+                        chat_mode=mode.value
+                        if hasattr(mode, "value")
+                        else str(mode),  # ADR-077: MultiQuery 활성화용
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"

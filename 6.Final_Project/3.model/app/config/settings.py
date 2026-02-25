@@ -116,6 +116,15 @@ class Settings(BaseSettings):
         default=50,
         description="Child chunk overlap (chars). ADR-076.",
     )
+    # ADR-077: 다중 쿼리 리트리버 (NORMAL 모드 일반 채팅 시 쿼리 다각화)
+    rag_use_multi_query: bool = Field(
+        default=False,
+        description="Use MultiQueryRetriever for NORMAL chat mode (expands query to multiple perspectives). ADR-077.",
+    )
+    rag_multi_query_count: int = Field(
+        default=3,
+        description="Number of perspective queries to generate for MultiQueryRetriever. ADR-077.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:
