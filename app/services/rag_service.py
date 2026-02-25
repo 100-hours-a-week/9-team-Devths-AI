@@ -86,6 +86,18 @@ RAG_QNA_PROMPT = """관련 정보:
 # RRF constant for ensemble retriever (ADR-069)
 _RRF_K = 60
 
+# ADR-077: 다중 쿼리 생성 프롬프트 (NORMAL 모드 일반 채팅용)
+_MULTI_QUERY_SYSTEM = """당신은 면접 준비 도우미입니다.
+사용자의 질문을 다양한 관점에서 검색 쿼리로 재작성하세요.
+각 쿼리는 한 줄로 작성하고, 번호를 붙이지 마세요.
+
+관점:
+1. 기술 역량 중심: 사용 기술, 프레임워크, 라이브러리 관점
+2. 경험/프로젝트 중심: 프로젝트명, 성과, 역할 관점
+3. 직무 적합성 중심: 채용공고 요구사항, 자격 요건 관점"""
+
+_MULTI_QUERY_HUMAN = "원래 질문: {question}"
+
 
 def _rrf_merge(
     dense_pairs: list[tuple[str, Document]],
@@ -305,6 +317,48 @@ class RAGService:
             logger.error(f"Error retrieving all documents: {e}")
             return ""
 
+    async def _generate_multi_queries(self, query: str) -> list[str]:
+        """ADR-077: LCEL 체인으로 다중 검색 쿼리 생성.
+
+        사용자 질문을 기술역량/경험·프로젝트/직무적합성 3가지 관점으로 재작성.
+        실패 시 원래 쿼리만 반환.
+        """
+        if not self._langchain_gateway:
+            return [query]
+
+        settings = get_settings()
+        try:
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
+
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", _MULTI_QUERY_SYSTEM),
+                    ("human", _MULTI_QUERY_HUMAN),
+                ]
+            )
+            chain = prompt | self._langchain_gateway.llm | StrOutputParser()
+            result = await chain.ainvoke({"question": query})
+
+            lines = [line.strip() for line in result.strip().split("\n") if line.strip()]
+            # 설정된 개수만큼만 사용
+            queries = lines[: settings.rag_multi_query_count]
+            if not queries:
+                return [query]
+
+            # 원래 쿼리도 포함하여 누락 방지
+            if query not in queries:
+                queries.insert(0, query)
+
+            # SAST: 사용자 입력(query)은 로그에 넣지 않음 — 개수만 기록
+            logger.info("ADR-077: MultiQuery generated %d queries", len(queries))
+            for i, q in enumerate(queries):
+                logger.debug("  MQ[%d]: %s", i, q[:80])
+            return queries
+        except Exception as e:
+            logger.warning("ADR-077: MultiQuery generation failed, using original query: %s", e)
+            return [query]
+
     async def retrieve_context(
         self,
         query: str,
@@ -314,11 +368,15 @@ class RAGService:
         *,
         dense_weight: float | None = None,
         sparse_weight: float | None = None,
+        chat_mode: str | None = None,
     ) -> str:
         """
         Retrieve relevant context: question → retriever (dense+sparse) → RRF merge → rerank → [compressor] → context.
         When rag_use_bm25 is True, uses dense (MMR) + sparse (BM25) ensemble with RRF (ADR-069).
         dense_weight/sparse_weight override settings at invoke time (ConfigurableField-style A/B test).
+
+        ADR-077: When rag_use_multi_query is True and chat_mode is NORMAL, expands query to
+        multiple perspective queries and merges results with deduplication.
         """
         if context_types is None:
             context_types = ["resume", "job_posting"]
@@ -328,6 +386,15 @@ class RAGService:
             self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore)
         )
 
+        # ADR-077: 다중 쿼리 확장 (NORMAL 모드에서만 활성화)
+        use_multi_query = (
+            settings.rag_use_multi_query and chat_mode and chat_mode.lower() == "normal"
+        )
+        if use_multi_query:
+            queries = await self._generate_multi_queries(query)
+        else:
+            queries = [query]
+
         # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF → rerank → optional compressor
         if settings.rag_use_bm25 and has_vectorstore and self.vectordb:
             try:
@@ -335,9 +402,31 @@ class RAGService:
                 if not types_to_fetch:
                     return ""
 
-                dense_pairs = await self._rag_chain.retrieve_context_documents(
-                    query, user_id, types_to_fetch
-                )
+                # ADR-077: 각 쿼리별 dense 검색 후 병합
+                all_dense_pairs: list[tuple[str, Document]] = []
+                for mq in queries:
+                    pairs = await self._rag_chain.retrieve_context_documents(
+                        mq, user_id, types_to_fetch
+                    )
+                    all_dense_pairs.extend(pairs)
+
+                # 다중 쿼리 결과 중복 제거 (page_content 해시 기준)
+                if len(queries) > 1:
+                    seen_keys: set[str] = set()
+                    deduped: list[tuple[str, Document]] = []
+                    for ct, doc in all_dense_pairs:
+                        key = (doc.page_content or "")[:500]
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            deduped.append((ct, doc))
+                    dense_pairs = deduped
+                    logger.info(
+                        "ADR-077: MultiQuery dense results: %d total → %d after dedup",
+                        len(all_dense_pairs),
+                        len(dense_pairs),
+                    )
+                else:
+                    dense_pairs = all_dense_pairs
 
                 results_per_type = await asyncio.gather(
                     *[
@@ -450,6 +539,7 @@ class RAGService:
         context_types: list[str] = None,
         model: str = "gemini",
         n_results: int = 1,  # 기본값을 1로 설정하여 속도 개선
+        chat_mode: str | None = None,  # ADR-077: 채팅 모드 전달 (NORMAL이면 MultiQuery 활성화)
     ) -> AsyncIterator[str]:
         """
         Chat with RAG context retrieval
@@ -461,6 +551,7 @@ class RAGService:
             use_rag: Whether to use RAG (retrieve context)
             context_types: Collection types to search
             model: Model to use ("gemini" or "vllm")
+            chat_mode: Chat mode ("normal", "interview", etc.) for ADR-077 multi-query
 
         Yields:
             Response chunks
@@ -479,6 +570,7 @@ class RAGService:
                     user_id=user_id,
                     context_types=context_types,
                     n_results=n_results,
+                    chat_mode=chat_mode,
                 )
 
                 if context:
