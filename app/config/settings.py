@@ -141,6 +141,24 @@ class Settings(BaseSettings):
         default=0.05,
         description="Decay rate for general queries. ADR-080.",
     )
+    # ADR-078: 다중 벡터 스토어 리트리버 (요약 임베딩 / 가설 쿼리)
+    rag_use_multi_vector: bool = Field(
+        default=False,
+        description="Use MultiVectorRetriever for trend_data (summary or hypothetical). ADR-078.",
+    )
+    rag_multi_vector_strategy: str = Field(
+        default="summary",
+        description="MultiVector strategy: 'summary' (요약 임베딩) or 'hypothetical' (가설 쿼리). ADR-078.",
+    )
+    rag_hypothetical_query_count: int = Field(
+        default=3,
+        description="Number of hypothetical queries per document for MultiVectorRetriever. ADR-078.",
+    )
+    # ADR-079: 셀프 쿼리 리트리버 (메타데이터 기반 구조화 검색)
+    rag_use_self_query: bool = Field(
+        default=False,
+        description="Use SelfQueryRetriever for trend_data metadata filtering. ADR-079.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:

@@ -88,13 +88,14 @@ class VectorDBService:
             )
             logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
-        # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션)
+        # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션 + ADR-078/094 trend_data)
         self.RESUME_COLLECTION = "resumes"
         self.POSTING_COLLECTION = "job_postings"
         self.PORTFOLIO_COLLECTION = "portfolios"
         self.INTERVIEW_COLLECTION = "interview_feedback"
         self.ANALYSIS_RESULTS_COLLECTION = "analysis_results"
         self.CHAT_CONTEXT_COLLECTION = "chat_context"
+        self.TREND_DATA_COLLECTION = "trend_data"  # ADR-078/094
 
         # Create or get collections
         self.resume_collection = self.chroma_client.get_or_create_collection(
@@ -118,6 +119,11 @@ class VectorDBService:
             name=self.CHAT_CONTEXT_COLLECTION,
             metadata={"description": "Important chat context"},
         )
+        # ADR-078/094: 채용 트렌드 데이터 (WebBaseLoader 크롤링)
+        self.trend_data_collection = self.chroma_client.get_or_create_collection(
+            name=self.TREND_DATA_COLLECTION,
+            metadata={"description": "Employment trend data (ADR-078/094)"},
+        )
 
     def _get_collection(self, collection_type: str):
         """Get collection by type (문서 6개 컬렉션 + 별칭)"""
@@ -133,8 +139,21 @@ class VectorDBService:
             return self.analysis_results_collection
         elif collection_type == "chat_context":
             return self.chat_context_collection
+        elif collection_type in ("trend_data", "trend"):  # ADR-078/094
+            return self.trend_data_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
+
+    def get_langchain_chroma(self, collection_type: str):
+        """ADR-078/079: LangChain Chroma 래퍼 생성 (MultiVector/SelfQuery 리트리버용)."""
+        from langchain_chroma import Chroma
+
+        collection = self._get_collection(collection_type)
+        return Chroma(
+            client=self.chroma_client,
+            collection_name=collection.name,
+            embedding_function=self.cached_embedder,
+        )
 
     async def create_embedding(self, text: str) -> list[float]:
         """
@@ -245,6 +264,7 @@ class VectorDBService:
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
             import time
+
             start_time = time.perf_counter()
             # Add to collection
             collection.upsert(
@@ -256,7 +276,10 @@ class VectorDBService:
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 
@@ -313,13 +336,17 @@ class VectorDBService:
             embeddings = await self.create_embeddings(texts)
 
             import time
+
             start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 
@@ -556,6 +583,7 @@ class VectorDBService:
                 filtered_metadatas.append(meta)
 
             import time
+
             start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(
@@ -567,7 +595,10 @@ class VectorDBService:
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_name).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_name).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 

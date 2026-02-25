@@ -105,6 +105,45 @@ _DECAY_RATES = {
     "general": 0.05,  # 일반: 중간 (반감기 ~13.5시간)
 }
 
+# ADR-078: 요약 임베딩 생성 프롬프트
+_SUMMARY_FOR_EMBEDDING_TEMPLATE = "다음 문서의 핵심 내용을 2-3문장으로 요약하세요:\n\n{doc}"
+
+# ADR-078: 가설 쿼리 생성 프롬프트
+_HYPOTHETICAL_QUERIES_TEMPLATE = (
+    "다음 문서를 읽고, 이 문서로 답변할 수 있는 질문 {count}개를 생성하세요.\n"
+    "각 질문은 한 줄로 작성하고, 번호를 붙이지 마세요.\n\n문서: {doc}"
+)
+
+# ADR-079: 채용 트렌드 메타데이터 스키마 (SelfQueryRetriever용)
+TREND_METADATA_FIELDS: list[dict] = [
+    {
+        "name": "year",
+        "description": "채용 트렌드 데이터의 연도 (예: 2024, 2025, 2026)",
+        "type": "integer",
+    },
+    {
+        "name": "company",
+        "description": "채용 기업명 (예: 카카오, 네이버, 삼성, 라인)",
+        "type": "string",
+    },
+    {
+        "name": "position",
+        "description": "직무/포지션 (예: 백엔드, 프론트엔드, AI/ML)",
+        "type": "string",
+    },
+    {
+        "name": "category",
+        "description": "데이터 카테고리 (예: 기술질문, 인성질문, 채용공고, 면접후기)",
+        "type": "string",
+    },
+    {
+        "name": "recruitment_type",
+        "description": "채용 유형 (예: 공채, 수시, 인턴)",
+        "type": "string",
+    },
+    {"name": "source", "description": "데이터 출처 (예: webbaseloader)", "type": "string"},
+]
+
 
 def _rrf_merge(
     dense_pairs: list[tuple[str, Document]],
@@ -419,6 +458,97 @@ class RAGService:
         )
         return [r for _, r in scored]
 
+    async def _retrieve_trend_data(self, query: str, n_results: int = 5) -> str:
+        """ADR-078/079: trend_data 컬렉션 전용 검색.
+
+        SelfQueryRetriever (ADR-079) 우선, 실패 시 MultiVectorRetriever (ADR-078),
+        둘 다 비활성화면 기본 의미 검색.
+        """
+        settings = get_settings()
+
+        # ADR-079: SelfQueryRetriever — 메타데이터 필터 자동 추출
+        if settings.rag_use_self_query and self.vectordb:
+            try:
+                results = await self._search_with_self_query(query, n_results)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("ADR-079: SelfQuery failed, falling back: %s", e)
+
+        # ADR-078: MultiVectorRetriever — 요약/가설 쿼리 기반 검색
+        if settings.rag_use_multi_vector and self.vectordb:
+            try:
+                results = await self._search_with_multi_vector(query, n_results)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("ADR-078: MultiVector failed, falling back: %s", e)
+
+        # Fallback: 기본 의미 검색
+        try:
+            trend_results = await self.vectordb.query(
+                query_text=query,
+                collection_type="trend_data",
+                n_results=n_results,
+            )
+            if trend_results:
+                return "\n\n".join(r["text"] for r in trend_results)
+        except Exception as e:
+            logger.warning("trend_data fallback query failed: %s", e)
+
+        return ""
+
+    async def _search_with_self_query(self, query: str, n_results: int = 5) -> str:
+        """ADR-079: SelfQueryRetriever로 메타데이터 필터 자동 추출 검색."""
+        from langchain.chains.query_constructor.schema import AttributeInfo
+        from langchain.retrievers.self_query.base import SelfQueryRetriever
+
+        lc_chroma = self.vectordb.get_langchain_chroma("trend_data")
+        metadata_field_info = [
+            AttributeInfo(name=f["name"], description=f["description"], type=f["type"])
+            for f in TREND_METADATA_FIELDS
+        ]
+
+        retriever = SelfQueryRetriever.from_llm(
+            llm=self._langchain_gateway.llm if self._langchain_gateway else None,
+            vectorstore=lc_chroma,
+            document_contents="채용 트렌드, 면접 질문, 기술 동향 관련 데이터",
+            metadata_field_info=metadata_field_info,
+            enable_limit=True,
+        )
+
+        docs = await asyncio.to_thread(retriever.invoke, query)
+        docs = docs[:n_results]
+        if docs:
+            logger.info("ADR-079: SelfQuery returned %d docs", len(docs))
+            return "\n\n".join(doc.page_content for doc in docs)
+        return ""
+
+    async def _search_with_multi_vector(self, query: str, n_results: int = 5) -> str:
+        """ADR-078: MultiVectorRetriever로 요약/가설 쿼리 기반 검색.
+
+        주의: MultiVectorRetriever는 문서 적재 시 요약/가설 쿼리를 사전 생성해야 함.
+        이 메서드는 이미 적재된 데이터를 검색하는 용도.
+        """
+        from langchain.retrievers.multi_vector import MultiVectorRetriever
+        from langchain.storage import InMemoryStore
+
+        lc_chroma = self.vectordb.get_langchain_chroma("trend_data")
+        docstore = InMemoryStore()
+
+        retriever = MultiVectorRetriever(
+            vectorstore=lc_chroma,
+            docstore=docstore,
+            id_key="doc_id",
+        )
+
+        docs = await asyncio.to_thread(retriever.invoke, query)
+        docs = docs[:n_results]
+        if docs:
+            logger.info("ADR-078: MultiVector returned %d docs", len(docs))
+            return "\n\n".join(doc.page_content for doc in docs)
+        return ""
+
     async def retrieve_context(
         self,
         query: str,
@@ -454,6 +584,25 @@ class RAGService:
             queries = await self._generate_multi_queries(query)
         else:
             queries = [query]
+
+        # ADR-078/079: trend_data 컬렉션 검색 경로 분기
+        if "trend_data" in context_types and self.vectordb:
+            trend_context = await self._retrieve_trend_data(query, n_results)
+            if trend_context:
+                # trend_data 외 다른 context_types도 있으면 함께 검색
+                remaining_types = [t for t in context_types if t != "trend_data"]
+                if not remaining_types:
+                    return trend_context
+                # 나머지 컨텍스트도 검색해서 병합
+                context_types = remaining_types
+                # trend_context는 나중에 병합
+            else:
+                trend_context = ""
+                context_types = [t for t in context_types if t != "trend_data"]
+                if not context_types:
+                    return ""
+        else:
+            trend_context = ""
 
         # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF → rerank → optional compressor
         if settings.rag_use_bm25 and has_vectorstore and self.vectordb:
