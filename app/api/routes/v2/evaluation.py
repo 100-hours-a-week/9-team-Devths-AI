@@ -8,8 +8,10 @@ POST /ai/evaluation/analyze   - 면접 평가 리포트 생성 (SSE 스트리밍
 POST /ai/evaluation/llm-judge - ADR-091 LLM-as-Judge 단건 채점 (내부 평가용)
 
 ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
+import asyncio
 import json
 import logging
 
@@ -53,18 +55,41 @@ def _trigger_ingest_interview_qa(request: AnalyzeInterviewRequest):
     """면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장 (ADR-102).
 
     asyncio.create_task() 대신 Celery 태스크로 이관하여 504 타임아웃 해결.
+    ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
     실패해도 평가 응답에 영향을 주지 않습니다.
     """
-    from app.tasks.evaluation_tasks import ingest_interview_qa_task
+    from app.tasks.celery_utils import is_celery_available
 
-    ingest_interview_qa_task.delay(
-        session_id=request.session_id,
-        user_id=request.user_id,
-        room_id=request.room_id,
-        context=request.context or [],
-    )
     safe_session_id = sanitize_log_input(request.session_id)
-    logger.info("[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", safe_session_id)
+
+    if is_celery_available():
+        from app.tasks.evaluation_tasks import ingest_interview_qa_task
+
+        ingest_interview_qa_task.delay(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            room_id=request.room_id,
+            context=request.context or [],
+        )
+        logger.info(
+            "[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", safe_session_id
+        )
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.evaluation_tasks import _ingest_interview_qa_async
+
+        asyncio.create_task(
+            _ingest_interview_qa_async(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                room_id=request.room_id,
+                context=request.context or [],
+            )
+        )
+        logger.warning(
+            "[Evaluation] Celery 불가 → asyncio fallback: session=%s (Celery Worker 실행 권장)",
+            safe_session_id,
+        )
 
 
 # ============================================

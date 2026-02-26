@@ -4,8 +4,10 @@ v2 텍스트 추출 + 임베딩 API
 POST /ai/text/extract - 이력서 + 채용공고 텍스트 추출 및 분석
 
 ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -193,22 +195,41 @@ async def text_extract(
     )
 
     # ADR-102: Celery 태스크로 이관 (asyncio.create_task 대신)
-    from app.tasks.text_extract_tasks import process_text_extract_task
-
-    model = request.model if hasattr(request, "model") and request.model else "gemini"
-
-    # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
-    process_text_extract_task.delay(
-        task_id=task_key,
-        user_id=request.user_id,
-        resume_data=request.resume.model_dump(),
-        job_posting_data=request.job_posting.model_dump(),
-        model=model,
-    )
-
+    # ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback
+    from app.tasks.celery_utils import is_celery_available
     from app.utils.log_sanitizer import sanitize_log_input
 
+    model = request.model if hasattr(request, "model") and request.model else "gemini"
     safe_task_key = sanitize_log_input(task_key)
-    logger.info("[TextExtract] Celery 태스크 등록 완료: %s", safe_task_key)
+
+    if is_celery_available():
+        # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
+        from app.tasks.text_extract_tasks import process_text_extract_task
+
+        process_text_extract_task.delay(
+            task_id=task_key,
+            user_id=request.user_id,
+            resume_data=request.resume.model_dump(),
+            job_posting_data=request.job_posting.model_dump(),
+            model=model,
+        )
+        logger.info("[TextExtract] Celery 태스크 등록 완료: %s", safe_task_key)
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.text_extract_tasks import _process_text_extract_async
+
+        asyncio.create_task(
+            _process_text_extract_async(
+                task_id=task_key,
+                user_id=request.user_id,
+                resume_data=request.resume.model_dump(),
+                job_posting_data=request.job_posting.model_dump(),
+                model=model,
+            )
+        )
+        logger.warning(
+            "[TextExtract] Celery 불가 → asyncio fallback: %s (Celery Worker 실행 권장)",
+            safe_task_key,
+        )
 
     return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)

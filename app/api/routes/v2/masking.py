@@ -6,8 +6,10 @@ GET /ai/masking/task/{task_id} - 마스킹 작업 상태 조회
 GET /ai/masking/health - 마스킹 서비스 헬스 체크
 
 ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -83,20 +85,40 @@ async def masking_draft(
     task_storage.save(task_id, task_data)
 
     # ADR-102: Celery 태스크로 이관 (asyncio.create_task 대신)
-    from app.tasks.masking_tasks import process_masking_task
+    # ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback
+    from app.tasks.celery_utils import is_celery_available
 
     model_value = request.model.value if hasattr(request.model, "value") else str(request.model)
 
-    # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
-    process_masking_task.delay(
-        task_id=task_id,
-        file_url=str(request.file_url) if request.file_url else "",
-        s3_key=str(request.s3_key) if request.s3_key else "",
-        file_type=request.file_type,
-        model=model_value,
-    )
+    if is_celery_available():
+        # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
+        from app.tasks.masking_tasks import process_masking_task
 
-    logger.info("[Masking] Celery 태스크 등록 완료: %s", task_id)
+        process_masking_task.delay(
+            task_id=task_id,
+            file_url=str(request.file_url) if request.file_url else "",
+            s3_key=str(request.s3_key) if request.s3_key else "",
+            file_type=request.file_type,
+            model=model_value,
+        )
+        logger.info("[Masking] Celery 태스크 등록 완료: %s", task_id)
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.masking_tasks import _process_masking_async
+
+        asyncio.create_task(
+            _process_masking_async(
+                task_id=task_id,
+                file_url=str(request.file_url) if request.file_url else "",
+                s3_key=str(request.s3_key) if request.s3_key else "",
+                file_type=request.file_type,
+                model=model_value,
+            )
+        )
+        logger.warning(
+            "[Masking] Celery 불가 → asyncio fallback: %s (Celery Worker 실행 권장)",
+            task_id,
+        )
 
     return AsyncTaskResponse(
         task_id=task_id,
