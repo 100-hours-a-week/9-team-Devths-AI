@@ -114,6 +114,15 @@ class Settings(BaseSettings):
         default=10,
         description="Max number of documents after merge (0 = no limit). ADR-069 long-context rerank.",
     )
+    # ADR-104: FlashRank 리랭커 (ONNX 기반 의미적 재정렬)
+    rag_use_flashrank: bool = Field(
+        default=False,
+        description="Use FlashRank reranker for semantic reranking after RRF merge. ADR-104.",
+    )
+    rag_flashrank_model: str = Field(
+        default="ms-marco-MiniLM-L-12-v2",
+        description="FlashRank model name. ADR-104. Options: ms-marco-MiniLM-L-12-v2, ms-marco-MultiBERT-L-12, rank-T5-flan.",
+    )
     # ADR-069 후속: BM25 인덱스 상한(메모리·지연 완화), 문서 압축기
     rag_bm25_max_docs: int = Field(
         default=1000,
