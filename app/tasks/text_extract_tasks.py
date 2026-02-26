@@ -12,6 +12,7 @@ from datetime import datetime
 
 from app.tasks.celery_app import celery_app
 from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.url_validator import validate_url
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +87,9 @@ async def _process_text_extract_async(
         logger.info("=" * 80)
         logger.info("=== 📄 텍스트 추출 시작 (Celery Worker) ===")
         logger.info("=" * 80)
+        safe_user_id = sanitize_log_input(user_id)
         logger.info("📌 OCR 전략: %s", model.upper())
-        logger.info("📌 사용자 ID: %s", user_id)
+        logger.info("📌 사용자 ID: %s", safe_user_id)
         logger.info("")
 
         async def extract_document(doc_data: dict, doc_type: str) -> DocumentExtractResult:
@@ -121,8 +123,6 @@ async def _process_text_extract_async(
                     len(pages),
                 )
             elif doc_input.url:
-                from app.utils.url_validator import validate_url
-
                 safe_url_log = sanitize_log_input(doc_input.url[:80] if doc_input.url else "N/A")
                 logger.info("   → URL 입력: %s", safe_url_log)
 
