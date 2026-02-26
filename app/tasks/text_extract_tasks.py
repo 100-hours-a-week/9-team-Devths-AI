@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 
 from app.tasks.celery_app import celery_app
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ def process_text_extract_task(
         job_posting_data: 채용공고 입력 데이터
         model: OCR 모델 선택 (gemini, auto 등)
     """
-    logger.info("[TextExtractTask] 태스크 시작: %s", task_id)
+    safe_task_id = sanitize_log_input(task_id)
+    logger.info("[TextExtractTask] 태스크 시작: %s", safe_task_id)
 
     try:
         result = asyncio.run(
@@ -45,11 +47,11 @@ def process_text_extract_task(
                 model=model,
             )
         )
-        logger.info("[TextExtractTask] 태스크 완료: %s", task_id)
+        logger.info("[TextExtractTask] 태스크 완료: %s", safe_task_id)
         return result
 
     except Exception as e:
-        logger.error("[TextExtractTask] 태스크 실패: %s — %s", task_id, e)
+        logger.error("[TextExtractTask] 태스크 실패: %s — %s", safe_task_id, type(e).__name__)
         raise self.retry(exc=e, countdown=60, max_retries=2) from e
 
 
