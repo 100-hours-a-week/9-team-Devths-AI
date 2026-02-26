@@ -2,16 +2,22 @@
 # 로컬 테스트: docker-compose up -d
 # GPU 포함: docker-compose --profile gpu up -d
 # 프로덕션: Redis는 AWS ElastiCache 사용 (환경변수로 주입)
+#
+# ADR-102: Docker replicas로 수평 확장 (504 타임아웃 완화)
+# - ai-endpoint: replicas 2~4 (부하에 따라 조절)
+# - celery-worker-extract: text_extract/masking/evaluation 전용 Worker
 services:
   # -----------------------------------------
-  # 1. AI Endpoint Server (CPU)
+  # 1. AI Endpoint Server (CPU) — ADR-102: replicas 추가
   # -----------------------------------------
   ai-endpoint:
     build:
       context: .
       dockerfile: Dockerfile
     image: ai-endpoint:v2
-    container_name: ai_endpoint
+    # container_name 제거 (replicas 사용 시 고유 이름 자동 생성)
+    deploy:
+      replicas: 4  # ADR-102 Phase 0: 504 타임아웃 완화
     ports:
       - "8000:8000"
     environment:
@@ -52,12 +58,12 @@ services:
   # 2. Celery Worker (트렌드 크롤링 태스크 처리) — ADR-094/096
   # Redis/ElastiCache 연결은 환경변수로 주입
   # -----------------------------------------
-  celery-worker:
+  celery-worker-trend:
     build:
       context: .
       dockerfile: Dockerfile
     image: ai-endpoint:v2
-    container_name: celery_worker
+    container_name: celery_worker_trend
     command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
     environment:
       - ENVIRONMENT=production
@@ -68,6 +74,41 @@ services:
       - CHROMA_SERVER_PORT=8000
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - TREND_CRAWL_URLS=${TREND_CRAWL_URLS:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+    depends_on:
+      - vectordb
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 2-1. Celery Worker (text_extract/masking/evaluation) — ADR-102
+  # 504 타임아웃 해결을 위한 CPU-bound 태스크 전용 Worker
+  # -----------------------------------------
+  celery-worker-extract:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-endpoint:v2
+    container_name: celery_worker_extract
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=${REDIS_URL:-redis://localhost:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://localhost:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://localhost:6379/2}
+      - CHROMA_SERVER_HOST=vectordb
+      - CHROMA_SERVER_PORT=8000
+      # LLM APIs (OCR, 분석에 필요)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # OCR
+      - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
+      - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
+      # S3 Storage
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_REGION=${S3_REGION:-ap-northeast-2}
+      - S3_BUCKET=${S3_BUCKET:-devths-dev}
     depends_on:
       - vectordb
     networks:

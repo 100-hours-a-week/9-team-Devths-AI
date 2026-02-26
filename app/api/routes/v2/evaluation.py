@@ -6,9 +6,10 @@ POST /ai/evaluation/analyze   - 면접 평가 리포트 생성 (SSE 스트리밍
   - retry=true:  Gemini×GPT-4o 토론 후 최종 리포트
 
 POST /ai/evaluation/llm-judge - ADR-091 LLM-as-Judge 단건 채점 (내부 평가용)
+
+ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
 """
 
-import asyncio
 import json
 import logging
 
@@ -26,9 +27,7 @@ from app.domain.evaluation.debate_graph import DebateService
 from app.schemas.evaluation import (
     AnalyzeInterviewRequest,
 )
-from app.schemas.ingestion import InterviewIngestionInput, InterviewResultDocument
 from app.schemas.judge import JudgeRequest, JudgeResponse
-from app.services.interview_ingestion_service import InterviewIngestionService
 from app.services.judge_service import JudgeService
 from app.utils.langfuse_client import trace_llm_call
 from app.utils.log_sanitizer import sanitize_log_input
@@ -50,59 +49,23 @@ def _validate_qa_list(qa_list: list[dict]) -> str | None:
     return None
 
 
-async def _ingest_interview_qa_best_effort(request: AnalyzeInterviewRequest):
-    """면접 Q&A 데이터를 VectorDB에 비동기 저장 (best-effort).
+def _trigger_ingest_interview_qa(request: AnalyzeInterviewRequest):
+    """면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장 (ADR-102).
 
+    asyncio.create_task() 대신 Celery 태스크로 이관하여 504 타임아웃 해결.
     실패해도 평가 응답에 영향을 주지 않습니다.
     """
+    from app.tasks.evaluation_tasks import ingest_interview_qa_task
 
-    try:
-        from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
-
-        CELERY_TASK_WAIT_TIME.labels(task_name="ingest_qa").observe(0.0)
-        CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").inc()
-    except Exception:
-        pass
-
-    try:
-        rag = get_services()
-        vectordb = rag.vectordb
-        ingestion_service = InterviewIngestionService(vectordb)
-
-        qa_results = []
-        for i, qa in enumerate(request.context or []):
-            qa_results.append(
-                InterviewResultDocument(
-                    question=qa.get("question", ""),
-                    answer=qa.get("answer", ""),
-                    question_index=i,
-                    interview_type=qa.get("category", "technical"),
-                )
-            )
-
-        if not qa_results:
-            return
-
-        input_data = InterviewIngestionInput(
-            session_id=request.session_id,
-            user_id=request.user_id,
-            room_id=request.room_id,
-            interview_type="technical",
-            qa_results=qa_results,
-        )
-
-        result = await ingestion_service.ingest_session(input_data)
-        # SAST: request 기반 값은 로그에 넣지 않음 (Log Injection 방지)
-        logger.info("📦 면접 Q&A VectorDB 자동 저장 완료: %d건", result["ingested_count"])
-    except Exception as e:
-        logger.warning("면접 Q&A VectorDB 자동 저장 실패 (무시): %s", str(e), exc_info=True)
-    finally:
-        try:
-            from app.core.monitoring import CELERY_TASKS_ACTIVE
-
-            CELERY_TASKS_ACTIVE.labels(task_name="ingest_qa").dec()
-        except Exception:
-            pass
+    ingest_interview_qa_task.delay(
+        session_id=request.session_id,
+        user_id=request.user_id,
+        room_id=request.room_id,
+        context=request.context or [],
+    )
+    logger.info(
+        "[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", request.session_id
+    )
 
 
 # ============================================
@@ -204,8 +167,8 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
 
         logger.info("✅ 면접 평가 리포트 생성 완료 (응답 길이: %d자)", len(full_report))
 
-        # 면접 Q&A 데이터를 VectorDB에 비동기 저장 (best-effort)
-        asyncio.create_task(_ingest_interview_qa_best_effort(request))
+        # ADR-102: 면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장
+        _trigger_ingest_interview_qa(request)
 
     except ConnectionError as e:
         logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
@@ -546,9 +509,7 @@ async def analyze_interview(
 )
 async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
     """단건 RAG 응답을 Gemini Judge LLM으로 채점 → Langfuse 기록."""
-    logger.info(
-        "LLM-as-Judge 요청: pipeline_stage=%s", sanitize_log_input(request.pipeline_stage)
-    )
+    logger.info("LLM-as-Judge 요청: pipeline_stage=%s", sanitize_log_input(request.pipeline_stage))
 
     try:
         judge = JudgeService()
