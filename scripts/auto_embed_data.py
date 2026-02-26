@@ -5,7 +5,6 @@
 
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -37,7 +36,7 @@ async def auto_embed_all_data():
     logger.info("========================================")
     logger.info("🚀 AI Service Auto Embedding Triggered!")
     logger.info("========================================")
-    
+
     # 1. 면접 데이터셋 (필수)
     # 추후 추가될 데이터 컬렉션(e.g., 직무 공고 등)이 있다면 아래에 순차적으로 추가합니다.
     await run_interview_dataset_embedding()
