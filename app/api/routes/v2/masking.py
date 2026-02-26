@@ -87,11 +87,13 @@ async def masking_draft(
     task_storage.save(task_id, task_data)
 
     import time
+
     enqueued_time = time.time()
 
     async def process_masking(store):
         try:
             from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+
             wait_time = time.time() - enqueued_time
             CELERY_TASK_WAIT_TIME.labels(task_name="masking_draft").observe(wait_time)
             CELERY_TASKS_ACTIVE.labels(task_name="masking_draft").inc()
@@ -196,6 +198,7 @@ async def masking_draft(
         finally:
             try:
                 from app.core.monitoring import CELERY_TASKS_ACTIVE
+
                 CELERY_TASKS_ACTIVE.labels(task_name="masking_draft").dec()
             except Exception:
                 pass
