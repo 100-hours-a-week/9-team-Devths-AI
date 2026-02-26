@@ -19,6 +19,17 @@ from app.config.settings import get_settings
 # 로깅 설정 (운영 서버 호환)
 # ============================================================================
 
+class EndpointFilter(logging.Filter):
+    """특정 엔드포인트(/health, /metrics 등)의 접근 로그를 무시하는 필터"""
+    def filter(self, record: logging.LogRecord) -> bool:
+        # uvicorn.access 로그 레코드의 args 속성은 다음과 같은 튜플 형태입니다:
+        # (client_addr, method, path, http_version, status_code)
+        if record.args and len(record.args) >= 3:
+            path = record.args[2]
+            if path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
+                return False
+        return True
+
 
 def setup_logging(settings):
     """운영 환경과 로컬 환경 모두에서 로그가 출력되도록 설정"""
@@ -49,6 +60,9 @@ def setup_logging(settings):
         logger.handlers.clear()
         logger.addHandler(stdout_handler)
         logger.setLevel(logging.INFO)
+        # uvicorn.access 로그 중 무의미한 헬스체크 등은 필터링
+        if logger_name == "uvicorn.access":
+            logger.addFilter(EndpointFilter())
 
     # 앱 로거 설정
     app_logger = logging.getLogger("app")
