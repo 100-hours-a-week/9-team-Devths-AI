@@ -343,6 +343,8 @@ async def _generate_debate_stream(
         debate_result = await debate_service.run_debate(
             qa_pairs=qa_pairs,
             gemini_analysis=gemini_dict,
+            session_id=request.session_id,
+            user_id=request.user_id,
         )
         logger.info("✅ [Debate] 2단계 완료: consensus=%s", debate_result.consensus_method)
 

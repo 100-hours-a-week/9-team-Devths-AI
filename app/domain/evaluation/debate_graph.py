@@ -25,6 +25,7 @@ from app.prompts.evaluation import (
     create_gpt4o_analyze_prompt,
     create_synthesize_prompt,
 )
+from app.utils.langfuse_client import get_langfuse_callback_handler
 
 from .entities import DebateResult, DebateState, InterviewAnalysis
 
@@ -544,6 +545,8 @@ class DebateService:
         resume_text: str = "",
         job_posting_text: str = "",
         interview_type: str = "tech",
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> DebateResult:
         """토론을 실행하고 결과를 반환합니다.
 
@@ -553,6 +556,8 @@ class DebateService:
             resume_text: 이력서 텍스트
             job_posting_text: 채용공고 텍스트
             interview_type: 면접 유형
+            session_id: 사용자 세션 ID (Langfuse 추적용, 선택)
+            user_id: 사용자 ID (Langfuse 추적용, 선택)
 
         Returns:
             DebateResult 토론 결과
@@ -574,7 +579,11 @@ class DebateService:
         }
 
         # LangGraph 실행
-        result = await self._graph.ainvoke(initial_state)
+        _lf_handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="debate"
+        )
+        _cfg = {"callbacks": [_lf_handler]} if _lf_handler else {}
+        result = await self._graph.ainvoke(initial_state, _cfg)
 
         # 결과 변환
         final_data = result.get("final_analysis", gemini_analysis)

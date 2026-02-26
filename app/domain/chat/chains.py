@@ -16,6 +16,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+from app.utils.langfuse_client import get_langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +242,7 @@ class RAGChain:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_retrieval: bool = True,
+        session_id: str | None = None,
     ) -> str:
         """Generate a chat response.
 
@@ -249,6 +251,7 @@ class RAGChain:
             user_id: User ID for context retrieval.
             history: Chat history.
             use_retrieval: Whether to use RAG retrieval.
+            session_id: Session ID for Langfuse tracking (optional).
 
         Returns:
             Generated response text.
@@ -260,11 +263,16 @@ class RAGChain:
             # Create chain with retrieval
             chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
 
+            _handler = get_langfuse_callback_handler(
+                session_id=session_id, user_id=user_id, trace_name="rag-chat"
+            )
+            _cfg = {"callbacks": [_handler]} if _handler else {}
             response = await chain.ainvoke(
                 {
                     "context": context,
                     "question": question,
-                }
+                },
+                config=_cfg,
             )
         else:
             # Create chain without retrieval
@@ -283,11 +291,16 @@ class RAGChain:
                     else:
                         lc_history.append(HumanMessage(content=content))
 
+            _handler = get_langfuse_callback_handler(
+                session_id=session_id, user_id=user_id, trace_name="rag-chat"
+            )
+            _cfg = {"callbacks": [_handler]} if _handler else {}
             response = await chain.ainvoke(
                 {
                     "history": lc_history,
                     "question": question,
-                }
+                },
+                config=_cfg,
             )
 
         return response
@@ -298,6 +311,7 @@ class RAGChain:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_retrieval: bool = True,
+        session_id: str | None = None,
     ) -> AsyncIterator[str]:
         """Generate a streaming chat response.
 
@@ -306,6 +320,7 @@ class RAGChain:
             user_id: User ID for context retrieval.
             history: Chat history.
             use_retrieval: Whether to use RAG retrieval.
+            session_id: Session ID for Langfuse tracking (optional).
 
         Yields:
             Chunks of generated response.
@@ -317,11 +332,16 @@ class RAGChain:
             # Create chain with retrieval
             chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
 
+            _handler = get_langfuse_callback_handler(
+                session_id=session_id, user_id=user_id, trace_name="rag-chat-stream"
+            )
+            _cfg = {"callbacks": [_handler]} if _handler else {}
             async for chunk in chain.astream(
                 {
                     "context": context,
                     "question": question,
-                }
+                },
+                config=_cfg,
             ):
                 yield chunk
         else:
@@ -341,11 +361,16 @@ class RAGChain:
                     else:
                         lc_history.append(HumanMessage(content=content))
 
+            _handler = get_langfuse_callback_handler(
+                session_id=session_id, user_id=user_id, trace_name="rag-chat-stream"
+            )
+            _cfg = {"callbacks": [_handler]} if _handler else {}
             async for chunk in chain.astream(
                 {
                     "history": lc_history,
                     "question": question,
-                }
+                },
+                config=_cfg,
             ):
                 yield chunk
 
@@ -354,6 +379,8 @@ class RAGChain:
         original_question: str,
         user_answer: str,
         context: str | None = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         """Generate a follow-up question based on user's answer.
 
@@ -361,6 +388,8 @@ class RAGChain:
             original_question: The original question asked.
             user_answer: User's answer to analyze.
             context: Additional context (optional).
+            session_id: Session ID for Langfuse tracking (optional).
+            user_id: User ID for Langfuse tracking (optional).
 
         Returns:
             Generated follow-up question.
@@ -385,12 +414,17 @@ class RAGChain:
 
         context_section = f"관련 컨텍스트:\n{context}" if context else ""
 
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="followup-question"
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
         response = await chain.ainvoke(
             {
                 "original_question": original_question,
                 "user_answer": user_answer,
                 "context_section": context_section,
-            }
+            },
+            config=_cfg,
         )
 
         return response
@@ -399,12 +433,16 @@ class RAGChain:
         self,
         resume_text: str,
         posting_text: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Generate analysis of resume and job posting match.
 
         Args:
             resume_text: Resume text.
             posting_text: Job posting text.
+            session_id: Session ID for Langfuse tracking (optional).
+            user_id: User ID for Langfuse tracking (optional).
 
         Returns:
             Analysis result as dictionary.
@@ -436,11 +474,16 @@ class RAGChain:
 
         chain = prompt | self._llm_gateway.llm | self._output_parser
 
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="analysis"
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
         response = await chain.ainvoke(
             {
                 "resume_text": resume_text,
                 "posting_text": posting_text,
-            }
+            },
+            config=_cfg,
         )
 
         # Parse JSON response
