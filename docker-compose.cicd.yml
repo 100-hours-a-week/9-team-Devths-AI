@@ -1,0 +1,190 @@
+# CI/CD 파이프라인 배포 전용 Compose 파일 (ADR-096, ADR-102)
+#
+# [용도] GitHub Actions → CodeDeploy → docker_deploy.sh 에서 사용
+# [로컬 테스트는 docker-compose.yml 사용 (build: 블록 포함)]
+#
+# [AI EC2에서 실행되는 서비스만 포함]
+#   - ai-endpoint           : FastAPI (Gunicorn 4 workers, ADR-102 / Dockerfile CMD)
+#   - celery-worker-trend   : 트렌드 크롤링 전용 Worker (ADR-094)
+#   - celery-worker-extract : 텍스트 추출/마스킹/평가 전용 Worker (ADR-102)
+#   - celery-beat           : 주간 스케줄러 (ADR-094)
+#   - promtail              : 컨테이너 로그 → Loki 전송
+#
+# [제외 서비스 — 별도 인스턴스에서 관리]
+#   - vectordb   : VectorDB EC2 → ${CHROMA_SERVER_HOST} 환경변수로 연결
+#   - exaone-8b  : GPU 인스턴스 → ${GCP_VLLM_BASE_URL} 환경변수로 연결
+#   - exaone-32b : RunPod Serverless → ${VLLM_32B_BASE_URL} 환경변수로 연결
+#   - easyocr-server : 레거시, 미사용
+#
+# [환경변수] docker_deploy.sh가 AWS Parameter Store에서 읽어 .env.cicd 파일로 주입
+# [이미지] ECR에서 pull (IMAGE_URI 환경변수로 주입)
+
+services:
+  # -----------------------------------------
+  # 1. AI Endpoint Server (FastAPI)
+  # Dockerfile CMD: gunicorn -w 4 -k uvicorn.workers.UvicornWorker (ADR-102)
+  # -----------------------------------------
+  ai-endpoint:
+    image: ${IMAGE_URI}
+    container_name: ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      # ChromaDB — VectorDB EC2 연결
+      - CHROMA_SERVER_HOST=${CHROMA_SERVER_HOST}
+      - CHROMA_SERVER_PORT=${CHROMA_SERVER_PORT:-8000}
+      # OCR
+      - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
+      - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
+      # LLM APIs
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # vLLM — 별도 GPU 인스턴스 / RunPod
+      - GCP_VLLM_BASE_URL=${GCP_VLLM_BASE_URL:-}
+      - VLLM_32B_BASE_URL=${VLLM_32B_BASE_URL:-}
+      # S3
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_REGION=${S3_REGION:-ap-northeast-2}
+      - S3_BUCKET=${S3_BUCKET:-devths-dev}
+      # Redis/ElastiCache (AWS) — 기본값 없음: 미설정 시 즉시 에러 감지
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      # Langfuse
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      # 기타
+      - API_KEY=${API_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+    volumes:
+      - ai_task_storage:/app/task_storage  # FastAPI ↔ Celery Worker 간 태스크 상태 파일 공유
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 2. Celery Worker — 트렌드 크롤링 전용 (ADR-094)
+  # -----------------------------------------
+  celery-worker-trend:
+    image: ${IMAGE_URI}
+    container_name: celery_worker_trend
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CHROMA_SERVER_HOST=${CHROMA_SERVER_HOST}
+      - CHROMA_SERVER_PORT=${CHROMA_SERVER_PORT:-8000}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - TREND_CRAWL_URLS=${TREND_CRAWL_URLS:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 3. Celery Worker — 텍스트 추출/마스킹/평가 전용 (ADR-102)
+  # CPU-bound 태스크 분리로 FastAPI 이벤트 루프 블로킹 해결
+  # -----------------------------------------
+  celery-worker-extract:
+    image: ${IMAGE_URI}
+    container_name: celery_worker_extract
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CHROMA_SERVER_HOST=${CHROMA_SERVER_HOST}
+      - CHROMA_SERVER_PORT=${CHROMA_SERVER_PORT:-8000}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
+      - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_REGION=${S3_REGION:-ap-northeast-2}
+      - S3_BUCKET=${S3_BUCKET:-devths-dev}
+    volumes:
+      - ai_task_storage:/app/task_storage  # FastAPI ↔ Celery Worker 간 태스크 상태 파일 공유
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 4. Celery Beat — 주간 트렌드 크롤링 스케줄러 (ADR-094)
+  # -----------------------------------------
+  celery-beat:
+    image: ${IMAGE_URI}
+    container_name: celery_beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    environment:
+      - ENVIRONMENT=production
+      - REDIS_URL=${REDIS_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - TREND_CRAWL_CRON_MINUTE=${TREND_CRAWL_CRON_MINUTE:-0}
+      - TREND_CRAWL_CRON_HOUR=${TREND_CRAWL_CRON_HOUR:-9}
+      - TREND_CRAWL_CRON_DAY_OF_WEEK=${TREND_CRAWL_CRON_DAY_OF_WEEK:-1}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - ai_network
+
+  # -----------------------------------------
+  # 5. Promtail — 컨테이너 로그 수집 → Loki 전송
+  # LOKI_URL: docker_deploy.sh에서 AWS EC2 API로 모니터링 서버 IP 조회 후 주입
+  # -----------------------------------------
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: ai-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    environment:
+      - LOKI_URL=${LOKI_URL}
+    volumes:
+      - ai_promtail_data:/promtail_data
+      - ./deploy/monitoring/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+    ports:
+      - "9080:9080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      - ai_network
+
+networks:
+  ai_network:
+    driver: bridge
+
+volumes:
+  ai_promtail_data:
+  ai_task_storage:  # FastAPI ↔ Celery Worker 간 태스크 상태 공유 볼륨 (FileTaskStore)

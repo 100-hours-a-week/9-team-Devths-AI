@@ -18,15 +18,37 @@ RETRY_INTERVAL=2
 # 1. 프로세스 확인 (Docker Container)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-echo "🔎 Checking if Docker container is running..."
-CONTAINER_NAME="ai-service"
-if docker ps --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
-    echo "✅ Docker container '$CONTAINER_NAME' is running."
-else
-    echo "❌ Docker container '$CONTAINER_NAME' is NOT running!"
-    docker ps -a | grep "$CONTAINER_NAME"
+echo "🔎 Checking if all Docker containers are running..."
+
+# docker-compose.cicd.yml 기준 모든 서비스 확인
+REQUIRED_CONTAINERS=("ai-service" "celery_worker_trend" "celery_worker_extract" "celery_beat")
+OPTIONAL_CONTAINERS=("ai-promtail")  # 모니터링 서버 미연결 시 미실행 가능
+CONTAINER_NAME="ai-service"  # 헬스체크용 메인 컨테이너
+
+ALL_PASS=true
+for CNAME in "${REQUIRED_CONTAINERS[@]}"; do
+    if docker ps --format '{{.Names}}' | grep -q "^$CNAME$"; then
+        echo "   ✅ $CNAME is running."
+    else
+        echo "   ❌ $CNAME is NOT running!"
+        docker ps -a | grep "$CNAME" || echo "   (container not found)"
+        ALL_PASS=false
+    fi
+done
+
+for CNAME in "${OPTIONAL_CONTAINERS[@]}"; do
+    if docker ps --format '{{.Names}}' | grep -q "^$CNAME$"; then
+        echo "   ✅ $CNAME is running. (optional)"
+    else
+        echo "   ⚠️  $CNAME is not running. (optional — monitoring may be unavailable)"
+    fi
+done
+
+if [ "$ALL_PASS" = "false" ]; then
+    echo "❌ One or more required containers are NOT running!"
     exit 1
 fi
+echo "✅ All required containers are running."
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 2. 헬스 체크 엔드포인트 확인

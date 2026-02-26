@@ -28,6 +28,7 @@ COPY pyproject.toml poetry.lock ./
 RUN poetry install --without ml,dev --no-root
 
 COPY app ./app
+COPY scripts ./scripts
 
 # Embedded 모드 시 ChromaDB 데이터 디렉터리 (볼륨 마운트 권장)
 RUN mkdir -p /data/chroma_db
@@ -39,5 +40,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # ADR-102: Gunicorn 4 Uvicorn workers (Docker Compose 환경 동시성 확장)
+# --timeout 300: LLM 호출 등 장시간 처리에서 worker 강제 종료 방지
 # uvicorn.workers.UvicornWorker 필수 (ASGI 지원)
-CMD ["poetry", "run", "gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120"]
+CMD ["poetry", "run", "gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "300"]
