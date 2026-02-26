@@ -383,7 +383,36 @@ class Settings(BaseSettings):
         default=200,
         description="청크 간 오버랩 크기 (문자 기준, 약 50 토큰)",
     )
-
+    # ADR-106 Phase 3: SemanticChunker (임베딩 유사도 기반 의미 분할)
+    rag_use_semantic_chunker: bool = Field(
+        default=False,
+        description="Use SemanticChunker for embedding-based text splitting. ADR-106.",
+    )
+    semantic_chunker_threshold_type: str = Field(
+        default="percentile",
+        description="SemanticChunker breakpoint type: percentile, standard_deviation, interquartile. ADR-106.",
+    )
+    semantic_chunker_threshold_amount: float = Field(
+        default=90.0,
+        description="SemanticChunker threshold (percentile=90 → 상위 10%% 변화점에서 분할). ADR-106.",
+    )
+    # ADR-106 Phase 4: RAPTOR (재귀적 요약 트리)
+    raptor_enabled: bool = Field(
+        default=False,
+        description="Enable RAPTOR tree construction on document upload. ADR-106.",
+    )
+    raptor_max_levels: int = Field(
+        default=3,
+        description="Maximum RAPTOR tree depth (levels of summarization). ADR-106.",
+    )
+    raptor_min_cluster_size: int = Field(
+        default=3,
+        description="Minimum texts in a cluster before stopping recursion. ADR-106.",
+    )
+    raptor_summary_max_docs: int = Field(
+        default=5,
+        description="Max documents per cluster to summarize (token limit). ADR-106.",
+    )
     # ============================================
     # PDF Text Extraction (ADR-063)
     # ============================================

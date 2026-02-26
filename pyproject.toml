@@ -74,6 +74,8 @@ langchain-chroma = "^0.2.0"
 langchain-tavily = "^0.1.0"
 rank-bm25 = "^0.2.2"
 flashrank = "^0.2.0"  # ADR-104: FlashRank 리랭커 (ONNX 기반, CPU 최적)
+langchain-experimental = "^0.3.0"  # ADR-106: SemanticChunker (임베딩 기반 의미 분할)
+scikit-learn = "^1.3.0"  # ADR-106: RAPTOR 클러스터링 (KMeans)
 beautifulsoup4 = "^4.12.0"
 langgraph = "^0.2.0"
 

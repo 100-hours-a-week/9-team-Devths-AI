@@ -110,6 +110,19 @@ class RAGChain:
 
         logger.info("RAGChain initialized")
 
+    # ADR-106: LLM bind 로직 공통화 (중복 제거)
+    def _build_llm(self, temperature: float | None = None, max_tokens: int | None = None):
+        """ADR-106: temperature/max_tokens가 적용된 LLM 반환."""
+        llm = self._llm_gateway.llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+        return llm
+
     def set_vectorstore(self, vectorstore: Chroma) -> None:
         """Set the vectorstore for retrieval.
 
@@ -256,29 +269,21 @@ class RAGChain:
         Returns:
             Generated response text.
         """
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id,
+            user_id=user_id,
+            trace_name="rag-chat" if use_retrieval else "chat",
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
+
         if use_retrieval:
-            # Retrieve context
             context = await self.retrieve_context(question, user_id)
-
-            # Create chain with retrieval
-            chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
-
-            _handler = get_langfuse_callback_handler(
-                session_id=session_id, user_id=user_id, trace_name="rag-chat"
-            )
-            _cfg = {"callbacks": [_handler]} if _handler else {}
-            response = await chain.ainvoke(
-                {
-                    "context": context,
-                    "question": question,
-                },
+            chain = self._rag_prompt | self._build_llm() | self._output_parser
+            return await chain.ainvoke(
+                {"context": context, "question": question},
                 config=_cfg,
             )
         else:
-            # Create chain without retrieval
-            chain = self._chat_prompt | self._llm_gateway.llm | self._output_parser
-
-            # Convert history to LangChain messages
             from langchain_core.messages import AIMessage, HumanMessage
 
             lc_history = []
@@ -290,20 +295,11 @@ class RAGChain:
                         lc_history.append(AIMessage(content=content))
                     else:
                         lc_history.append(HumanMessage(content=content))
-
-            _handler = get_langfuse_callback_handler(
-                session_id=session_id, user_id=user_id, trace_name="rag-chat"
-            )
-            _cfg = {"callbacks": [_handler]} if _handler else {}
-            response = await chain.ainvoke(
-                {
-                    "history": lc_history,
-                    "question": question,
-                },
+            chain = self._chat_prompt | self._build_llm() | self._output_parser
+            return await chain.ainvoke(
+                {"history": lc_history, "question": question},
                 config=_cfg,
             )
-
-        return response
 
     async def chat_stream(
         self,
@@ -325,30 +321,22 @@ class RAGChain:
         Yields:
             Chunks of generated response.
         """
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id,
+            user_id=user_id,
+            trace_name="rag-chat-stream" if use_retrieval else "chat-stream",
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
+
         if use_retrieval:
-            # Retrieve context
             context = await self.retrieve_context(question, user_id)
-
-            # Create chain with retrieval
-            chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
-
-            _handler = get_langfuse_callback_handler(
-                session_id=session_id, user_id=user_id, trace_name="rag-chat-stream"
-            )
-            _cfg = {"callbacks": [_handler]} if _handler else {}
+            chain = self._rag_prompt | self._build_llm() | self._output_parser
             async for chunk in chain.astream(
-                {
-                    "context": context,
-                    "question": question,
-                },
+                {"context": context, "question": question},
                 config=_cfg,
             ):
                 yield chunk
         else:
-            # Create chain without retrieval
-            chain = self._chat_prompt | self._llm_gateway.llm | self._output_parser
-
-            # Convert history
             from langchain_core.messages import AIMessage, HumanMessage
 
             lc_history = []
@@ -360,16 +348,9 @@ class RAGChain:
                         lc_history.append(AIMessage(content=content))
                     else:
                         lc_history.append(HumanMessage(content=content))
-
-            _handler = get_langfuse_callback_handler(
-                session_id=session_id, user_id=user_id, trace_name="rag-chat-stream"
-            )
-            _cfg = {"callbacks": [_handler]} if _handler else {}
+            chain = self._chat_prompt | self._build_llm() | self._output_parser
             async for chunk in chain.astream(
-                {
-                    "history": lc_history,
-                    "question": question,
-                },
+                {"history": lc_history, "question": question},
                 config=_cfg,
             ):
                 yield chunk
