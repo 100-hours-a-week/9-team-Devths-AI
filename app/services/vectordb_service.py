@@ -479,6 +479,12 @@ class VectorDBService:
             # Create query embedding
             query_embedding = await self.create_embedding(query_text)
 
+            import time
+
+            from app.core.monitoring import VECTOR_DB_QUERY_DURATION
+
+            start_time = time.perf_counter()
+
             # Query collection
             results = collection.query(
                 query_embeddings=[query_embedding],
@@ -486,6 +492,14 @@ class VectorDBService:
                 where=where,
                 include=["documents", "metadatas", "distances"],
             )
+
+            query_duration = time.perf_counter() - start_time
+            try:
+                VECTOR_DB_QUERY_DURATION.labels(collection_name=collection_type).observe(
+                    query_duration
+                )
+            except Exception as e:
+                logger.error(f"VectorDB Metric Error: {e}")
 
             # Format results
             formatted_results = []

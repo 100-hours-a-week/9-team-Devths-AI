@@ -48,6 +48,12 @@ VECTOR_DB_INSERT_DURATION = Histogram(
     ["collection_name"],
 )
 
+VECTOR_DB_QUERY_DURATION = Histogram(
+    "vector_db_query_duration_seconds",
+    "VectorDB 검색(Query) 쿼리 소요 시간",
+    ["collection_name"],
+)
+
 EXTERNAL_API_ERRORS = Counter(
     "external_api_errors_total",
     "외부 AI 연동 API 실패 횟수 (LLM, VQA 등)",
