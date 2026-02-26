@@ -184,6 +184,7 @@ class LLMService:
         """에러 기록"""
         try:
             from app.core.monitoring import EXTERNAL_API_ERRORS
+
             error_type = type(error).__name__
 
             # API 상태 코드가 있는 HTTP 에러 등에 대한 처리 추가 가능 로직

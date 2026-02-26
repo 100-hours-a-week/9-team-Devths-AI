@@ -203,11 +203,13 @@ async def text_extract(
     )
 
     import time
+
     enqueued_time = time.time()
 
     async def process_text_extract(store):
         try:
             from app.core.monitoring import CELERY_TASK_WAIT_TIME, CELERY_TASKS_ACTIVE
+
             wait_time = time.time() - enqueued_time
             CELERY_TASK_WAIT_TIME.labels(task_name="text_extract").observe(wait_time)
             CELERY_TASKS_ACTIVE.labels(task_name="text_extract").inc()
@@ -468,6 +470,7 @@ async def text_extract(
         finally:
             try:
                 from app.core.monitoring import CELERY_TASKS_ACTIVE
+
                 CELERY_TASKS_ACTIVE.labels(task_name="text_extract").dec()
             except Exception:
                 pass

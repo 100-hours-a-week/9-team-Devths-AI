@@ -46,13 +46,11 @@ class PrometheusMiddleware(BaseHTTPMiddleware):
 
             # 메트릭 기록 (Counter & Histogram)
             # 상태 코드는 문자열 변환
-            HTTP_REQUESTS_TOTAL.labels(
-                method=method, path=path, status=str(status_code)
-            ).inc()
+            HTTP_REQUESTS_TOTAL.labels(method=method, path=path, status=str(status_code)).inc()
 
-            HTTP_REQUEST_DURATION.labels(
-                method=method, path=path, status=str(status_code)
-            ).observe(process_time)
+            HTTP_REQUEST_DURATION.labels(method=method, path=path, status=str(status_code)).observe(
+                process_time
+            )
 
     def get_path(self, request: Request) -> tuple[str, bool]:
         """
