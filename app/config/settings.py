@@ -506,6 +506,11 @@ class Settings(BaseSettings):
         return bool(self.openai_api_key)
 
     @property
+    def tavily_available(self) -> bool:
+        """Tavily Search API 설정 여부. ADR-101/103."""
+        return bool(self.tavily_api_key)
+
+    @property
     def debate_available(self) -> bool:
         """Check if debate feature is available."""
         return self.eval_debate_enabled and self.openai_available

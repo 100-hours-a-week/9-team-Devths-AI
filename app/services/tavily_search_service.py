@@ -10,9 +10,15 @@ Phase 1 (WebBaseLoader) 대비 장점:
 - 중복 URL 자동 필터링
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +55,7 @@ class TavilySearchService:
     미설정 시 ValueError 발생 → /crawl/trend/search에서 503으로 처리.
     """
 
-    def __init__(self, settings=None):
+    def __init__(self, settings: Settings | None = None):
         from app.config.settings import get_settings
 
         self.settings = settings or get_settings()
