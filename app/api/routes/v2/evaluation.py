@@ -63,9 +63,8 @@ def _trigger_ingest_interview_qa(request: AnalyzeInterviewRequest):
         room_id=request.room_id,
         context=request.context or [],
     )
-    logger.info(
-        "[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", request.session_id
-    )
+    safe_session_id = sanitize_log_input(request.session_id)
+    logger.info("[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", safe_session_id)
 
 
 # ============================================

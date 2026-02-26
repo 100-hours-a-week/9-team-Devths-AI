@@ -206,6 +206,9 @@ async def text_extract(
         model=model,
     )
 
-    logger.info("[TextExtract] Celery 태스크 등록 완료: %s", task_key)
+    from app.utils.log_sanitizer import sanitize_log_input
+
+    safe_task_key = sanitize_log_input(task_key)
+    logger.info("[TextExtract] Celery 태스크 등록 완료: %s", safe_task_key)
 
     return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)
