@@ -188,7 +188,7 @@ async def text_extract(
         {
             "type": "text_extract",
             "status": TaskStatus.PROCESSING,
-            "created_at": datetime.now(),
+            "created_at": datetime.now().isoformat(),
             "room_id": request.room_id,
             "request": request.model_dump(),
         },

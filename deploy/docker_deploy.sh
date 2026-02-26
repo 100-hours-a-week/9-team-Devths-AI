@@ -7,7 +7,7 @@
 APP_DIR="/home/ubuntu/ai"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/deploy.log"
-CONTAINER_NAME="ai-service"
+COMPOSE_FILE="$APP_DIR/docker-compose.cicd.yml"
 AWS_REGION="ap-northeast-2" # Default region
 
 # AWS CodeDeploy의 환경 변수(PATH) 초기화 문제 방지를 위해 명시적으로 PATH 추가
@@ -107,35 +107,13 @@ if [ $? -ne 0 ]; then
 fi
 log "✅ ECR Login successful."
 
-# 3. Pull New Image
-log "⬇️  Pulling Docker image: $IMAGE_URI"
-docker pull "$IMAGE_URI"
-if [ $? -ne 0 ]; then
-    log "❌ Docker pull failed!"
-    exit 1
-fi
-
-# 4. Stop & Remove Old Container
-log "🛑 Stopping existing container..."
-if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
-    docker stop "$CONTAINER_NAME"
-    docker rm "$CONTAINER_NAME"
-    log "✅ Removed old container."
-else
-    log "ℹ️  No existing container found."
-fi
-
-# 5. Prepare Environment Variables for Container (Memory Injection)
-# We need to pass env vars to the container without writing them to disk.
-# Strategy: Source load_env_from_parameter_store.sh and construct -e flags dynamically.
-
+# 3. Load vars from Parameter Store & Export to shell (디스크 기록 없음)
+# docker compose는 현재 셸의 export된 변수를 자동으로 읽습니다.
 log "📥 Loading vars from Parameter Store..."
-# Set helper vars for load_env script to know where to look
 if [[ "$ENV_TAG" == "prod" ]]; then export PARAMETER_STORE_PATH="/Prod/AI/"; fi
 if [[ "$ENV_TAG" == "stg" ]]; then export PARAMETER_STORE_PATH="/Stg/AI/"; fi
 if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 
-# Source the script to load variables into the current shell session
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "$SCRIPT_DIR/load_env_from_parameter_store.sh" ]; then
     source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
@@ -143,75 +121,103 @@ else
     log "⚠️  load_env_from_parameter_store.sh not found at $SCRIPT_DIR. Skipping Parameter Store load."
 fi
 
-# Construct Docker Environment Arguments
-log "🔨 Constructing Docker environment arguments..."
-DOCKER_ENV_ARGS=()
+# IMAGE_URI를 셸 환경변수로 export (docker-compose.cicd.yml의 ${IMAGE_URI} 참조)
+export IMAGE_URI="$IMAGE_URI"
 
-# 1. Parameter Store에서 로드된 변수 주입
+# Parameter Store에서 로드된 변수 전체를 셸 환경변수로 export
+# 디스크에 기록하지 않음 — 스크립트 종료 시 메모리에서 자동 소멸
 if [ -n "$LOADED_PARAM_KEYS" ]; then
-    log "ℹ️  Injecting variables from Parameter Store..."
+    EXPORTED_COUNT=0
     for var_name in $LOADED_PARAM_KEYS; do
         var_value="${!var_name}"
         if [ -n "$var_value" ]; then
-            DOCKER_ENV_ARGS+=("-e" "$var_name=$var_value")
+            export "$var_name"   # 셸 메모리에만 존재
+            EXPORTED_COUNT=$((EXPORTED_COUNT + 1))
         fi
     done
+    log "✅ $EXPORTED_COUNT variables exported to shell environment (no disk write)."
 fi
 
-log "✅ Prepared $(( ${#DOCKER_ENV_ARGS[@]} / 2 )) environment variables for injection."
+# Promtail LOKI_URL: AWS EC2 API로 모니터링 서버 Private IP 조회 후 export
+log "🔍 Resolving Loki URL from monitoring instance..."
+if [[ "$DEPLOYMENT_GROUP_NAME" == *"Prod"* ]] || [[ "$DEPLOY_BRANCH" == "main" ]]; then
+    TARGET_INSTANCE_NAME="devths-v2-prod-monitoring"
+else
+    TARGET_INSTANCE_NAME="devths-v2-nonprod-monitoring"
+fi
 
-# 6. Run New Container
-log "▶️  Starting new container..."
-# create a temporary array for the command to handle quoting correctly
-cmd=(docker run -d \
-    --name "$CONTAINER_NAME" \
-    --restart unless-stopped \
-    --log-driver json-file \
-    --log-opt max-size=10m \
-    --log-opt max-file=3 \
-    "${DOCKER_ENV_ARGS[@]}" \
-    -p 8000:8000 \
-    "$IMAGE_URI")
+MONITORING_PRIVATE_IP=$(aws ec2 describe-instances \
+    --region "$AWS_REGION" \
+    --filters "Name=tag:Name,Values=$TARGET_INSTANCE_NAME" "Name=instance-state-name,Values=running" \
+    --query "Reservations[*].Instances[*].PrivateIpAddress" \
+    --output text 2>/dev/null | awk '{print $1}')
 
-# Execute the command
-"${cmd[@]}"
+if [ -n "$MONITORING_PRIVATE_IP" ]; then
+    export LOKI_URL="http://${MONITORING_PRIVATE_IP}:3100/loki/api/v1/push"
+    log "✅ LOKI_URL resolved: $LOKI_URL"
+else
+    log "⚠️  Could not resolve monitoring server IP. Promtail will start without Loki target."
+    export LOKI_URL=""
+fi
 
+# 4. Pre-flight: 필수 환경변수 존재 여부 확인 (compose up 전에 즉시 감지)
+log "🔍 Pre-flight check: Validating required environment variables..."
+PREFLIGHT_FAIL=false
+REQUIRED_VARS=("REDIS_URL" "CELERY_BROKER_URL" "CELERY_RESULT_BACKEND" "CHROMA_SERVER_HOST" "API_KEY")
+for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var}" ]; then
+        log "❌ Missing required variable: $var"
+        PREFLIGHT_FAIL=true
+    else
+        log "   ✅ $var is set."
+    fi
+done
+if [ "$PREFLIGHT_FAIL" = "true" ]; then
+    log "❌ Pre-flight failed: Required environment variables are missing. Aborting deployment."
+    exit 1
+fi
+log "✅ Pre-flight check passed."
+
+# 5. Stop existing services (if any)
+log "🛑 Stopping existing services..."
+if [ -f "$COMPOSE_FILE" ]; then
+    docker compose -f "$COMPOSE_FILE" down --remove-orphans >> "$LOG_FILE" 2>&1
+    log "✅ Existing services stopped."
+fi
+
+# 5. Pull new image
+log "⬇️  Pulling new Docker image: $IMAGE_URI"
+docker compose -f "$COMPOSE_FILE" pull >> "$LOG_FILE" 2>&1
 if [ $? -ne 0 ]; then
-    log "❌ Failed to start container!"
+    log "❌ Docker image pull failed!"
     exit 1
 fi
 
-log "✅ Main container started successfully."
-
-# 6.5. Start Promtail Container
-log "🔄 Starting Promtail container..."
-if [ -x "$APP_DIR/deploy/monitoring/run_promtail.sh" ]; then
-    bash "$APP_DIR/deploy/monitoring/run_promtail.sh" > "$LOG_DIR/promtail_deploy.log" 2>&1
-    if [ $? -eq 0 ]; then
-        log "✅ Promtail container started successfully."
-    else
-        log "⚠️  Failed to start Promtail container. Check logs/promtail_deploy.log."
-    fi
-else
-    log "⚠️  run_promtail.sh not found or not executable at $APP_DIR/deploy/monitoring/run_promtail.sh"
+# 6. Start all services via Docker Compose
+log "▶️  Starting all services (ai-endpoint, celery-worker-trend, celery-worker-extract, celery-beat, promtail)..."
+docker compose -f "$COMPOSE_FILE" up -d >> "$LOG_FILE" 2>&1
+if [ $? -ne 0 ]; then
+    log "❌ docker compose up failed!"
+    exit 1
 fi
 
+log "✅ All services started successfully."
+
 # 7. Health Check
-log "Hz  Health Checking..."
+log "🏥 Health Checking..."
 for i in {1..12}; do
     sleep 5
     if curl -s "http://localhost:8000/health" > /dev/null; then
         log "✅ Health check passed!"
-        
+
         # 8. Trigger Auto-Embedding if flagged by CI/CD
         if [ "$TRIGGER_DATA_EMBEDDING" = "true" ]; then
             log "📂 Data directory change detected. Triggering auto-embedding..."
-            docker exec "$CONTAINER_NAME" python scripts/auto_embed_data.py >> "$LOG_FILE" 2>&1
+            docker exec ai-service python scripts/auto_embed_data.py >> "$LOG_FILE" 2>&1
             if [ $? -eq 0 ]; then
                 log "✅ Auto-embedding completed successfully."
             else
                 log "⚠️  Auto-embedding failed! Check the logs above."
-                # We don't exit 1 here because the main application is healthy
             fi
         fi
 
@@ -221,6 +227,6 @@ for i in {1..12}; do
     log "⏳ Waiting for service to be healthy... ($i/12)"
 done
 
-log "❌ Health check timed out!"
-docker logs --tail 20 "$CONTAINER_NAME"
+log "❌ Health check timed out! Showing recent container logs:"
+docker compose -f "$COMPOSE_FILE" logs --tail 30 ai-endpoint >> "$LOG_FILE" 2>&1
 exit 1

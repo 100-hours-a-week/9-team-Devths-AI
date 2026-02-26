@@ -251,9 +251,10 @@ jobs:
           ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
           mkdir -p deploy-package
 
-          # Copy ONLY deployment scripts and appspec
+          # Copy deployment scripts, appspec, and compose file
           cp -r deploy/ deploy-package/
           cp appspec.yml deploy-package/
+          cp docker-compose.cicd.yml deploy-package/  # EC2에 복사될 CI/CD 전용 Compose 파일
 
           # Create .deploy-env file
           echo "export DEPLOY_BRANCH=\"${{ github.ref_name }}\"" > deploy-package/.deploy-env
