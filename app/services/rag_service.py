@@ -356,9 +356,19 @@ class RAGService:
         self.ocr = ocr_service or OCRService(llm_service=llm_service)
         # 템플릿 기반 면접 질문 서비스
         self.interview_templates = InterviewTemplateService()
+        # ADR-106 Phase 4: RAPTOR 서비스 (설정 활성화 시에만 초기화)
+        self._raptor: Any = None
+        if get_settings().raptor_enabled:
+            from app.services.raptor_service import RaptorService as _RaptorSvc
+
+            self._raptor = _RaptorSvc(
+                vectordb_service=vectordb_service,
+                langchain_gateway=langchain_gateway,
+            )
         logger.info(
-            "RAG Service initialized (OCR + InterviewTemplate; LCEL=%s)",
+            "RAG Service initialized (OCR + InterviewTemplate; LCEL=%s, RAPTOR=%s)",
             "on" if langchain_gateway else "off",
+            "on" if self._raptor else "off",
         )
 
     async def retrieve_all_documents(self, user_id: str, context_types: list[str] = None) -> str:
@@ -940,6 +950,25 @@ class RAGService:
                     else settings.rag_ensemble_sparse_weight
                 )
                 merged = _rrf_merge(dense_pairs, sparse_pairs, dw, sw, top_k=0)
+
+                # ADR-106 Phase 4: RAPTOR 다단계 검색 결과 병합
+                if self._raptor:
+                    for ct in context_types:
+                        coll = ct + "s" if not ct.endswith("s") else ct
+                        raptor_pairs = await self._raptor.retrieve_multi_level(
+                            query=query,
+                            collection_name=coll,
+                            user_id=user_id,
+                            top_k=3,
+                        )
+                        if raptor_pairs:
+                            merged.extend(raptor_pairs)
+                            logger.info(
+                                "ADR-106: RAPTOR %d개 결과 병합 (collection=%s)",
+                                len(raptor_pairs),
+                                coll,
+                            )
+
                 # 재정렬: top_k 적용 (ADR-069 question → retriever → rerank → context)
                 rerank_k = settings.rag_rerank_top_k if settings.rag_rerank_top_k > 0 else 0
                 merged = await _rerank(merged, rerank_k, query=query)
@@ -1080,10 +1109,11 @@ class RAGService:
                 ):
                     yield chunk
             elif self._langchain_gateway:
-                # LCEL 체인: history 있으면 create_chat_chain(MessagesPlaceholder), 없으면 create_chain
+                # ADR-106 Phase 2: LCEL 체인 활용
                 logger.info("Using Gemini model (LCEL chain)")
                 settings = get_settings()
                 if history:
+                    # history 있는 경우: MessagesPlaceholder 기반 chat chain 유지
                     final_message = user_message
                     if context:
                         final_message = f"""관련 정보:
@@ -1110,6 +1140,7 @@ class RAGService:
                         if chunk:
                             yield chunk
                 else:
+                    # ADR-106: history 없는 경우 → LCEL 체인
                     chain = self._langchain_gateway.create_chain(
                         RAG_QNA_PROMPT,
                         system_prompt=system_prompt,

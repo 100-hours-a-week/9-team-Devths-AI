@@ -455,6 +455,137 @@ class LangChainLLMGateway:
 
         return prompt | llm | self._output_parser
 
+    # ============================================
+    # ADR-106 Phase 2: LCEL 고급 패턴
+    # ============================================
+
+    def get_llm_with_retry(
+        self,
+        *,
+        stop_after_attempt: int = 3,
+        wait_exponential_jitter: bool = True,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """ADR-106: 자동 재시도가 적용된 LLM 반환.
+
+        429 (Rate Limit), 500 등 일시적 오류 시 자동 재시도.
+
+        Returns:
+            Runnable LLM with retry.
+        """
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        return llm.with_retry(
+            stop_after_attempt=stop_after_attempt,
+            wait_exponential_jitter=wait_exponential_jitter,
+        )
+
+    def get_llm_with_fallbacks(
+        self,
+        fallback_llms: list,
+        *,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ):
+        """ADR-106: 폴백 LLM이 연결된 LLM 반환 (Gemini → vLLM 등).
+
+        Args:
+            fallback_llms: 폴백으로 사용할 LLM 리스트.
+            temperature: 샘플링 온도.
+            max_tokens: 최대 토큰 수.
+
+        Returns:
+            Runnable LLM with fallbacks.
+        """
+        llm = self._llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+
+        if fallback_llms:
+            return llm.with_fallbacks(fallback_llms)
+        return llm
+
+    def create_rag_chain(
+        self,
+        retrieve_fn,
+        *,
+        system_prompt: str | None = None,
+        prompt_template: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        use_retry: bool = True,
+    ):
+        """ADR-106: LCEL RAG 체인 — 검색 → 프롬프트 → LLM → 파싱을 단일 체인으로 구성.
+
+        Args:
+            retrieve_fn: 검색 함수 (async callable). dict → str 반환.
+                         입력: {"question": str, ...}, 출력: context str.
+            system_prompt: 시스템 프롬프트.
+            prompt_template: 사용자 프롬프트 템플릿 ({context}, {question} 포함).
+            temperature: 샘플링 온도.
+            max_tokens: 최대 토큰 수.
+            use_retry: 자동 재시도 적용 여부.
+
+        Returns:
+            LangChain Runnable. astream({"question": ..., ...}) / ainvoke({"question": ..., ...}).
+        """
+        from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+
+        # 검색 함수를 Runnable로 래핑
+        retriever_runnable = RunnableLambda(retrieve_fn)
+
+        # 프롬프트 구성
+        if prompt_template is None:
+            prompt_template = (
+                "관련 정보:\n{context}\n\n"
+                "질문: {question}\n\n"
+                "위 관련 정보를 참고하여 질문에 답변해주세요. "
+                "관련 정보가 없으면 일반적인 지식으로 답변해주세요."
+            )
+
+        messages = []
+        if system_prompt:
+            messages.append(("system", system_prompt))
+        messages.append(("human", prompt_template))
+        prompt = ChatPromptTemplate.from_messages(messages)
+
+        # LLM (재시도 옵션)
+        if use_retry:
+            llm = self.get_llm_with_retry(temperature=temperature, max_tokens=max_tokens)
+        else:
+            llm = self._llm
+            if temperature is not None or max_tokens is not None:
+                bind_kwargs = {}
+                if temperature is not None:
+                    bind_kwargs["temperature"] = temperature
+                if max_tokens is not None:
+                    bind_kwargs["max_output_tokens"] = max_tokens
+                llm = llm.bind(**bind_kwargs)
+
+        # LCEL 파이프라인: 검색 → context 주입 → 프롬프트 → LLM → 파싱
+        chain = (
+            RunnablePassthrough.assign(context=retriever_runnable)
+            | prompt
+            | llm
+            | self._output_parser
+        )
+
+        logger.debug("ADR-106: LCEL RAG chain created (retry=%s)", use_retry)
+        return chain
+
     async def health_check(self) -> bool:
         """Check if the gateway is healthy.
 
