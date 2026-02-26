@@ -189,6 +189,37 @@ def create_generation(
         return None
 
 
+def record_score(
+    trace: "LangfuseTraceContext | None",
+    name: str,
+    value: float,
+    comment: str | None = None,
+) -> None:
+    """ADR-091: Judge LLM이 채점한 점수를 Langfuse trace에 기록.
+
+    Langfuse 대시보드에서 모델/파이프라인 단계별 품질 점수를 확인할 수 있다.
+    Langfuse 미설정 또는 오류 시 no-op으로 동작 (서비스 중단 없음).
+
+    Args:
+        trace: trace_llm_call()로 생성한 컨텍스트
+        name: 채점 기준명 ("relevance", "accuracy", "fluency", "completeness", "overall")
+        value: 점수 (1.0 ~ 5.0)
+        comment: 채점 근거 텍스트 (선택)
+    """
+    if trace is None:
+        return
+    try:
+        client = trace["client"]
+        client.score(
+            trace_id=trace["trace_id"],
+            name=name,
+            value=value,
+            comment=comment,
+        )
+    except Exception as e:
+        logger.error("Langfuse score 기록 실패 (name=%s): %s", name, e)
+
+
 # 데코레이터를 사용한 간편한 추적
 def observe_llm_call(name: str | None = None):
     """
@@ -208,3 +239,51 @@ def observe_llm_call(name: str | None = None):
         return _noop_decorator
 
     return observe(name=name)
+
+
+def get_langfuse_callback_handler(
+    session_id: str | None = None,
+    user_id: str | None = None,
+    trace_name: str | None = None,
+) -> Any | None:
+    """LangChain CallbackHandler 반환 (ADR-068).
+
+    LCEL chain / LangGraph ainvoke의 config={"callbacks": [...]}에 주입한다.
+    Langfuse 미설치·미설정 시 None 반환 → 호출부에서 조건부 처리.
+
+    Args:
+        session_id: 사용자 세션 ID (Langfuse Session으로 기록)
+        user_id: 사용자 ID
+        trace_name: Langfuse trace 이름 (미지정 시 "langchain-trace")
+
+    Returns:
+        LangfuseCallbackHandler 인스턴스 또는 None
+    """
+    if not LANGFUSE_AVAILABLE:
+        return None
+    try:
+        from langfuse.callback import CallbackHandler as LangfuseCallbackHandler  # type: ignore
+    except Exception:
+        return None
+
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+    host = os.getenv("LANGFUSE_HOST") or os.getenv("LANGFUSE_BASE_URL") or "http://localhost:3001"
+    if host:
+        host = host.strip()
+
+    if not public_key or not secret_key:
+        return None
+
+    try:
+        return LangfuseCallbackHandler(
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host,
+            session_id=str(session_id) if session_id else None,
+            user_id=str(user_id) if user_id else None,
+            trace_name=trace_name or "langchain-trace",
+        )
+    except Exception as e:
+        logger.error("Failed to create LangfuseCallbackHandler: %s", e)
+        return None

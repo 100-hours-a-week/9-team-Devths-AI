@@ -107,3 +107,124 @@ def _load_url(url: str):
     """WebBaseLoader를 동기적으로 호출합니다 (run_in_executor용)."""
     loader = WebBaseLoader(url)
     return loader.load()
+
+
+# ADR-094/078: 메타데이터 추출용 프롬프트
+_METADATA_EXTRACTION_TEMPLATE = """다음 채용/면접 관련 문서에서 메타데이터를 추출하세요.
+반드시 아래 JSON 형식으로만 응답하세요. 확인할 수 없는 필드는 null로 적으세요.
+
+{{
+  "year": 연도(정수) 또는 null,
+  "company": "기업명" 또는 null,
+  "position": "직무/포지션" 또는 null,
+  "category": "기술질문|인성질문|채용공고|면접후기|채용트렌드" 중 하나 또는 null,
+  "recruitment_type": "공채|수시|인턴" 중 하나 또는 null
+}}
+
+문서 내용:
+{doc}"""
+
+
+class TrendCrawlService:
+    """ADR-094/078: 채용 트렌드 URL 크롤링 + 메타데이터 자동 태깅 서비스."""
+
+    def __init__(self, vectordb=None, llm=None):
+        self.vectordb = vectordb
+        self.llm = llm
+
+    async def crawl_trend_urls(
+        self,
+        urls: list[str],
+    ) -> list[dict]:
+        """URL 목록을 크롤링하여 메타데이터 태깅 후 trend_data 컬렉션에 적재.
+
+        Args:
+            urls: 크롤링할 URL 목록
+
+        Returns:
+            적재된 문서 정보 리스트
+        """
+        import uuid
+
+        results = []
+
+        for url in urls:
+            try:
+                # SAST: url은 사용자 입력값이므로 로그에 넣지 않음
+                logger.info("[TrendCrawl] URL 크롤링 시작 (%d/%d)", len(results) + 1, len(urls))
+                text = await WebLoaderService.extract_text_from_url(url)
+
+                if not text:
+                    logger.warning("[TrendCrawl] URL에서 텍스트 추출 실패")
+                    continue
+
+                # LLM으로 메타데이터 자동 추출
+                metadata = await self._extract_metadata_with_llm(text)
+                metadata["source"] = "webbaseloader"
+
+                # trend_data 컬렉션에 적재
+                doc_id = str(uuid.uuid4())
+                if self.vectordb:
+                    await self.vectordb.add_document(
+                        document_id=doc_id,
+                        text=text,
+                        collection_type="trend_data",
+                        metadata=metadata,
+                    )
+
+                results.append(
+                    {
+                        "id": doc_id,
+                        "text_length": len(text),
+                        "metadata": metadata,
+                    }
+                )
+                logger.info(
+                    "[TrendCrawl] 문서 적재 완료: %d자, 메타데이터 %d개 필드",
+                    len(text),
+                    len([v for v in metadata.values() if v is not None]),
+                )
+
+            except Exception as e:
+                logger.error("[TrendCrawl] 크롤링 실패: %s", e)
+                continue
+
+        logger.info("[TrendCrawl] 총 %d/%d URL 적재 완료", len(results), len(urls))
+        return results
+
+    async def _extract_metadata_with_llm(self, text: str) -> dict:
+        """LLM으로 문서 내용에서 메타데이터 자동 추출.
+
+        Returns:
+            추출된 메타데이터 dict (null 값은 제거)
+        """
+        import json as _json
+
+        if not self.llm:
+            logger.warning("[TrendCrawl] LLM 미설정, 기본 메타데이터 반환")
+            return {}
+
+        try:
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
+
+            # 문서 앞부분만 사용 (토큰 절약)
+            snippet = text[:3000]
+            prompt = ChatPromptTemplate.from_template(_METADATA_EXTRACTION_TEMPLATE)
+            chain = prompt | self.llm | StrOutputParser()
+
+            result_text = await chain.ainvoke({"doc": snippet})
+
+            # JSON 파싱
+            result_text = result_text.strip()
+            if result_text.startswith("```"):
+                result_text = result_text.split("\n", 1)[-1].rsplit("```", 1)[0]
+
+            metadata = _json.loads(result_text)
+            # None 값 제거 (ChromaDB 호환)
+            metadata = {k: v for k, v in metadata.items() if v is not None}
+            return metadata
+
+        except Exception as e:
+            logger.warning("[TrendCrawl] 메타데이터 추출 실패 (기본값 사용): %s", e)
+            return {}

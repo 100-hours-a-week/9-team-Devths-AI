@@ -115,6 +115,87 @@ class Settings(BaseSettings):
         default=5,
         description="Number of docs to compress when rag_use_compressor=True. Use smaller k to limit LLM calls.",
     )
+    # ADR-077: 다중 쿼리 리트리버 (NORMAL 모드 일반 채팅 시 쿼리 다각화)
+    rag_use_multi_query: bool = Field(
+        default=False,
+        description="Use MultiQueryRetriever for NORMAL chat mode (expands query to multiple perspectives). ADR-077.",
+    )
+    rag_multi_query_count: int = Field(
+        default=3,
+        description="Number of perspective queries to generate for MultiQueryRetriever. ADR-077.",
+    )
+    # ADR-080: 시간 가중 벡터 스토어 리트리버 (interview_feedback 최신성 반영)
+    rag_use_time_weighted: bool = Field(
+        default=False,
+        description="Apply time-decay scoring to interview_feedback retrieval. ADR-080.",
+    )
+    rag_decay_rate_technical: float = Field(
+        default=0.1,
+        description="Decay rate for technical questions (higher = faster decay). ADR-080.",
+    )
+    rag_decay_rate_personality: float = Field(
+        default=0.01,
+        description="Decay rate for personality questions (lower = slower decay). ADR-080.",
+    )
+    rag_decay_rate_general: float = Field(
+        default=0.05,
+        description="Decay rate for general queries. ADR-080.",
+    )
+    # ADR-078: 다중 벡터 스토어 리트리버 (요약 임베딩 / 가설 쿼리)
+    rag_use_multi_vector: bool = Field(
+        default=False,
+        description="Use MultiVectorRetriever for trend_data (summary or hypothetical). ADR-078.",
+    )
+    rag_multi_vector_strategy: str = Field(
+        default="summary",
+        description="MultiVector strategy: 'summary' (요약 임베딩) or 'hypothetical' (가설 쿼리). ADR-078.",
+    )
+    rag_hypothetical_query_count: int = Field(
+        default=3,
+        description="Number of hypothetical queries per document for MultiVectorRetriever. ADR-078.",
+    )
+    # ADR-079: 셀프 쿼리 리트리버 (메타데이터 기반 구조화 검색)
+    rag_use_self_query: bool = Field(
+        default=False,
+        description="Use SelfQueryRetriever for trend_data metadata filtering. ADR-079.",
+    )
+    # ADR-076: 부모 문서 리트리버 (자식 청크 정밀 검색 → 부모 청크 반환)
+    rag_use_parent_retriever: bool = Field(
+        default=False,
+        description="resumes/portfolios에서 자식 청크(400자)로 정밀 검색 후 부모 청크(2000자) 반환. ADR-076.",
+    )
+    rag_child_chunk_size: int = Field(
+        default=400,
+        description="ParentDocumentRetriever 자식 청크 크기(문자 기준). ADR-076.",
+    )
+    rag_child_chunk_overlap: int = Field(
+        default=50,
+        description="ParentDocumentRetriever 자식 청크 오버랩(문자 기준). ADR-076.",
+    )
+
+    # ============================================
+    # ADR-094: Trend Crawling Configuration
+    # ============================================
+    trend_crawl_urls: str = Field(
+        default="",
+        description="Comma-separated list of URLs to crawl for trend data. ADR-094.",
+    )
+    trend_crawl_collection: str = Field(
+        default="trend_data",
+        description="ChromaDB collection name for trend data. ADR-094.",
+    )
+    trend_crawl_cron_minute: str = Field(
+        default="0",
+        description="Celery Beat cron minute for trend crawling. ADR-094.",
+    )
+    trend_crawl_cron_hour: str = Field(
+        default="9",
+        description="Celery Beat cron hour for trend crawling. ADR-094.",
+    )
+    trend_crawl_cron_day_of_week: str = Field(
+        default="1",
+        description="Celery Beat cron day of week (0=Sun, 1=Mon, ...). ADR-094.",
+    )
 
     @property
     def all_google_api_keys(self) -> list[str]:

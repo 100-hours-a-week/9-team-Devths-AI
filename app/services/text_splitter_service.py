@@ -118,6 +118,46 @@ class TextSplitterService:
         )
         return result
 
+    def split_parent_chunk_to_children(self, parent_chunk: TextChunk) -> list[TextChunk]:
+        """ADR-076: 부모 청크 → 자식 청크들 (정밀 검색용).
+
+        부모 청크를 self._chunk_size(기본 400자) 단위로 재분할한다.
+        자식 청크 메타데이터에 parent_chunk_id를 포함하여 역방향 조회 가능.
+
+        Args:
+            parent_chunk: 원본 2000자 부모 청크
+
+        Returns:
+            400자 자식 TextChunk 리스트
+        """
+        if not parent_chunk.text or not parent_chunk.text.strip():
+            return []
+
+        raw_splits = self._splitter.split_text(parent_chunk.text)
+        children: list[TextChunk] = []
+        for i, child_text in enumerate(raw_splits):
+            child_id = f"{parent_chunk.id}_child_{i:03d}"
+            children.append(
+                TextChunk(
+                    id=child_id,
+                    text=child_text,
+                    metadata={
+                        **parent_chunk.metadata,
+                        "parent_chunk_id": parent_chunk.id,
+                        "child_index": i,
+                        "is_child": True,
+                    },
+                )
+            )
+
+        logger.debug(
+            "ADR-076: 부모 청크 '%s' → %d개 자식 청크 (chunk_size=%d)",
+            parent_chunk.id,
+            len(children),
+            self._chunk_size,
+        )
+        return children
+
     def split_to_batch_docs(
         self,
         text: str,

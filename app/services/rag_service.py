@@ -34,6 +34,7 @@ from app.prompts import (
     create_followup_prompt,
 )
 from app.prompts.interview import create_feedback_prompt
+from app.utils.log_sanitizer import sanitize_log_input
 
 from .example_selector import get_few_shot_for_general
 from .interview_templates import InterviewTemplateService
@@ -85,6 +86,64 @@ RAG_QNA_PROMPT = """관련 정보:
 
 # RRF constant for ensemble retriever (ADR-069)
 _RRF_K = 60
+
+# ADR-077: 다중 쿼리 생성 프롬프트 (NORMAL 모드 일반 채팅용)
+_MULTI_QUERY_SYSTEM = """당신은 면접 준비 도우미입니다.
+사용자의 질문을 다양한 관점에서 검색 쿼리로 재작성하세요.
+각 쿼리는 한 줄로 작성하고, 번호를 붙이지 마세요.
+
+관점:
+1. 기술 역량 중심: 사용 기술, 프레임워크, 라이브러리 관점
+2. 경험/프로젝트 중심: 프로젝트명, 성과, 역할 관점
+3. 직무 적합성 중심: 채용공고 요구사항, 자격 요건 관점"""
+
+_MULTI_QUERY_HUMAN = "원래 질문: {question}"
+
+# ADR-080: 질문 유형별 시간 감쇠율 (interview_feedback 최신성 반영)
+_DECAY_RATES = {
+    "technical": 0.1,  # 기술 질문: 최신 정보 우선 (반감기 ~6.6시간)
+    "personality": 0.01,  # 인성 질문: 시간 거의 무관 (반감기 ~69시간)
+    "general": 0.05,  # 일반: 중간 (반감기 ~13.5시간)
+}
+
+# ADR-078: 요약 임베딩 생성 프롬프트
+_SUMMARY_FOR_EMBEDDING_TEMPLATE = "다음 문서의 핵심 내용을 2-3문장으로 요약하세요:\n\n{doc}"
+
+# ADR-078: 가설 쿼리 생성 프롬프트
+_HYPOTHETICAL_QUERIES_TEMPLATE = (
+    "다음 문서를 읽고, 이 문서로 답변할 수 있는 질문 {count}개를 생성하세요.\n"
+    "각 질문은 한 줄로 작성하고, 번호를 붙이지 마세요.\n\n문서: {doc}"
+)
+
+# ADR-079: 채용 트렌드 메타데이터 스키마 (SelfQueryRetriever용)
+TREND_METADATA_FIELDS: list[dict] = [
+    {
+        "name": "year",
+        "description": "채용 트렌드 데이터의 연도 (예: 2024, 2025, 2026)",
+        "type": "integer",
+    },
+    {
+        "name": "company",
+        "description": "채용 기업명 (예: 카카오, 네이버, 삼성, 라인)",
+        "type": "string",
+    },
+    {
+        "name": "position",
+        "description": "직무/포지션 (예: 백엔드, 프론트엔드, AI/ML)",
+        "type": "string",
+    },
+    {
+        "name": "category",
+        "description": "데이터 카테고리 (예: 기술질문, 인성질문, 채용공고, 면접후기)",
+        "type": "string",
+    },
+    {
+        "name": "recruitment_type",
+        "description": "채용 유형 (예: 공채, 수시, 인턴)",
+        "type": "string",
+    },
+    {"name": "source", "description": "데이터 출처 (예: webbaseloader)", "type": "string"},
+]
 
 
 def _rrf_merge(
@@ -192,6 +251,12 @@ def _parse_interview_json_list(text: str) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
     return []
+
+
+# ADR-076: ParentDocumentRetriever 대상 컬렉션 타입 (모듈 레벨 상수 — 매 호출마다 재생성 방지)
+_PARENT_RETRIEVER_TYPES: frozenset[str] = frozenset(
+    {"resumes", "resume", "portfolios", "portfolio"}
+)
 
 
 class RAGService:
@@ -305,6 +370,361 @@ class RAGService:
             logger.error(f"Error retrieving all documents: {e}")
             return ""
 
+    async def _generate_multi_queries(self, query: str) -> list[str]:
+        """ADR-077: LCEL 체인으로 다중 검색 쿼리 생성.
+
+        사용자 질문을 기술역량/경험·프로젝트/직무적합성 3가지 관점으로 재작성.
+        실패 시 원래 쿼리만 반환.
+        """
+        if not self._langchain_gateway:
+            return [query]
+
+        settings = get_settings()
+        try:
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.prompts import ChatPromptTemplate
+
+            prompt = ChatPromptTemplate.from_messages(
+                [
+                    ("system", _MULTI_QUERY_SYSTEM),
+                    ("human", _MULTI_QUERY_HUMAN),
+                ]
+            )
+            chain = prompt | self._langchain_gateway.llm | StrOutputParser()
+            result = await chain.ainvoke({"question": query})
+
+            lines = [line.strip() for line in result.strip().split("\n") if line.strip()]
+            # 설정된 개수만큼만 사용
+            queries = lines[: settings.rag_multi_query_count]
+            if not queries:
+                return [query]
+
+            # 원래 쿼리도 포함하여 누락 방지
+            if query not in queries:
+                queries.insert(0, query)
+
+            # SAST: 사용자 입력(query)은 로그에 넣지 않음 — 개수만 기록
+            logger.info("ADR-077: MultiQuery generated %d queries", len(queries))
+            for i, q in enumerate(queries):
+                logger.debug("  MQ[%d]: %s", i, q[:80])
+            return queries
+        except Exception as e:
+            logger.warning("ADR-077: MultiQuery generation failed, using original query: %s", e)
+            return [query]
+
+    @staticmethod
+    def _apply_time_weighting(
+        results: list[dict],
+        interview_type: str = "general",
+    ) -> list[dict]:
+        """ADR-080: 시간 감쇠 점수 적용 후 재정렬.
+
+        공식: score = semantic_similarity + (1.0 - decay_rate) ^ hours_passed
+        created_at 메타데이터가 없는 기존 문서는 시간 점수 0으로 처리 (의미 유사도만 사용).
+        """
+        from datetime import datetime, timezone
+
+        settings = get_settings()
+        decay_rate = getattr(
+            settings, f"rag_decay_rate_{interview_type}", settings.rag_decay_rate_general
+        )
+
+        now = datetime.now(timezone.utc)
+        scored: list[tuple[float, dict]] = []
+
+        for r in results:
+            # ChromaDB distance는 L2 거리 (lower = more similar)
+            # similarity = 1 / (1 + distance) 으로 변환
+            distance = r.get("distance", 0.0)
+            similarity = 1.0 / (1.0 + distance)
+
+            # 시간 점수 계산
+            created_at_str = (r.get("metadata") or {}).get("created_at")
+            if created_at_str:
+                try:
+                    created_at = datetime.fromisoformat(created_at_str)
+                    if created_at.tzinfo is None:
+                        created_at = created_at.replace(tzinfo=timezone.utc)
+                    hours_passed = (now - created_at).total_seconds() / 3600.0
+                    time_score = (1.0 - decay_rate) ** max(hours_passed, 0)
+                except (ValueError, TypeError):
+                    time_score = 0.0
+            else:
+                time_score = 0.0  # created_at 없는 기존 문서
+
+            total_score = similarity + time_score
+            scored.append((total_score, r))
+
+        # 점수 내림차순 정렬
+        scored.sort(key=lambda x: x[0], reverse=True)
+        logger.info(
+            "ADR-080: TimeWeighted re-scored %d results (type=%s, decay=%.3f)",
+            len(scored),
+            interview_type,
+            decay_rate,
+        )
+        return [r for _, r in scored]
+
+    async def _retrieve_trend_data(self, query: str, n_results: int = 5) -> str:
+        """ADR-078/079: trend_data 컬렉션 전용 검색.
+
+        SelfQueryRetriever (ADR-079) 우선, 실패 시 MultiVectorRetriever (ADR-078),
+        둘 다 비활성화면 기본 의미 검색.
+        """
+        settings = get_settings()
+
+        # ADR-079: SelfQueryRetriever — 메타데이터 필터 자동 추출
+        if settings.rag_use_self_query and self.vectordb:
+            try:
+                results = await self._search_with_self_query(query, n_results)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("ADR-079: SelfQuery failed, falling back: %s", e)
+
+        # ADR-078: MultiVectorRetriever — 요약/가설 쿼리 기반 검색
+        if settings.rag_use_multi_vector and self.vectordb:
+            try:
+                results = await self._search_with_multi_vector(query, n_results)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning("ADR-078: MultiVector failed, falling back: %s", e)
+
+        # Fallback: 기본 의미 검색
+        try:
+            trend_results = await self.vectordb.query(
+                query_text=query,
+                collection_type="trend_data",
+                n_results=n_results,
+            )
+            if trend_results:
+                return "\n\n".join(r["text"] for r in trend_results)
+        except Exception as e:
+            logger.warning("trend_data fallback query failed: %s", e)
+
+        return ""
+
+    async def _search_with_self_query(self, query: str, n_results: int = 5) -> str:
+        """ADR-079: SelfQueryRetriever로 메타데이터 필터 자동 추출 검색."""
+        from langchain.chains.query_constructor.schema import AttributeInfo
+        from langchain.retrievers.self_query.base import SelfQueryRetriever
+
+        lc_chroma = self.vectordb.get_langchain_chroma("trend_data")
+        metadata_field_info = [
+            AttributeInfo(name=f["name"], description=f["description"], type=f["type"])
+            for f in TREND_METADATA_FIELDS
+        ]
+
+        retriever = SelfQueryRetriever.from_llm(
+            llm=self._langchain_gateway.llm if self._langchain_gateway else None,
+            vectorstore=lc_chroma,
+            document_contents="채용 트렌드, 면접 질문, 기술 동향 관련 데이터",
+            metadata_field_info=metadata_field_info,
+            enable_limit=True,
+        )
+
+        docs = await asyncio.to_thread(retriever.invoke, query)
+        docs = docs[:n_results]
+        if docs:
+            logger.info("ADR-079: SelfQuery returned %d docs", len(docs))
+            return "\n\n".join(doc.page_content for doc in docs)
+        return ""
+
+    async def _search_with_multi_vector(self, query: str, n_results: int = 5) -> str:
+        """ADR-078: MultiVectorRetriever로 요약/가설 쿼리 기반 검색.
+
+        주의: MultiVectorRetriever는 문서 적재 시 요약/가설 쿼리를 사전 생성해야 함.
+        이 메서드는 이미 적재된 데이터를 검색하는 용도.
+        """
+        from langchain.retrievers.multi_vector import MultiVectorRetriever
+        from langchain.storage import InMemoryStore
+
+        lc_chroma = self.vectordb.get_langchain_chroma("trend_data")
+        docstore = InMemoryStore()
+
+        retriever = MultiVectorRetriever(
+            vectorstore=lc_chroma,
+            docstore=docstore,
+            id_key="doc_id",
+        )
+
+        docs = await asyncio.to_thread(retriever.invoke, query)
+        docs = docs[:n_results]
+        if docs:
+            logger.info("ADR-078: MultiVector returned %d docs", len(docs))
+            return "\n\n".join(doc.page_content for doc in docs)
+        return ""
+
+    async def _search_with_parent_retriever(
+        self,
+        query: str,
+        user_id: str,
+        collection_type: str,
+        n_results: int | None = None,
+    ) -> list[tuple[str, Document]]:
+        """ADR-076: 자식 컬렉션(400자)으로 정밀 검색 → 부모 컬렉션(2000자) 반환.
+
+        1. resumes_child / portfolios_child 에서 400자 단위 정밀 검색
+        2. 결과 metadata 의 parent_chunk_id 추출
+        3. 부모 컬렉션에서 2000자 원본 청크를 ID 로 직접 fetch
+        4. (collection_type, Document) 쌍으로 반환
+
+        Args:
+            n_results: 자식 컬렉션 검색 수. None이면 settings.rag_retrieval_k * 4 사용. ADR-076.
+        """
+        _settings = get_settings()
+        effective_n = n_results if n_results is not None else _settings.rag_retrieval_k * 4
+
+        child_collection = (
+            self.vectordb.RESUME_CHILD_COLLECTION
+            if collection_type in ("resumes", "resume")
+            else self.vectordb.PORTFOLIO_CHILD_COLLECTION
+        )
+        try:
+            where = {"user_id": user_id} if user_id else None
+            child_results = await self.vectordb.query(
+                query_text=query,
+                collection_type=child_collection,
+                n_results=effective_n,
+                where=where,
+            )
+            if not child_results:
+                logger.info(
+                    "ADR-076: No child results for %s — skip parent retrieval", collection_type
+                )
+                return []
+
+            # 중복 제거하여 고유 parent_chunk_id 추출
+            parent_ids = list(
+                {
+                    r["metadata"].get("parent_chunk_id")
+                    for r in child_results
+                    if r["metadata"].get("parent_chunk_id")
+                }
+            )
+            if not parent_ids:
+                logger.warning(
+                    "ADR-076: child results found but no parent_chunk_id in metadata (%s)",
+                    collection_type,
+                )
+                return []
+
+            parent_docs = await self.vectordb.get_documents_by_ids(
+                ids=parent_ids,
+                collection_type=collection_type,
+            )
+            results = [
+                (collection_type, Document(page_content=d["text"], metadata=d["metadata"]))
+                for d in parent_docs
+            ]
+            logger.info(
+                "ADR-076: ParentRetriever — %d child hits → %d parent docs (%s)",
+                len(child_results),
+                len(results),
+                collection_type,
+            )
+            return results
+        except Exception as e:
+            logger.warning(
+                "ADR-076: _search_with_parent_retriever failed (%s): %s", collection_type, e
+            )
+            return []
+
+    async def ingest_trend_documents(
+        self,
+        documents: list[dict],
+    ) -> int:
+        """ADR-078: 트렌드 문서를 요약/가설 쿼리로 변환하여 MultiVector 구조로 적재.
+
+        Args:
+            documents: [{"id": str, "text": str, "metadata": dict}, ...]
+
+        Returns:
+            성공적으로 적재된 문서 수
+        """
+        import uuid
+
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.prompts import ChatPromptTemplate
+
+        settings = get_settings()
+        if not settings.rag_use_multi_vector or not self.vectordb:
+            logger.warning("ADR-078: MultiVector 미활성화 또는 vectordb 미설정")
+            return 0
+
+        llm = self._langchain_gateway.llm if self._langchain_gateway else None
+        if not llm:
+            logger.warning("ADR-078: LLM 미설정, 적재 불가")
+            return 0
+
+        strategy = settings.rag_multi_vector_strategy
+        count = 0
+
+        for doc in documents:
+            try:
+                doc_id = doc.get("id") or str(uuid.uuid4())
+                text = doc["text"]
+                metadata = doc.get("metadata", {})
+
+                if strategy == "summary":
+                    # 요약 임베딩 생성
+                    prompt = ChatPromptTemplate.from_template(_SUMMARY_FOR_EMBEDDING_TEMPLATE)
+                    chain = prompt | llm | StrOutputParser()
+                    summary = await chain.ainvoke({"doc": text[:5000]})
+
+                    # 요약을 trend_data 컬렉션에 저장 (doc_id 매핑)
+                    summary_meta = {**metadata, "doc_id": doc_id, "representation": "summary"}
+                    await self.vectordb.add_document(
+                        document_id=f"summary_{doc_id}",
+                        text=summary,
+                        collection_type="trend_data",
+                        metadata=summary_meta,
+                    )
+
+                elif strategy == "hypothetical":
+                    # 가설 쿼리 생성
+                    query_count = settings.rag_hypothetical_query_count
+                    prompt = ChatPromptTemplate.from_template(_HYPOTHETICAL_QUERIES_TEMPLATE)
+                    chain = prompt | llm | StrOutputParser()
+                    queries_text = await chain.ainvoke(
+                        {
+                            "doc": text[:5000],
+                            "count": query_count,
+                        }
+                    )
+
+                    # 각 가설 쿼리를 개별 문서로 저장
+                    queries = [q.strip() for q in queries_text.strip().split("\n") if q.strip()]
+                    for idx, q in enumerate(queries[:query_count]):
+                        q_meta = {**metadata, "doc_id": doc_id, "representation": "hypothetical"}
+                        await self.vectordb.add_document(
+                            document_id=f"hyp_{doc_id}_{idx}",
+                            text=q,
+                            collection_type="trend_data",
+                            metadata=q_meta,
+                        )
+
+                # 원본 문서도 저장 (검색 결과 반환용)
+                orig_meta = {**metadata, "representation": "original"}
+                await self.vectordb.add_document(
+                    document_id=doc_id,
+                    text=text,
+                    collection_type="trend_data",
+                    metadata=orig_meta,
+                )
+                count += 1
+                logger.info("ADR-078: 문서 적재 완료 (strategy=%s, doc_id=%s)", strategy, doc_id)
+
+            except Exception as e:
+                logger.error("ADR-078: 문서 적재 실패: %s", e)
+                continue
+
+        logger.info(
+            "ADR-078: 총 %d/%d 문서 적재 완료 (strategy=%s)", count, len(documents), strategy
+        )
+        return count
+
     async def retrieve_context(
         self,
         query: str,
@@ -314,11 +734,15 @@ class RAGService:
         *,
         dense_weight: float | None = None,
         sparse_weight: float | None = None,
+        chat_mode: str | None = None,
     ) -> str:
         """
         Retrieve relevant context: question → retriever (dense+sparse) → RRF merge → rerank → [compressor] → context.
         When rag_use_bm25 is True, uses dense (MMR) + sparse (BM25) ensemble with RRF (ADR-069).
         dense_weight/sparse_weight override settings at invoke time (ConfigurableField-style A/B test).
+
+        ADR-077: When rag_use_multi_query is True and chat_mode is NORMAL, expands query to
+        multiple perspective queries and merges results with deduplication.
         """
         if context_types is None:
             context_types = ["resume", "job_posting"]
@@ -328,6 +752,34 @@ class RAGService:
             self._rag_chain and (self._rag_chain._vectorstores or self._rag_chain._vectorstore)
         )
 
+        # ADR-077: 다중 쿼리 확장 (NORMAL 모드에서만 활성화)
+        use_multi_query = (
+            settings.rag_use_multi_query and chat_mode and chat_mode.lower() == "normal"
+        )
+        if use_multi_query:
+            queries = await self._generate_multi_queries(query)
+        else:
+            queries = [query]
+
+        # ADR-078/079: trend_data 컬렉션 검색 경로 분기
+        if "trend_data" in context_types and self.vectordb:
+            trend_context = await self._retrieve_trend_data(query, n_results)
+            if trend_context:
+                # trend_data 외 다른 context_types도 있으면 함께 검색
+                remaining_types = [t for t in context_types if t != "trend_data"]
+                if not remaining_types:
+                    return trend_context
+                # 나머지 컨텍스트도 검색해서 병합
+                context_types = remaining_types
+                # trend_context는 나중에 병합
+            else:
+                trend_context = ""
+                context_types = [t for t in context_types if t != "trend_data"]
+                if not context_types:
+                    return ""
+        else:
+            trend_context = ""
+
         # ADR-069: Dense (MMR) + Sparse (BM25) ensemble with RRF → rerank → optional compressor
         if settings.rag_use_bm25 and has_vectorstore and self.vectordb:
             try:
@@ -335,9 +787,55 @@ class RAGService:
                 if not types_to_fetch:
                     return ""
 
-                dense_pairs = await self._rag_chain.retrieve_context_documents(
-                    query, user_id, types_to_fetch
-                )
+                # ADR-077: 각 쿼리별 dense 검색 후 병합
+                # ADR-076: resumes/portfolios는 ParentDocumentRetriever 경로로 분기
+                all_dense_pairs: list[tuple[str, Document]] = []
+                if settings.rag_use_parent_retriever and self.vectordb:
+                    _parent_cts = [ct for ct in types_to_fetch if ct in _PARENT_RETRIEVER_TYPES]
+                    _other_cts = [ct for ct in types_to_fetch if ct not in _PARENT_RETRIEVER_TYPES]
+                    for mq in queries:
+                        for ct in _parent_cts:
+                            pairs = await self._search_with_parent_retriever(mq, user_id, ct)
+                            if not pairs:
+                                # 자식 컬렉션 미적재 또는 검색 실패 시 기존 MMR으로 fallback
+                                logger.info(
+                                    "ADR-076: parent retriever 결과 없음 (%s) — MMR fallback ('%s'...)",
+                                    ct,
+                                    sanitize_log_input(mq[:40]),
+                                )
+                                pairs = await self._rag_chain.retrieve_context_documents(
+                                    mq, user_id, [ct]
+                                )
+                            all_dense_pairs.extend(pairs)
+                        if _other_cts:
+                            pairs = await self._rag_chain.retrieve_context_documents(
+                                mq, user_id, _other_cts
+                            )
+                            all_dense_pairs.extend(pairs)
+                else:
+                    for mq in queries:
+                        pairs = await self._rag_chain.retrieve_context_documents(
+                            mq, user_id, types_to_fetch
+                        )
+                        all_dense_pairs.extend(pairs)
+
+                # 다중 쿼리 결과 중복 제거 (page_content 해시 기준)
+                if len(queries) > 1:
+                    seen_keys: set[str] = set()
+                    deduped: list[tuple[str, Document]] = []
+                    for ct, doc in all_dense_pairs:
+                        key = (doc.page_content or "")[:500]
+                        if key not in seen_keys:
+                            seen_keys.add(key)
+                            deduped.append((ct, doc))
+                    dense_pairs = deduped
+                    logger.info(
+                        "ADR-077: MultiQuery dense results: %d total → %d after dedup",
+                        len(all_dense_pairs),
+                        len(dense_pairs),
+                    )
+                else:
+                    dense_pairs = all_dense_pairs
 
                 results_per_type = await asyncio.gather(
                     *[
@@ -450,6 +948,7 @@ class RAGService:
         context_types: list[str] = None,
         model: str = "gemini",
         n_results: int = 1,  # 기본값을 1로 설정하여 속도 개선
+        chat_mode: str | None = None,  # ADR-077: 채팅 모드 전달 (NORMAL이면 MultiQuery 활성화)
     ) -> AsyncIterator[str]:
         """
         Chat with RAG context retrieval
@@ -461,6 +960,7 @@ class RAGService:
             use_rag: Whether to use RAG (retrieve context)
             context_types: Collection types to search
             model: Model to use ("gemini" or "vllm")
+            chat_mode: Chat mode ("normal", "interview", etc.) for ADR-077 multi-query
 
         Yields:
             Response chunks
@@ -479,6 +979,7 @@ class RAGService:
                     user_id=user_id,
                     context_types=context_types,
                     n_results=n_results,
+                    chat_mode=chat_mode,
                 )
 
                 if context:
@@ -643,9 +1144,16 @@ class RAGService:
                     feedback_results = await self.vectordb.query(
                         query_text=f"{interview_type} 면접 약점 피드백",
                         collection_type="interview_feedback",
-                        n_results=2,
+                        n_results=5
+                        if settings.rag_use_time_weighted
+                        else 2,  # ADR-080: 시간 가중 시 더 많이 가져와서 re-score
                         where={"user_id": user_id, "interview_type": interview_type},
                     )
+                    # ADR-080: 시간 가중 적용 후 상위 2건만 사용
+                    if settings.rag_use_time_weighted and feedback_results:
+                        feedback_results = self._apply_time_weighting(
+                            feedback_results, interview_type
+                        )
                     if feedback_results:
                         return "\n".join(r["text"] for r in feedback_results[:2])
                 except Exception:
@@ -748,9 +1256,14 @@ class RAGService:
                     feedback_results = await self.vectordb.query(
                         query_text=f"{interview_type} 면접 약점 피드백",
                         collection_type="interview_feedback",
-                        n_results=2,
+                        n_results=5 if settings.rag_use_time_weighted else 2,  # ADR-080
                         where={"user_id": user_id, "interview_type": interview_type},
                     )
+                    # ADR-080: 시간 가중 적용 후 상위 2건만 사용
+                    if settings.rag_use_time_weighted and feedback_results:
+                        feedback_results = self._apply_time_weighting(
+                            feedback_results, interview_type
+                        )
                     if feedback_results:
                         return "\n".join(r["text"] for r in feedback_results[:2])
                 except Exception:

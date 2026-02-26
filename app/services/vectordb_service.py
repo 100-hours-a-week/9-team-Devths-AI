@@ -18,6 +18,9 @@ from langchain.embeddings import CacheBackedEmbeddings
 from langchain.storage import LocalFileStore
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+from app.config.settings import get_settings
+from app.services.text_splitter_service import TextChunk, TextSplitterService
+
 logger = logging.getLogger(__name__)
 
 # 임베딩 캐시 디렉터리 (ADR-065)
@@ -26,6 +29,10 @@ EMBEDDING_CACHE_DIR = os.getenv("EMBEDDING_CACHE_DIR", "./embedding_cache")
 
 class VectorDBService:
     """VectorDB Service for storing and retrieving embeddings"""
+
+    # ADR-076: 자식 컬렉션 이름 상수 — rag_service 등 외부에서도 참조 가능 (문자열 중복 제거)
+    RESUME_CHILD_COLLECTION: str = "resumes_child"
+    PORTFOLIO_CHILD_COLLECTION: str = "portfolios_child"
 
     def __init__(
         self,
@@ -88,13 +95,14 @@ class VectorDBService:
             )
             logger.info(f"VectorDB Service initialized with ChromaDB at {persist_directory}")
 
-        # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션)
+        # Collection names (문서 [AI] 09_VectorDB_설계.md 6개 컬렉션 + ADR-078/094 trend_data)
         self.RESUME_COLLECTION = "resumes"
         self.POSTING_COLLECTION = "job_postings"
         self.PORTFOLIO_COLLECTION = "portfolios"
         self.INTERVIEW_COLLECTION = "interview_feedback"
         self.ANALYSIS_RESULTS_COLLECTION = "analysis_results"
         self.CHAT_CONTEXT_COLLECTION = "chat_context"
+        self.TREND_DATA_COLLECTION = "trend_data"  # ADR-078/094
 
         # Create or get collections
         self.resume_collection = self.chroma_client.get_or_create_collection(
@@ -118,6 +126,33 @@ class VectorDBService:
             name=self.CHAT_CONTEXT_COLLECTION,
             metadata={"description": "Important chat context"},
         )
+        # ADR-078/094: 채용 트렌드 데이터 (WebBaseLoader 크롤링)
+        self.trend_data_collection = self.chroma_client.get_or_create_collection(
+            name=self.TREND_DATA_COLLECTION,
+            metadata={"description": "Employment trend data (ADR-078/094)"},
+        )
+        # ADR-076: 자식 컬렉션 및 분할기 — rag_use_parent_retriever 활성화 시에만 생성
+        _init_settings = get_settings()
+        if _init_settings.rag_use_parent_retriever:
+            self.resume_child_collection = self.chroma_client.get_or_create_collection(
+                name=self.RESUME_CHILD_COLLECTION,
+                metadata={
+                    "description": "Resume child chunks for ParentDocumentRetriever (ADR-076)"
+                },
+            )
+            self.portfolio_child_collection = self.chroma_client.get_or_create_collection(
+                name=self.PORTFOLIO_CHILD_COLLECTION,
+                metadata={
+                    "description": "Portfolio child chunks for ParentDocumentRetriever (ADR-076)"
+                },
+            )
+            self._child_splitter = TextSplitterService(
+                chunk_size=_init_settings.rag_child_chunk_size,
+                chunk_overlap=_init_settings.rag_child_chunk_overlap,
+            )
+            logger.info(
+                "ADR-076: ParentDocumentRetriever 활성화 — 자식 컬렉션 및 분할기 초기화 완료"
+            )
 
     def _get_collection(self, collection_type: str):
         """Get collection by type (문서 6개 컬렉션 + 별칭)"""
@@ -133,8 +168,33 @@ class VectorDBService:
             return self.analysis_results_collection
         elif collection_type == "chat_context":
             return self.chat_context_collection
+        elif collection_type in ("trend_data", "trend"):  # ADR-078/094
+            return self.trend_data_collection
+        elif collection_type in ("resumes_child", "resume_child"):  # ADR-076
+            if not hasattr(self, "resume_child_collection"):
+                raise ValueError(
+                    "resume_child_collection 미초기화 — rag_use_parent_retriever=True 설정 필요 (ADR-076)"
+                )
+            return self.resume_child_collection
+        elif collection_type in ("portfolios_child", "portfolio_child"):  # ADR-076
+            if not hasattr(self, "portfolio_child_collection"):
+                raise ValueError(
+                    "portfolio_child_collection 미초기화 — rag_use_parent_retriever=True 설정 필요 (ADR-076)"
+                )
+            return self.portfolio_child_collection
         else:
             raise ValueError(f"Invalid collection type: {collection_type}")
+
+    def get_langchain_chroma(self, collection_type: str):
+        """ADR-078/079: LangChain Chroma 래퍼 생성 (MultiVector/SelfQuery 리트리버용)."""
+        from langchain_chroma import Chroma
+
+        collection = self._get_collection(collection_type)
+        return Chroma(
+            client=self.chroma_client,
+            collection_name=collection.name,
+            embedding_function=self.cached_embedder,
+        )
 
     async def create_embedding(self, text: str) -> list[float]:
         """
@@ -235,10 +295,17 @@ class VectorDBService:
             doc_metadata["document_id"] = document_id
             doc_metadata["collection_type"] = collection_type
 
+            # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+            if "created_at" not in doc_metadata:
+                from datetime import datetime, timezone
+
+                doc_metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
             # ChromaDB는 None 값을 허용하지 않음 - 필터링
             doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
 
             import time
+
             start_time = time.perf_counter()
             # Add to collection
             collection.upsert(
@@ -250,7 +317,10 @@ class VectorDBService:
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 
@@ -291,6 +361,13 @@ class VectorDBService:
                 metadata = doc.get("metadata", {}).copy()
                 metadata["document_id"] = doc_id
                 metadata["collection_type"] = collection_type
+
+                # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+                if "created_at" not in metadata:
+                    from datetime import datetime, timezone
+
+                    metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
                 metadata = {k: v for k, v in metadata.items() if v is not None}
                 ids.append(doc_id)
                 texts.append(text)
@@ -300,22 +377,78 @@ class VectorDBService:
             embeddings = await self.create_embeddings(texts)
 
             import time
+
             start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(ids=ids, embeddings=embeddings, documents=texts, metadatas=metadatas)
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_type).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 
             logger.info(f"Added {len(ids)} documents to {collection_type} collection")
+
+            # ADR-076: resumes/portfolios 적재 시 자식 청크도 함께 생성 (설정 활성화 시)
+            _settings = get_settings()
+            if _settings.rag_use_parent_retriever and collection_type in (
+                "resume",
+                "resumes",
+                "portfolio",
+                "portfolios",
+            ):
+                try:
+                    await self._add_child_chunks(documents, collection_type)
+                except Exception as child_err:
+                    # 자식 청크 생성 실패는 비치명적 — 부모 저장은 이미 완료됨
+                    logger.warning(
+                        "ADR-076: 자식 청크 생성 실패 (비치명적, 부모 저장 성공): %s", child_err
+                    )
+
             return ids
 
         except Exception as e:
             logger.error(f"Error adding documents batch to VectorDB: {e}")
             raise
+
+    async def _add_child_chunks(
+        self, parent_documents: list[dict[str, Any]], parent_collection_type: str
+    ) -> None:
+        """ADR-076: 부모 청크들을 400자 자식으로 분할 → 자식 컬렉션에 저장.
+
+        Args:
+            parent_documents: add_documents_batch()에 전달된 부모 청크 dict 목록
+            parent_collection_type: "resumes" 또는 "portfolios"
+        """
+        child_collection_type = (
+            self.RESUME_CHILD_COLLECTION
+            if parent_collection_type in ("resume", "resumes")
+            else self.PORTFOLIO_CHILD_COLLECTION
+        )
+
+        child_docs: list[dict[str, Any]] = []
+        for parent_doc in parent_documents:
+            parent_chunk = TextChunk(
+                id=parent_doc["id"],
+                text=parent_doc["text"],
+                metadata=parent_doc.get("metadata", {}),
+            )
+            for child in self._child_splitter.split_parent_chunk_to_children(parent_chunk):
+                child_docs.append({"id": child.id, "text": child.text, "metadata": child.metadata})
+
+        if child_docs:
+            # add_documents_batch 재귀 방지: child_collection_type은 조건에 걸리지 않음
+            await self.add_documents_batch(child_docs, child_collection_type)
+            logger.info(
+                "ADR-076: Added %d child chunks to %s (from %d parent chunks)",
+                len(child_docs),
+                child_collection_type,
+                len(parent_documents),
+            )
 
     async def query(
         self,
@@ -431,6 +564,44 @@ class VectorDBService:
             logger.error(f"Error retrieving documents for user: {e}")
             return []
 
+    async def get_documents_by_ids(
+        self, ids: list[str], collection_type: str
+    ) -> list[dict[str, Any]]:
+        """ADR-076: 부모 청크 ID 목록으로 직접 fetch.
+
+        ParentDocumentRetriever 검색 2단계 — 자식 청크에서 추출한 parent_chunk_id로
+        부모 컬렉션에서 2000자 원본 청크를 반환한다.
+
+        Args:
+            ids: 조회할 문서 ID 목록
+            collection_type: "resumes", "portfolios" 등 부모 컬렉션
+
+        Returns:
+            [{"id": str, "text": str, "metadata": dict}, ...]
+        """
+        if not ids:
+            return []
+        try:
+            collection = self._get_collection(collection_type)
+            result = collection.get(ids=ids, include=["documents", "metadatas"])
+            formatted: list[dict[str, Any]] = []
+            if result and result["ids"]:
+                for i in range(len(result["ids"])):
+                    formatted.append(
+                        {
+                            "id": result["ids"][i],
+                            "text": result["documents"][i],
+                            "metadata": result["metadatas"][i],
+                        }
+                    )
+            logger.info(
+                "ADR-076: Fetched %d parent docs by ID from %s", len(formatted), collection_type
+            )
+            return formatted
+        except Exception as e:
+            logger.error("ADR-076: get_documents_by_ids failed: %s", e)
+            return []
+
     async def get_document(self, document_id: str, collection_type: str) -> dict[str, Any] | None:
         """
         Get document by ID
@@ -532,10 +703,18 @@ class VectorDBService:
             for i in range(len(texts)):
                 meta = metadatas[i].copy() if i < len(metadatas) else {}
                 meta["user_id"] = str(user_id)
+
+                # ADR-080: created_at 메타데이터 자동 추가 (시간 가중 검색용)
+                if "created_at" not in meta:
+                    from datetime import datetime, timezone
+
+                    meta["created_at"] = datetime.now(timezone.utc).isoformat()
+
                 meta = {k: v for k, v in meta.items() if v is not None}
                 filtered_metadatas.append(meta)
 
             import time
+
             start_time = time.perf_counter()
             # Add batch to collection
             collection.upsert(
@@ -547,7 +726,10 @@ class VectorDBService:
             insert_duration = time.perf_counter() - start_time
             try:
                 from app.core.monitoring import VECTOR_DB_INSERT_DURATION
-                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_name).observe(insert_duration)
+
+                VECTOR_DB_INSERT_DURATION.labels(collection_name=collection_name).observe(
+                    insert_duration
+                )
             except Exception as e:
                 logger.error(f"VectorDB Metric Error: {e}")
 

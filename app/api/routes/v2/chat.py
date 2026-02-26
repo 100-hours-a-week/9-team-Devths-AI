@@ -29,6 +29,7 @@ from app.prompts.interview import (
     get_system_tech_interview,
 )
 from app.prompts.loader import load_prompt_yaml
+from app.prompts.persona_styles import get_personality_style_prompt, get_tech_style_prompt
 from app.schemas.chat import (
     ChatMode,
     ChatRequest,
@@ -67,6 +68,7 @@ async def generate_chat_stream(
         )
         try:
             from app.core.monitoring import AI_PROMPT_INJECTION_BLOCKED
+
             AI_PROMPT_INJECTION_BLOCKED.labels(endpoint="/ai/chat").inc()
         except Exception as e:
             logger.error(f"Prompt Injection Metric Error: {e}")
@@ -105,6 +107,7 @@ async def generate_chat_stream(
             try:
                 ttft = first_token_time - start_time
                 from app.core.monitoring import AI_TIME_TO_FIRST_TOKEN
+
                 AI_TIME_TO_FIRST_TOKEN.labels(model=model, endpoint="/ai/chat").observe(ttft)
             except Exception as e:
                 logger.error(f"TTFT Metric Error: {e}")
@@ -283,6 +286,7 @@ async def generate_chat_stream(
                         use_rag=True,
                         context_types=["resume", "job_posting"],
                         model="gemini",
+                        chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
                         record_ttft()
                         full_response += chunk
@@ -390,6 +394,7 @@ async def generate_chat_stream(
                         use_rag=True,
                         context_types=context_types,
                         model=model,
+                        chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
                         record_ttft()
                         full_response += chunk
@@ -458,7 +463,24 @@ async def generate_chat_stream(
                     else "tech_interview_init"
                 )
                 init_prompts = load_prompt_yaml("interview", yaml_name)
-                system_prompt = init_prompts["system"]
+
+                # ADR-098: 면접 스타일 프롬프트 적용
+                # 허용된 스타일만 사용 (Log Injection 방지)
+                allowed_styles = {"friendly", "standard", "challenging", "practical"}
+                raw_style = (
+                    request.context.interview_style
+                    if request.context and request.context.interview_style
+                    else "standard"
+                )
+                interview_style = raw_style if raw_style in allowed_styles else "standard"
+                if interview_type == "behavior":
+                    style_prompt = get_personality_style_prompt(interview_style)
+                else:
+                    style_prompt = get_tech_style_prompt(interview_style)
+
+                safe_info(logger, "🎭 [면접] 스타일 적용: %s", interview_style)
+
+                system_prompt = init_prompts["system"].format(style_prompt=style_prompt)
                 init_prompt = init_prompts["human"].format(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
@@ -812,12 +834,16 @@ async def generate_chat_stream(
             gen_time_str = f"{gen_time:.2f}s"
             try:
                 from app.core.monitoring import AI_GENERATION_DURATION
+
                 AI_GENERATION_DURATION.labels(model=model, endpoint="/ai/chat").observe(gen_time)
             except Exception:
                 pass
 
-        safe_info(logger, f"📊 [LLM Stats] Mode={mode} | Model={model} | TTFT={ttft_str} | GenTime={gen_time_str} | TotalTime={total_time:.2f}s | UID={request.user_id}")
-        safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration_ms)
+        safe_info(
+            logger,
+            f"📊 [LLM Stats] Mode={mode} | Model={model} | TTFT={ttft_str} | GenTime={gen_time_str} | TotalTime={total_time:.2f}s | UID={request.user_id}",
+        )
+        safe_info(logger, "⏱️ 채팅 처리 완료: %sms", f"{duration_ms:.2f}")
     except Exception as e:
         logger.error(f"Failed to record latency metric: {e}")
 
