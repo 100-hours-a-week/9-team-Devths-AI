@@ -3,21 +3,19 @@
 # GPU 포함: docker-compose --profile gpu up -d
 # 프로덕션: Redis는 AWS ElastiCache 사용 (환경변수로 주입)
 #
-# ADR-102: Docker replicas로 수평 확장 (504 타임아웃 완화)
-# - ai-endpoint: replicas 2~4 (부하에 따라 조절)
+# ADR-102: Gunicorn 4 Uvicorn workers로 동시성 확장 (Compose 환경)
+# - ai-endpoint: Gunicorn -w 4 (deploy.replicas는 Swarm 전용으로 제거)
 # - celery-worker-extract: text_extract/masking/evaluation 전용 Worker
 services:
   # -----------------------------------------
-  # 1. AI Endpoint Server (CPU) — ADR-102: replicas 추가
+  # 1. AI Endpoint Server (CPU) — ADR-102: Gunicorn 4 Uvicorn workers
   # -----------------------------------------
   ai-endpoint:
     build:
       context: .
       dockerfile: Dockerfile
     image: ai-endpoint:v2
-    # container_name 제거 (replicas 사용 시 고유 이름 자동 생성)
-    deploy:
-      replicas: 4  # ADR-102 Phase 0: 504 타임아웃 완화
+    container_name: ai_endpoint
     ports:
       - "8000:8000"
     environment:
