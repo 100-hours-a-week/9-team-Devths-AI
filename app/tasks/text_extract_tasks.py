@@ -88,7 +88,8 @@ async def _process_text_extract_async(
         logger.info("=== 📄 텍스트 추출 시작 (Celery Worker) ===")
         logger.info("=" * 80)
         safe_user_id = sanitize_log_input(user_id)
-        logger.info("📌 OCR 전략: %s", model.upper())
+        safe_model = sanitize_log_input(model.upper())
+        logger.info("📌 OCR 전략: %s", safe_model)
         logger.info("📌 사용자 ID: %s", safe_user_id)
         logger.info("")
 
