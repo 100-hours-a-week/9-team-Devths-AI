@@ -40,6 +40,7 @@ def process_masking_task(
         result = asyncio.run(
             _process_masking_async(
                 task_id=task_id,
+                safe_task_id=safe_task_id,
                 file_url=file_url,
                 s3_key=s3_key,
                 file_type=file_type,
@@ -56,6 +57,7 @@ def process_masking_task(
 
 async def _process_masking_async(
     task_id: str,
+    safe_task_id: str,
     file_url: str,
     s3_key: str,
     file_type: str,
@@ -70,7 +72,6 @@ async def _process_masking_async(
 
     task_storage = get_legacy_task_storage()
 
-    safe_task_id = sanitize_log_input(task_id)
     safe_model = sanitize_log_input(model)
     logger.info("[PROCESS_MASKING] Starting masking task %s", safe_task_id)
     logger.info("[PROCESS_MASKING] Using model: %s", safe_model)
