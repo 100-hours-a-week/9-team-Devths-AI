@@ -209,6 +209,29 @@ class Settings(BaseSettings):
         description="Celery Beat cron day of week (0=Sun, 1=Mon, ...). ADR-094.",
     )
 
+    # ============================================
+    # ADR-101: Tavily Search API (Phase 2 크롤링)
+    # ============================================
+    tavily_api_key: str = Field(
+        default="",
+        description="Tavily Search API 키. 미설정 시 Tavily 기능 비활성화. ADR-101.",
+    )
+    tavily_search_depth: str = Field(
+        default="advanced",
+        description="Tavily 검색 깊이 (basic/advanced). advanced는 전체 본문 추출. ADR-101.",
+    )
+    tavily_max_results: int = Field(
+        default=5,
+        description="Tavily 검색당 최대 결과 수. ADR-101.",
+    )
+    trend_crawl_queries: str = Field(
+        default="",
+        description=(
+            "Tavily 검색 쿼리 목록 (쉼표 구분). "
+            "예: '2026 백엔드 채용 트렌드,AI 엔지니어 채용 공고'. ADR-101."
+        ),
+    )
+
     @property
     def all_google_api_keys(self) -> list[str]:
         """Google API 키를 리스트로 반환 (쉼표 구분 분산 처리)."""

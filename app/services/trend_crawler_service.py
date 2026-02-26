@@ -1,7 +1,10 @@
 """
-Trend Crawler Service — ADR-094.
+Trend Crawler Service — ADR-094 / ADR-101.
 
 채용 트렌드 크롤링 서비스: Celery Beat 스케줄러 연동 및 수동 크롤링 지원.
+
+- Phase 1 (ADR-094): WebBaseLoader 기반 URL 크롤링 (crawl_urls / crawl_configured_urls)
+- Phase 2 (ADR-101): Tavily 검색 쿼리 기반 자동 발견 (search_by_queries / trigger_tavily_task)
 """
 
 import logging
@@ -140,3 +143,103 @@ class TrendCrawlerService:
             "status": result.status,
             "result": result.result if result.ready() else None,
         }
+
+    # ============================================
+    # ADR-101: Phase 2 — Tavily 검색 쿼리 기반 크롤링
+    # ============================================
+
+    def get_configured_queries(self) -> list[str]:
+        """환경변수에서 Tavily 검색 쿼리 목록 반환 (ADR-101).
+
+        환경변수: TREND_CRAWL_QUERIES (쉼표 구분)
+        예: "2026 백엔드 채용 트렌드,AI 엔지니어 채용 공고"
+        """
+        queries_str = self.settings.trend_crawl_queries
+        if not queries_str:
+            return []
+        return [q.strip() for q in queries_str.split(",") if q.strip()]
+
+    async def search_by_queries(self, queries: list[str]) -> CrawlStats:
+        """Tavily 검색 쿼리로 트렌드 데이터 검색 + VectorDB 적재 (ADR-101).
+
+        Args:
+            queries: 검색 쿼리 목록
+
+        Returns:
+            CrawlStats: 검색/적재 통계
+        """
+        import uuid
+
+        from app.services.tavily_search_service import TavilySearchService
+        from app.services.vectordb_service import VectorDBService
+
+        logger.info("[TrendCrawler] Tavily 검색 시작: %d개 쿼리", len(queries))
+
+        tavily = TavilySearchService(self.settings)
+        results, stats = await tavily.search_multiple(queries)
+
+        vectordb = VectorDBService(
+            api_key=self.settings.google_api_key,
+            persist_directory=self.settings.chroma_persist_dir,
+            chroma_server_host=self.settings.chroma_server_host,
+            chroma_server_port=self.settings.chroma_server_port,
+        )
+
+        documents = []
+        for r in results:
+            try:
+                metadata: dict = {
+                    "source": "tavily",
+                    "title": r.title,
+                    "score": r.score,
+                }
+                if r.published_date:
+                    metadata["published_date"] = r.published_date
+                # SAST: URL은 외부 입력이므로 로그에 직접 포함하지 않음
+                # ChromaDB 호환: None 값 제거
+                metadata = {k: v for k, v in metadata.items() if v is not None}
+
+                doc_id = str(uuid.uuid4())
+                await vectordb.add_document(
+                    document_id=doc_id,
+                    text=r.content,
+                    collection_type="trend_data",
+                    metadata=metadata,
+                )
+                documents.append(
+                    {
+                        "id": doc_id,
+                        "text_length": len(r.content),
+                        "metadata": metadata,
+                    }
+                )
+            except Exception as e:
+                logger.error("[TrendCrawler] Tavily 결과 적재 실패: %s", e)
+                continue
+
+        crawl_stats = CrawlStats(
+            total_urls=stats.total_results,
+            success_count=len(documents),
+            failed_count=stats.total_results - len(documents),
+            documents=documents,
+        )
+
+        logger.info(
+            "[TrendCrawler] Tavily 검색 완료: %d/%d 건 적재 (중복 제거 후 %d건)",
+            crawl_stats.success_count,
+            crawl_stats.total_urls,
+            stats.deduplicated_results,
+        )
+        return crawl_stats
+
+    def trigger_tavily_task(self) -> str:
+        """Tavily 검색 Celery 태스크를 수동으로 트리거 (ADR-101).
+
+        Returns:
+            str: 태스크 ID
+        """
+        from app.tasks.trend_tasks import search_trend_queries_task
+
+        task = search_trend_queries_task.delay()
+        logger.info("[TrendCrawler] Tavily Celery 태스크 트리거됨: %s", task.id)
+        return task.id

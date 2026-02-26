@@ -19,8 +19,10 @@ from app.config.settings import get_settings
 # 로깅 설정 (운영 서버 호환)
 # ============================================================================
 
+
 class EndpointFilter(logging.Filter):
     """특정 엔드포인트(/health, /metrics 등)의 접근 로그를 무시하는 필터"""
+
     def filter(self, record: logging.LogRecord) -> bool:
         # uvicorn.access 로그 레코드의 args 속성은 다음과 같은 튜플 형태입니다:
         # (client_addr, method, path, http_version, status_code)
