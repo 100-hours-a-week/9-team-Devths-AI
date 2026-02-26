@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     api_port: int = Field(default=8000, description="API port")
 
     # ============================================
+    # CORS
+    # ============================================
+    allowed_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:5173"],
+        description=(
+            "CORS 허용 origin 목록. "
+            "환경변수 ALLOWED_ORIGINS=https://dev.devths.com,http://localhost:3000 처럼 "
+            "쉼표 구분 문자열로도 입력 가능."
+        ),
+    )
+
+    # ============================================
     # Google Gemini API
     # ============================================
     google_api_key: str | None = Field(
