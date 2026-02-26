@@ -70,8 +70,10 @@ async def _process_masking_async(
 
     task_storage = get_legacy_task_storage()
 
-    logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
-    logger.info("[PROCESS_MASKING] Using model: %s", model)
+    safe_task_id = sanitize_log_input(task_id)
+    safe_model = sanitize_log_input(model)
+    logger.info("[PROCESS_MASKING] Starting masking task %s", safe_task_id)
+    logger.info("[PROCESS_MASKING] Using model: %s", safe_model)
 
     try:
         if model == MaskingModelType.CHANDRA or model == "chandra":
@@ -85,7 +87,7 @@ async def _process_masking_async(
         task_data["progress"] = 10
         task_data["message"] = "파일을 다운로드 중입니다..."
         task_storage.save(task_id, task_data)
-        logger.info("Task %s: Downloading file", task_id)
+        logger.info("Task %s: Downloading file", safe_task_id)
 
         if file_type == "pdf":
             task_data = task_storage.get(task_id) or {}
@@ -142,7 +144,8 @@ async def _process_masking_async(
                     )
                 )
             except ValueError:
-                logger.warning("Unknown PII type: %s", pii_type)
+                safe_pii_type = sanitize_log_input(pii_type)
+                logger.warning("Unknown PII type: %s", safe_pii_type)
 
         task_data = task_storage.get(task_id) or {}
         task_data["status"] = TaskStatus.COMPLETED
@@ -157,7 +160,7 @@ async def _process_masking_async(
         ).model_dump()
         task_storage.save(task_id, task_data)
 
-        logger.info("Task %s completed with %d PII detections", task_id, len(detected_pii))
+        logger.info("Task %s completed with %d PII detections", safe_task_id, len(detected_pii))
 
         return {
             "status": "completed",
@@ -166,10 +169,10 @@ async def _process_masking_async(
         }
 
     except Exception as e:
-        logger.error("Task %s failed: %s", task_id, str(e), exc_info=True)
+        logger.error("Task %s failed: %s", safe_task_id, type(e).__name__, exc_info=True)
         task_data = task_storage.get(task_id) or {}
         task_data["status"] = TaskStatus.FAILED
-        task_data["message"] = f"마스킹 작업 실패: {str(e)}"
-        task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
+        task_data["message"] = f"마스킹 작업 실패: {type(e).__name__}"
+        task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": type(e).__name__}
         task_storage.save(task_id, task_data)
         raise

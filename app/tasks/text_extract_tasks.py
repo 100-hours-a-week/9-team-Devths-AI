@@ -121,12 +121,24 @@ async def _process_text_extract_async(
                     len(pages),
                 )
             elif doc_input.url:
-                logger.info("   → URL 입력: %s", doc_input.url[:80] if doc_input.url else "N/A")
-                extracted_text = await WebLoaderService.extract_text_from_url(doc_input.url)
-                if extracted_text:
-                    logger.info("   ✅ [WebLoader] URL 텍스트 추출 완료: %d자", len(extracted_text))
+                from app.utils.url_validator import validate_url
+
+                safe_url_log = sanitize_log_input(doc_input.url[:80] if doc_input.url else "N/A")
+                logger.info("   → URL 입력: %s", safe_url_log)
+
+                # SSRF 방어: URL 검증
+                is_valid, error_msg = validate_url(doc_input.url)
+                if not is_valid:
+                    logger.warning("   ⚠️ 허용되지 않은 URL 차단: %s", safe_url_log)
+                    extracted_text = ""
                 else:
-                    logger.warning("   ⚠️ URL에서 텍스트를 추출할 수 없습니다")
+                    extracted_text = await WebLoaderService.extract_text_from_url(doc_input.url)
+                    if extracted_text:
+                        logger.info(
+                            "   ✅ [WebLoader] URL 텍스트 추출 완료: %d자", len(extracted_text)
+                        )
+                    else:
+                        logger.warning("   ⚠️ URL에서 텍스트를 추출할 수 없습니다")
             else:
                 extracted_text = doc_input.text or ""
                 logger.info("   → 텍스트 직접 입력: %d characters", len(extracted_text))
