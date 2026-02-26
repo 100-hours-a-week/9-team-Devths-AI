@@ -9,6 +9,8 @@ import logging
 import socket
 from urllib.parse import urlparse
 
+from app.utils.log_sanitizer import sanitize_log_input
+
 logger = logging.getLogger(__name__)
 
 # 허용된 프로토콜
@@ -78,12 +80,14 @@ def is_allowed_host(hostname: str) -> bool:
         ip_addresses = socket.gethostbyname_ex(hostname)[2]
         for ip in ip_addresses:
             if is_private_ip(ip):
-                logger.warning("[URLValidator] 사설 IP 접근 시도 차단: %s -> %s", hostname, ip)
+                safe_hostname = sanitize_log_input(hostname)
+                logger.warning("[URLValidator] 사설 IP 접근 시도 차단: %s -> %s", safe_hostname, ip)
                 return False
         return True
     except socket.gaierror:
         # DNS 조회 실패 시 차단
-        logger.warning("[URLValidator] DNS 조회 실패: %s", hostname)
+        safe_hostname = sanitize_log_input(hostname)
+        logger.warning("[URLValidator] DNS 조회 실패: %s", safe_hostname)
         return False
 
 
