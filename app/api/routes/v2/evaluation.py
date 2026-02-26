@@ -552,6 +552,18 @@ async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
 
     try:
         judge = JudgeService()
+    except ValueError as e:
+        # GOOGLE_API_KEY / GEMINI_API_KEY 미설정 — 서비스 자체가 사용 불가
+        logger.warning("JudgeService 초기화 실패 (API 키 미설정): %s", str(e))
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "JUDGE_UNAVAILABLE",
+                "message": "Judge LLM 서비스가 설정되지 않았습니다. GOOGLE_API_KEY 환경변수를 확인하세요.",
+            },
+        ) from e
+
+    try:
         result = await judge.score(
             question=request.question,
             answer=request.answer,

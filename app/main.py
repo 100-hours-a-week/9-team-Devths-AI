@@ -98,9 +98,12 @@ app = FastAPI(
 )
 
 # CORS 미들웨어 설정
+# allow_origins=["*"] + allow_credentials=True 조합은 CORS 명세 위반
+# (Starlette는 쿠키 없는 요청에서 * 와 credentials:true를 동시 반환 → 브라우저 차단)
+# → settings.allowed_origins 로 구체적 도메인 관리 (환경변수 ALLOWED_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
