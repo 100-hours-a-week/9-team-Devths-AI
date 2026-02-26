@@ -259,7 +259,7 @@ class RaptorService:
         """
         all_pairs: list[tuple[str, Document]] = []
         # collection_name에서 collection_type 추출 (resumes → resume)
-        ct = collection_name.rstrip("s") if collection_name.endswith("s") else collection_name
+        ct = collection_name[:-1] if collection_name.endswith("s") else collection_name
 
         for level in range(1, self._max_levels + 1):
             try:
