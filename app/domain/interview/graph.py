@@ -18,6 +18,7 @@ from app.prompts.interview import (
     create_tech_interview_init_prompt,
     format_conversation_history,
 )
+from app.utils.langfuse_client import get_langfuse_callback_handler
 
 from .entities import InterviewState
 
@@ -474,7 +475,12 @@ class InterviewWorkflow:
             "previous_questions": previous_questions,
         }
 
+        _lf_handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="interview-start"
+        )
         config = {"configurable": {"thread_id": session_id}}
+        if _lf_handler:
+            config["callbacks"] = [_lf_handler]
         result = await self._graph.ainvoke(initial_state, config)
 
         return result
@@ -496,7 +502,14 @@ class InterviewWorkflow:
         state["user_answer"] = user_answer
         state["phase"] = "questioning"
 
+        _lf_handler = get_langfuse_callback_handler(
+            session_id=state.get("session_id"),
+            user_id=state.get("user_id"),
+            trace_name="interview-answer",
+        )
         config = {"configurable": {"thread_id": state["session_id"]}}
+        if _lf_handler:
+            config["callbacks"] = [_lf_handler]
         result = await self._graph.ainvoke(state, config)
 
         if result.get("phase") == "completed":
@@ -520,7 +533,14 @@ class InterviewWorkflow:
             # Force completion
             state["phase"] = "completed"
 
+        _lf_handler = get_langfuse_callback_handler(
+            session_id=state.get("session_id"),
+            user_id=state.get("user_id"),
+            trace_name="interview-report",
+        )
         config = {"configurable": {"thread_id": state["session_id"]}}
+        if _lf_handler:
+            config["callbacks"] = [_lf_handler]
         result = await self._graph.ainvoke(state, config)
 
         return result.get("response", "")
