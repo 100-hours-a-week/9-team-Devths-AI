@@ -10,6 +10,7 @@ import base64
 import logging
 
 from app.tasks.celery_app import celery_app
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ def process_masking_task(
         file_type: 파일 타입 (pdf, image)
         model: 마스킹 모델 (gemini, chandra)
     """
-    logger.info("[MaskingTask] 태스크 시작: %s", task_id)
+    safe_task_id = sanitize_log_input(task_id)
+    logger.info("[MaskingTask] 태스크 시작: %s", safe_task_id)
 
     try:
         result = asyncio.run(
@@ -44,11 +46,11 @@ def process_masking_task(
                 model=model,
             )
         )
-        logger.info("[MaskingTask] 태스크 완료: %s", task_id)
+        logger.info("[MaskingTask] 태스크 완료: %s", safe_task_id)
         return result
 
     except Exception as e:
-        logger.error("[MaskingTask] 태스크 실패: %s — %s", task_id, e)
+        logger.error("[MaskingTask] 태스크 실패: %s — %s", safe_task_id, type(e).__name__)
         raise self.retry(exc=e, countdown=60, max_retries=2) from e
 
 
