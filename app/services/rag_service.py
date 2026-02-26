@@ -186,11 +186,76 @@ def _rrf_merge(
     return pairs
 
 
-def _rerank(pairs: list[tuple[str, Document]], top_k: int) -> list[tuple[str, Document]]:
-    """ADR-069: 재정렬 단계. 현재는 top_k 자르기만 적용 (cross-encoder 등은 후속)."""
-    if top_k <= 0:
+# ADR-104: FlashRank 리랭커 싱글톤 (모델 로딩 1회만)
+_flashrank_ranker: Any = None
+
+
+def _get_flashrank_ranker(model_name: str = "ms-marco-MiniLM-L-12-v2") -> Any:
+    """ADR-104: FlashRank Ranker 싱글톤 반환. 최초 호출 시 모델 다운로드 (~60MB)."""
+    global _flashrank_ranker  # noqa: PLW0603
+    if _flashrank_ranker is None:
+        from flashrank import Ranker
+
+        _flashrank_ranker = Ranker(model_name=model_name, cache_dir="./flashrank_cache")
+        _flashrank_ranker._loaded_model_name = model_name  # 추적용
+        logger.info("ADR-104: FlashRank Ranker initialized (model=%s)", model_name)
+    elif getattr(_flashrank_ranker, "_loaded_model_name", None) != model_name:
+        logger.warning(
+            "ADR-104: FlashRank 모델 불일치 (loaded=%s, requested=%s). 서버 재시작 필요.",
+            getattr(_flashrank_ranker, "_loaded_model_name", "unknown"),
+            model_name,
+        )
+    return _flashrank_ranker
+
+
+async def _rerank(
+    pairs: list[tuple[str, Document]],
+    top_k: int,
+    query: str = "",
+) -> list[tuple[str, Document]]:
+    """ADR-104: FlashRank 리랭커로 의미적 재정렬 후 top_k 반환.
+
+    settings.rag_use_flashrank=True이고 query가 있으면 FlashRank 적용.
+    그 외에는 기존 동작(단순 top_k 자르기) 유지.
+    실패 시 기존 방식으로 폴백.
+    """
+    if top_k <= 0 or not pairs:
         return pairs
-    return pairs[:top_k]
+
+    settings = get_settings()
+    if not settings.rag_use_flashrank or not query:
+        return pairs[:top_k]
+
+    try:
+        from flashrank import RerankRequest
+
+        ranker = _get_flashrank_ranker(settings.rag_flashrank_model)
+        passages = [
+            {"id": idx, "text": (doc.page_content or "")[:1000]}
+            for idx, (_, doc) in enumerate(pairs)
+        ]
+        rerank_req = RerankRequest(query=query, passages=passages)
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, ranker.rerank, rerank_req)
+
+        # FlashRank 점수순으로 pairs 재정렬
+        id_to_score: dict[int, float] = {int(r["id"]): float(r["score"]) for r in results}
+        scored = [(id_to_score.get(i, 0.0), pair) for i, pair in enumerate(pairs)]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        reranked = [pair for _, pair in scored[:top_k]]
+
+        logger.info(
+            "ADR-104: FlashRank reranked %d → %d docs (top=%.3f, bottom=%.3f)",
+            len(pairs),
+            len(reranked),
+            scored[0][0] if scored else 0,
+            scored[min(top_k - 1, len(scored) - 1)][0] if scored else 0,
+        )
+        return reranked
+    except Exception as e:
+        logger.warning("ADR-104: FlashRank 실패, top_k 폴백: %s", e)
+        return pairs[:top_k]
 
 
 async def _compress_pairs_with_llm(
@@ -877,7 +942,7 @@ class RAGService:
                 merged = _rrf_merge(dense_pairs, sparse_pairs, dw, sw, top_k=0)
                 # 재정렬: top_k 적용 (ADR-069 question → retriever → rerank → context)
                 rerank_k = settings.rag_rerank_top_k if settings.rag_rerank_top_k > 0 else 0
-                merged = _rerank(merged, rerank_k)
+                merged = await _rerank(merged, rerank_k, query=query)
 
                 if settings.rag_use_compressor and merged:
                     llm = getattr(getattr(self._rag_chain, "_llm_gateway", None), "llm", None)
