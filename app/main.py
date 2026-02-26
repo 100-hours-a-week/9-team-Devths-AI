@@ -26,7 +26,8 @@ class EndpointFilter(logging.Filter):
         # (client_addr, method, path, http_version, status_code)
         if record.args and len(record.args) >= 3:
             path = record.args[2]
-            if path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
+            # 끝에 붙은 '/' 를 제거하여 매칭 (예: '/metrics/' -> '/metrics')
+            if path.rstrip("/") in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
                 return False
         return True
 
