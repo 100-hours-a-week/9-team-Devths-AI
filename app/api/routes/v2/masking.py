@@ -77,7 +77,7 @@ async def masking_draft(
     task_data = {
         "type": "masking",
         "status": TaskStatus.PROCESSING,
-        "created_at": datetime.now(),
+        "created_at": datetime.now().isoformat(),
         "progress": 0,
         "message": "마스킹 작업을 시작합니다...",
         "request": request.model_dump(),
