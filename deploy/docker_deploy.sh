@@ -244,9 +244,9 @@ fi
 
 log "✅ All services started successfully."
 
-# 7. Health Check
-log "🏥 Health Checking..."
-for i in {1..12}; do
+# 7. Health Check (24 × 5s = 120초 대기 — 새 ML 서비스 기동 여유)
+log "🏥 Health Checking (up to 120s)..."
+for i in {1..24}; do
     sleep 5
     if curl -s "http://localhost:8000/health" > /dev/null; then
         log "✅ Health check passed!"
@@ -254,8 +254,8 @@ for i in {1..12}; do
         # 8. Trigger Auto-Embedding if flagged by CI/CD
         if [ "$TRIGGER_DATA_EMBEDDING" = "true" ]; then
             log "📂 Data directory change detected. Triggering auto-embedding..."
-            docker exec ai-service python scripts/auto_embed_data.py >> "$LOG_FILE" 2>&1
-            if [ $? -eq 0 ]; then
+            docker exec ai-service python scripts/auto_embed_data.py 2>&1 | tee -a "$LOG_FILE"
+            if [ ${PIPESTATUS[0]} -eq 0 ]; then
                 log "✅ Auto-embedding completed successfully."
             else
                 log "⚠️  Auto-embedding failed! Check the logs above."
@@ -265,7 +265,7 @@ for i in {1..12}; do
         log "🚀 Deployment Successful!"
         exit 0
     fi
-    log "⏳ Waiting for service to be healthy... ($i/12)"
+    log "⏳ Waiting for service to be healthy... ($i/24)"
 done
 
 log "❌ Health check timed out! Dumping ai-endpoint logs:"
