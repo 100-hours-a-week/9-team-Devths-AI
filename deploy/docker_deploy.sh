@@ -268,6 +268,6 @@ for i in {1..12}; do
     log "⏳ Waiting for service to be healthy... ($i/12)"
 done
 
-log "❌ Health check timed out! Showing recent container logs:"
-docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --tail 30 ai-endpoint >> "$LOG_FILE" 2>&1
+log "❌ Health check timed out! Dumping ai-endpoint logs:"
+docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --tail 50 ai-endpoint 2>&1 | tee -a "$LOG_FILE"
 exit 1
