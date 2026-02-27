@@ -8,6 +8,7 @@ APP_DIR="/home/ubuntu/ai"
 LOG_DIR="$APP_DIR/logs"
 LOG_FILE="$LOG_DIR/deploy.log"
 COMPOSE_FILE="$APP_DIR/docker-compose.cicd.yml"
+COMPOSE_PROJECT="ai"  # --project-name: compose 컨테이너 관리 일관성 보장
 AWS_REGION="ap-northeast-2" # Default region
 
 # AWS CodeDeploy의 환경 변수(PATH) 초기화 문제 방지를 위해 명시적으로 PATH 추가
@@ -198,13 +199,13 @@ for name in "${LEGACY_NAMES[@]}"; do
 done
 
 if [ -f "$COMPOSE_FILE" ]; then
-    docker compose -f "$COMPOSE_FILE" down --remove-orphans 2>&1 | tee -a "$LOG_FILE"
+    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --remove-orphans 2>&1 | tee -a "$LOG_FILE"
     log "✅ Existing services stopped."
 fi
 
 # 5. Pull new image
 log "⬇️  Pulling new Docker image: $IMAGE_URI"
-docker compose -f "$COMPOSE_FILE" pull 2>&1 | tee -a "$LOG_FILE"
+docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" pull 2>&1 | tee -a "$LOG_FILE"
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     log "❌ Docker image pull failed!"
     exit 1
@@ -212,14 +213,32 @@ fi
 
 # 6. Start all services via Docker Compose
 log "▶️  Starting all services (ai-endpoint, celery-worker-trend, celery-worker-extract, celery-beat, promtail)..."
-docker compose -f "$COMPOSE_FILE" up -d 2>&1 | tee -a "$LOG_FILE"
+COMPOSE_UP_LOG="$LOG_DIR/compose_up.log"
+docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d 2>&1 | tee -a "$LOG_FILE" "$COMPOSE_UP_LOG"
 UP_EXIT_CODE=${PIPESTATUS[0]}
 if [ $UP_EXIT_CODE -ne 0 ]; then
-    log "❌ docker compose up failed! Dumping diagnostics..."
-    log "=== Container Status (docker ps -a) ==="
+    log "❌ docker compose up failed (exit code: $UP_EXIT_CODE)! Dumping diagnostics..."
+
+    # [1] compose up 자체 출력 (에러 메시지 원문)
+    log "=== [1/4] docker compose up output ==="
+    cat "$COMPOSE_UP_LOG" >> "$LOG_FILE" 2>/dev/null
+
+    # [2] 전체 컨테이너 상태
+    log "=== [2/4] Container Status (docker ps -a) ==="
     docker ps -a 2>&1 | tee -a "$LOG_FILE"
-    log "=== Recent Service Logs ==="
-    docker compose -f "$COMPOSE_FILE" logs --tail=20 2>&1 | tee -a "$LOG_FILE"
+
+    # [3] compose 서비스별 상태 확인 (exited/created 여부 포함)
+    log "=== [3/4] Service-level Status (docker compose ps) ==="
+    docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" ps -a 2>&1 | tee -a "$LOG_FILE"
+
+    # [4] 각 서비스별 로그 개별 출력 (Created 상태 포함)
+    log "=== [4/4] Per-service Logs (last 30 lines each) ==="
+    for SERVICE in ai-endpoint celery-worker-trend celery-worker-extract celery-beat promtail; do
+        log "--- [$SERVICE] ---"
+        docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --tail=30 "$SERVICE" 2>&1 | tee -a "$LOG_FILE" || \
+            log "  (no logs available for $SERVICE — container may not have started)"
+    done
+
     exit 1
 fi
 
@@ -250,5 +269,5 @@ for i in {1..12}; do
 done
 
 log "❌ Health check timed out! Showing recent container logs:"
-docker compose -f "$COMPOSE_FILE" logs --tail 30 ai-endpoint >> "$LOG_FILE" 2>&1
+docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" logs --tail 30 ai-endpoint >> "$LOG_FILE" 2>&1
 exit 1
