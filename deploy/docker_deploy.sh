@@ -180,24 +180,46 @@ log "✅ Pre-flight check passed."
 
 # 5. Stop existing services (if any)
 log "🛑 Stopping existing services..."
+
+# [마이그레이션 정리] 이전 docker run 기반 컨테이너 강제 삭제
+# docker compose down은 docker run으로 시작된 컨테이너를 인식하지 못해
+# container_name 충돌로 compose up이 실패하는 것을 방지
+log "🧹 Removing legacy containers (docker run → docker compose migration)..."
+LEGACY_NAMES=("ai-service" "ai-promtail" "celery_worker_trend" "celery_worker_extract" "celery_beat")
+for name in "${LEGACY_NAMES[@]}"; do
+    if docker ps -aq --filter "name=^${name}$" | grep -q .; then
+        docker rm -f "$name" 2>&1 | tee -a "$LOG_FILE"
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            log "   🗑️  Removed legacy container: $name"
+        else
+            log "   ⚠️  Failed to remove legacy container: $name (continuing anyway)"
+        fi
+    fi
+done
+
 if [ -f "$COMPOSE_FILE" ]; then
-    docker compose -f "$COMPOSE_FILE" down --remove-orphans >> "$LOG_FILE" 2>&1
+    docker compose -f "$COMPOSE_FILE" down --remove-orphans 2>&1 | tee -a "$LOG_FILE"
     log "✅ Existing services stopped."
 fi
 
 # 5. Pull new image
 log "⬇️  Pulling new Docker image: $IMAGE_URI"
-docker compose -f "$COMPOSE_FILE" pull >> "$LOG_FILE" 2>&1
-if [ $? -ne 0 ]; then
+docker compose -f "$COMPOSE_FILE" pull 2>&1 | tee -a "$LOG_FILE"
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
     log "❌ Docker image pull failed!"
     exit 1
 fi
 
 # 6. Start all services via Docker Compose
 log "▶️  Starting all services (ai-endpoint, celery-worker-trend, celery-worker-extract, celery-beat, promtail)..."
-docker compose -f "$COMPOSE_FILE" up -d >> "$LOG_FILE" 2>&1
-if [ $? -ne 0 ]; then
-    log "❌ docker compose up failed!"
+docker compose -f "$COMPOSE_FILE" up -d 2>&1 | tee -a "$LOG_FILE"
+UP_EXIT_CODE=${PIPESTATUS[0]}
+if [ $UP_EXIT_CODE -ne 0 ]; then
+    log "❌ docker compose up failed! Dumping diagnostics..."
+    log "=== Container Status (docker ps -a) ==="
+    docker ps -a 2>&1 | tee -a "$LOG_FILE"
+    log "=== Recent Service Logs ==="
+    docker compose -f "$COMPOSE_FILE" logs --tail=20 2>&1 | tee -a "$LOG_FILE"
     exit 1
 fi
 
