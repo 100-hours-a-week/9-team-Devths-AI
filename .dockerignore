@@ -37,7 +37,7 @@ easyocr_server/
 
 # Deploy scripts (not needed in container)
 deploy/
-scripts/
+#scripts/
 
 # Cache
 .ruff_cache/
