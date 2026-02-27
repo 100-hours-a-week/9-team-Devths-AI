@@ -59,7 +59,7 @@ services:
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
       # 기타
       - API_KEY=${API_KEY}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-[]}
     volumes:
       - ai_task_storage:/app/task_storage  # FastAPI ↔ Celery Worker 간 태스크 상태 파일 공유
     logging:
@@ -93,6 +93,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      disable: true  # celery는 HTTP 서버가 아니므로 Dockerfile HEALTHCHECK 비활성화
     networks:
       - ai_network
 
@@ -127,6 +129,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      disable: true  # celery는 HTTP 서버가 아니므로 Dockerfile HEALTHCHECK 비활성화
     networks:
       - ai_network
 
@@ -151,6 +155,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      disable: true  # celery는 HTTP 서버가 아니므로 Dockerfile HEALTHCHECK 비활성화
     networks:
       - ai_network
 
