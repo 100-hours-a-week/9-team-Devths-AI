@@ -77,7 +77,7 @@ services:
     image: ${IMAGE_URI}
     container_name: celery_worker_trend
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
+    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=${REDIS_URL}
@@ -104,7 +104,7 @@ services:
     image: ${IMAGE_URI}
     container_name: celery_worker_extract
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
+    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=${REDIS_URL}
@@ -137,7 +137,7 @@ services:
     image: ${IMAGE_URI}
     container_name: celery_beat
     restart: unless-stopped
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: poetry run celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=${REDIS_URL}
