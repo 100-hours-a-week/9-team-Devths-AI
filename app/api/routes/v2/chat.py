@@ -535,12 +535,35 @@ async def generate_chat_stream(
                         record_ttft()
                         full_response += chunk
                 else:
-                    full_response = await rag.llm.generate_response_non_stream(
-                        user_message=init_prompt,
-                        context=None,
-                        system_prompt=system_prompt,
-                        user_id=request.user_id,
+                    # Gunicorn + Nginx 환경에서 PHASE 1 LLM 대기(60~120초) 중
+                    # SSE idle timeout(proxy_read_timeout 기본 60s) 방지:
+                    # 1) 즉시 "생성 중" 이벤트 전송 → Nginx idle timer 리셋
+                    # 2) 25초마다 keepalive SSE comment 전송
+                    thinking_event = json.dumps(
+                        {"type": "thinking", "chunk": "⏳ 면접 질문을 생성하고 있습니다..."},
+                        ensure_ascii=False,
                     )
+                    yield f"data: {thinking_event}{sse_end}"
+
+                    llm_task = asyncio.create_task(
+                        rag.llm.generate_response_non_stream(
+                            user_message=init_prompt,
+                            context=None,
+                            system_prompt=system_prompt,
+                            user_id=request.user_id,
+                        )
+                    )
+                    try:
+                        while not llm_task.done():
+                            try:
+                                await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
+                                break
+                            except asyncio.TimeoutError:
+                                yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
+                        full_response = llm_task.result()
+                    except BaseException:
+                        llm_task.cancel()
+                        raise
 
                 # JSON 파싱하여 세션 생성
                 try:
