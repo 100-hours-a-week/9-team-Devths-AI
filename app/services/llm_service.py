@@ -65,8 +65,8 @@ class LLMService:
         # 각 키별 Gemini 클라이언트 생성
         self._clients = [genai.Client(api_key=k) for k in api_keys]
         self.client = self._clients[0]  # 기본 클라이언트 (하위 호환)
-        self.model_name = "gemini-3-flash-preview"
-        self.analysis_model = "gemini-3-flash-preview"
+        self.model_name = self._settings.gemini_model
+        self.analysis_model = self._settings.gemini_model
 
         logger.info(
             f"LLM Service initialized with model: {self.model_name}, "

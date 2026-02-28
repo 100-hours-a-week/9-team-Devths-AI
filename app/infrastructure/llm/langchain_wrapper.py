@@ -17,6 +17,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+from app.config.settings import get_settings
 from app.prompts.loader import load_prompt_yaml
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class LangChainLLMGateway:
         self,
         google_api_key: str | None = None,
         google_api_keys: list[str] | None = None,
-        model_name: str = "gemini-3-flash-preview",
+        model_name: str | None = None,
         embedding_model: str = "gemini-embedding-001",
         temperature: float = 0.7,
     ):
@@ -97,6 +98,7 @@ class LangChainLLMGateway:
             embedding_model: Model name for embeddings.
             temperature: Default temperature for generation.
         """
+        model_name = model_name or get_settings().gemini_model
         import random
 
         # API 키 수집
