@@ -74,7 +74,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
-        default="gemini-3-flash-preview",
+        default="gemini-3.1-flash-preview",
         description="Gemini model name",
     )
     gemini_embedding_model: str = Field(
@@ -441,7 +441,7 @@ class Settings(BaseSettings):
     # Evaluation Configuration (면접 답변 분석)
     # ============================================
     eval_gemini_model: str = Field(
-        default="gemini-3-pro-preview",
+        default="gemini-3.1-pro-preview",
         description="Gemini model for interview evaluation",
     )
     eval_thinking_level: str = Field(

@@ -545,6 +545,12 @@ async def generate_chat_stream(
                     )
                     yield f"data: {thinking_event}{sse_end}"
 
+                    safe_info(
+                        logger,
+                        "⏳ [PHASE 1] LLM 비스트리밍 호출 시작 | user=%s room=%s",
+                        request.user_id,
+                        request.room_id,
+                    )
                     llm_task = asyncio.create_task(
                         rag.llm.generate_response_non_stream(
                             user_message=init_prompt,
@@ -559,8 +565,16 @@ async def generate_chat_stream(
                                 await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
                                 break
                             except asyncio.TimeoutError:
+                                logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
                                 yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
                         full_response = llm_task.result()
+                        safe_info(
+                            logger,
+                            "✅ [PHASE 1] LLM 응답 수신 완료 (%d자) | user=%s room=%s",
+                            len(full_response),
+                            request.user_id,
+                            request.room_id,
+                        )
                     except BaseException:
                         llm_task.cancel()
                         raise
