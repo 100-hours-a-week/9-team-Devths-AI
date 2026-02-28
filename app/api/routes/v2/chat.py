@@ -568,7 +568,8 @@ async def generate_chat_stream(
                                 logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
                                 yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
                         full_response = llm_task.result()
-                        logger.info(
+                        safe_info(
+                            logger,
                             "✅ [PHASE 1] LLM 응답 수신 완료 (%d자) | user=%s room=%s",
                             len(full_response),
                             request.user_id,
