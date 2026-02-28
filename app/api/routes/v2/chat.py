@@ -567,7 +567,7 @@ async def generate_chat_stream(
                             except asyncio.TimeoutError:
                                 logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
                                 yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
-                        full_response = llm_task.result()
+                        safe_info(
                         logger.info(
                             "✅ [PHASE 1] LLM 응답 수신 완료 (%d자) | user=%s room=%s",
                             len(full_response),
