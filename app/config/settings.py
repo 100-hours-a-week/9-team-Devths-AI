@@ -74,7 +74,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY"),
     )
     gemini_model: str = Field(
-        default="gemini-3.1-flash-preview",
+        default="gemini-3-flash-preview",
         description="Gemini model name",
     )
     gemini_embedding_model: str = Field(
