@@ -16,6 +16,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+from app.utils.chromadb_utils import normalize_chromadb_filter
 from app.utils.langfuse_client import get_langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
@@ -147,12 +148,13 @@ class RAGChain:
     ) -> list[tuple[str, Document]]:
         """Run MMR search on one collection (sync method in thread)."""
         try:
+            effective_filter = normalize_chromadb_filter(filter_dict)
             docs = store.max_marginal_relevance_search(
                 query,
                 k=self._retrieval_k,
                 fetch_k=self._fetch_k,
                 lambda_mult=self._lambda_mult,
-                filter=filter_dict,
+                filter=effective_filter,
             )
             return [(collection_type, doc) for doc in docs]
         except Exception as e:
@@ -180,6 +182,7 @@ class RAGChain:
                 store = self._vectorstores.get(ct)
                 if not store:
                     continue
+                # user_id가 있고 portfolio가 아닌 경우에만 필터 적용
                 filter_dict = None
                 if ct != "portfolio" and user_id:
                     filter_dict = {"user_id": user_id}
@@ -192,13 +195,14 @@ class RAGChain:
                 )
                 all_pairs.extend(pairs)
         elif self._vectorstore:
+            # normalize_chromadb_filter로 user_id 정규화
+            effective_filter = normalize_chromadb_filter({"user_id": user_id}) if user_id else None
+            filter_kwargs: dict[str, Any] = {"score_threshold": 0.3, "k": self._retrieval_k}
+            if effective_filter:
+                filter_kwargs["filter"] = effective_filter
             retriever = self._vectorstore.as_retriever(
                 search_type="similarity_score_threshold",
-                search_kwargs={
-                    "score_threshold": 0.3,
-                    "k": self._retrieval_k,
-                    "filter": {"user_id": user_id},
-                },
+                search_kwargs=filter_kwargs,
             )
             docs = await retriever.aget_relevant_documents(query)
             for doc in docs:
