@@ -545,7 +545,8 @@ async def generate_chat_stream(
                     )
                     yield f"data: {thinking_event}{sse_end}"
 
-                    logger.info(
+                    safe_info(
+                        logger,
                         "⏳ [PHASE 1] LLM 비스트리밍 호출 시작 | user=%s room=%s",
                         request.user_id,
                         request.room_id,
