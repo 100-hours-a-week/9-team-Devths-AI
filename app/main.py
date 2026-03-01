@@ -14,6 +14,7 @@ from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
 from app.config.settings import get_settings
+from app.utils.chromadb_utils import apply_chromadb_query_fix
 
 # ============================================================================
 # 로깅 설정 (운영 서버 호환)
@@ -78,6 +79,9 @@ settings = get_settings()
 
 # 로깅 초기화
 setup_logging(settings)
+
+# chromadb 0.4.x where_document={} 버그 패치 (서버 시작 시 1회 적용)
+apply_chromadb_query_fix()
 
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
