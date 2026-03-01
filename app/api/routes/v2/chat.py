@@ -746,6 +746,15 @@ async def generate_chat_stream(
                     full_response = ""
                     system_prompt = get_system_tech_interview()
 
+                    safe_info(
+                        logger,
+                        "🔍 [꼬리질문 진단] Q%s depth=%s/%s → 꼬리질문 생성 시도",
+                        current_q_id,
+                        current_q.current_depth,
+                        current_q.max_depth,
+                    )
+                    yield ": keepalive\n\n"
+
                     if model_choice == "vllm" and rag.vllm:
                         async for chunk in rag.vllm.generate_response(
                             user_message=followup_prompt,
@@ -755,6 +764,7 @@ async def generate_chat_stream(
                         ):
                             record_ttft()
                             full_response += chunk
+                            yield ": k\n\n"
                     else:
                         async for chunk in rag.llm.generate_response(
                             user_message=followup_prompt,
@@ -765,12 +775,22 @@ async def generate_chat_stream(
                         ):
                             record_ttft()
                             full_response += chunk
+                            yield ": k\n\n"
+
+                    safe_info(logger, "🔍 [꼬리질문 진단] LLM 응답 앞 400자: %s", full_response[:400])
 
                     try:
                         json_start = full_response.find("{")
                         json_end = full_response.rfind("}") + 1
                         if json_start != -1 and json_end > json_start:
                             followup_data = json.loads(full_response[json_start:json_end])
+
+                            safe_info(
+                                logger,
+                                "🔍 [꼬리질문 진단] should_continue=%s | followup 존재=%s",
+                                followup_data.get("should_continue"),
+                                bool(followup_data.get("followup")),
+                            )
 
                             if followup_data.get("should_continue", True) and followup_data.get(
                                 "followup"
@@ -792,6 +812,11 @@ async def generate_chat_stream(
                                     yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                                     await asyncio.sleep(0.015)
                             else:
+                                safe_info(
+                                    logger,
+                                    "🔍 [꼬리질문 진단] 꼬리질문 스킵 → is_completed=True (Q%s)",
+                                    current_q_id,
+                                )
                                 current_q.is_completed = True
 
                                 # ADR-066: answer_quality 파싱 → 마스터한 질문 수집
