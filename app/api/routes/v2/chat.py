@@ -426,6 +426,12 @@ async def generate_chat_stream(
             user_message = request.message or ""
 
             session = request.context.interview_session
+            logger.info(
+                "🔍 [면접 진단] session_key=%s | request.interview_session=%s | user_msg_len=%d",
+                session_key,
+                f"phase={session.phase}" if session else "None",
+                len(user_message),
+            )
             if session is None:
                 session_data = await session_store.get(session_key)
                 session = InterviewSession.model_validate(session_data) if session_data else None
@@ -437,6 +443,12 @@ async def generate_chat_stream(
                         session.phase,
                         session.current_question_id,
                     )
+            logger.info(
+                "🔍 [면접 진단] 최종 세션 상태: %s",
+                f"phase={session.phase}, Q{session.current_question_id}/5"
+                if session
+                else "None → PHASE 1 시작",
+            )
 
             model_choice = (
                 request.model.value if hasattr(request.model, "value") else str(request.model)
