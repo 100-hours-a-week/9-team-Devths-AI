@@ -596,7 +596,7 @@ async def generate_chat_stream(
                         full_response = llm_task.result()
                         safe_info(
                             logger,
-                            "✅ [PHASE 1] LLM 응답 수신 완료 (%d자) | user=%s room=%s",
+                            "✅ [PHASE 1] LLM 응답 수신 완료 (%s자) | user=%s room=%s",
                             len(full_response),
                             request.user_id,
                             request.room_id,
@@ -667,9 +667,7 @@ async def generate_chat_stream(
 
                         logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
-                        await session_store.set(session_key, new_session.model_dump())
-                        safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
-
+                        # 질문 스트리밍을 먼저 수행 (Redis 저장 실패해도 사용자에게 질문 전달)
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
@@ -684,6 +682,16 @@ async def generate_chat_stream(
                                 "session": new_session.model_dump(),
                             }
                             yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
+
+                        # 세션 저장 (실패해도 질문은 이미 전달됨)
+                        try:
+                            await session_store.set(session_key, new_session.model_dump())
+                            safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
+                        except Exception as e:
+                            logger.error(
+                                "💾 [면접] 세션 저장 실패 (질문은 전달됨): %s",
+                                type(e).__name__,
+                            )
                     else:
                         raise ValueError("JSON 형식을 찾을 수 없습니다")
 
