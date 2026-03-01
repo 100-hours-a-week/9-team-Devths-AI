@@ -254,7 +254,18 @@ for i in {1..24}; do
         # 8. Trigger Auto-Embedding if flagged by CI/CD
         if [ "$TRIGGER_DATA_EMBEDDING" = "true" ]; then
             log "📂 Data directory change detected. Triggering auto-embedding..."
-            docker exec ai-service python scripts/auto_embed_data.py 2>&1 | tee -a "$LOG_FILE"
+            
+            # [수정] docker exec(컨테이너 내부 파일 의존) -> docker run(호스트 디렉토리 마운트 + 일회용 실행)
+            # 호스트의 data/ 폴더만 읽기 전용(ro)으로 안전하게 마운트하여 Dockerfile 미포함 문제 해결
+            # 이미 로드된 환경변수 중 필수인 것들을 명시적으로 주입
+            docker run --rm -v "$(pwd)/data:/app/data:ro" \
+                -e CHROMA_SERVER_HOST="${CHROMA_SERVER_HOST}" \
+                -e CHROMA_SERVER_PORT="${CHROMA_SERVER_PORT:-8000}" \
+                -e GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
+                -e INTERVIEW_DATASET_FILE="${INTERVIEW_DATASET_FILE}" \
+                "${IMAGE_URI}" \
+                poetry run python scripts/auto_embed_data.py 2>&1 | tee -a "$LOG_FILE"
+                
             if [ ${PIPESTATUS[0]} -eq 0 ]; then
                 log "✅ Auto-embedding completed successfully."
             else
