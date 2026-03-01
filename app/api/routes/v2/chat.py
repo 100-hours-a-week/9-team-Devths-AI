@@ -419,6 +419,10 @@ async def generate_chat_stream(
     # =========================================================================
     elif mode == ChatMode.INTERVIEW:
         try:
+            # SSE 스트림 즉시 오픈: Redis/RAG 등 첫 await 전에 keepalive를 전송해
+            # 프록시(Nginx) 및 메인 백엔드의 첫 청크 대기 타임아웃을 방지한다.
+            yield ": keepalive\n\n"
+
             interview_type = request.context.interview_type or "tech"
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
