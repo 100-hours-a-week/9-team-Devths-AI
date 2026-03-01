@@ -1,7 +1,7 @@
 """
-Gemini 3 Flash Preview를 사용한 얼굴 PII 마스킹 서비스
+Gemini Flash를 사용한 얼굴 PII 마스킹 서비스
 
-Gemini 3 Flash Preview의 bounding box detection을 사용하여 얼굴을 감지하고 원형으로 마스킹합니다.
+Gemini Flash의 bounding box detection을 사용하여 얼굴을 감지하고 원형으로 마스킹합니다.
 실패 시 OpenCV Haar Cascade를 fallback으로 사용합니다.
 """
 
@@ -18,6 +18,7 @@ import httpx
 import pdf2image
 from PIL import Image, ImageDraw
 
+from app.config.settings import get_settings
 from app.utils.log_sanitizer import sanitize_log_input
 from app.utils.url_validator import validate_url_or_raise
 
@@ -258,7 +259,7 @@ If no faces: {"faces": []}"""
 
             response = await asyncio.to_thread(
                 client.models.generate_content,
-                model="gemini-3-flash-preview",
+                model=get_settings().gemini_model,
                 contents=contents,
                 config=generation_config,
             )

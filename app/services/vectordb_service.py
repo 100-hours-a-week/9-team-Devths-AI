@@ -20,6 +20,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from app.config.settings import get_settings
 from app.services.text_splitter_service import TextChunk, TextSplitterService
+from app.utils.chromadb_utils import normalize_chromadb_filter
 
 logger = logging.getLogger(__name__)
 
@@ -485,11 +486,13 @@ class VectorDBService:
 
             start_time = time.perf_counter()
 
+            effective_where = normalize_chromadb_filter(where)
+
             # Query collection
             results = collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where,
+                where=effective_where,
                 include=["documents", "metadatas", "distances"],
             )
 
@@ -553,8 +556,8 @@ class VectorDBService:
         try:
             collection = self._get_collection(collection_type)
 
-            # Get all documents with matching user_id
-            result = collection.get(where={"user_id": user_id}, include=["documents", "metadatas"])
+            where_filter = normalize_chromadb_filter({"user_id": user_id})
+            result = collection.get(where=where_filter, include=["documents", "metadatas"])
 
             formatted_results = []
             if result and result["ids"] and len(result["ids"]) > 0:

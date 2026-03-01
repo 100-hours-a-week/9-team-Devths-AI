@@ -20,6 +20,7 @@ from google.genai import types as genai_types
 from langgraph.graph import END, StateGraph
 from openai import AsyncOpenAI
 
+from app.config.settings import get_settings
 from app.prompts.evaluation import (
     create_debate_rebuttal_prompt,
     create_gpt4o_analyze_prompt,
@@ -38,7 +39,7 @@ SCORE_DISAGREEMENT_THRESHOLD = 2
 def create_debate_graph(
     google_api_key: str,
     openai_api_key: str,
-    gemini_model: str = "gemini-3-pro-preview",
+    gemini_model: str | None = None,
     gpt_model: str = "gpt-4o",
     thinking_level: str = "HIGH",
 ) -> Any:
@@ -54,6 +55,8 @@ def create_debate_graph(
     Returns:
         Compiled LangGraph state machine
     """
+    gemini_model = gemini_model or get_settings().eval_gemini_model
+
     # 클라이언트 초기화
     gemini_client = genai.Client(api_key=google_api_key)
     openai_client = AsyncOpenAI(api_key=openai_api_key)
@@ -519,14 +522,14 @@ class DebateService:
         self,
         google_api_key: str,
         openai_api_key: str,
-        gemini_model: str = "gemini-3-pro-preview",
+        gemini_model: str | None = None,
         gpt_model: str = "gpt-4o",
         thinking_level: str = "HIGH",
     ):
         """Initialize debate service."""
         self._google_api_key = google_api_key
         self._openai_api_key = openai_api_key
-        self._gemini_model = gemini_model
+        self._gemini_model = gemini_model or get_settings().eval_gemini_model
         self._gpt_model = gpt_model
         self._thinking_level = thinking_level
         self._graph = create_debate_graph(

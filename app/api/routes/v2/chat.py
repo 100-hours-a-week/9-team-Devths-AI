@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from app.api.routes.v2._helpers import get_services, get_session_key
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
+from app.config.settings import get_settings
 from app.prompts import (
     get_extract_title_prompt,
 )
@@ -39,7 +40,7 @@ from app.schemas.chat import (
 from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
 from app.services.interview_dedup import is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
-from app.utils.log_sanitizer import safe_info, safe_warning
+from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
@@ -419,6 +420,10 @@ async def generate_chat_stream(
     # =========================================================================
     elif mode == ChatMode.INTERVIEW:
         try:
+            # SSE 스트림 즉시 오픈: Redis/RAG 등 첫 await 전에 keepalive를 전송해
+            # 프록시(Nginx) 및 메인 백엔드의 첫 청크 대기 타임아웃을 방지한다.
+            yield ": keepalive\n\n"
+
             interview_type = request.context.interview_type or "tech"
             interview_type_kr = "기술" if interview_type == "tech" else "인성"
 
@@ -426,8 +431,23 @@ async def generate_chat_stream(
             user_message = request.message or ""
 
             session = request.context.interview_session
+            safe_info(
+                logger,
+                "🔍 [면접 진단] session_key=%s | request.interview_session=%s | user_msg_len=%s",
+                session_key,
+                f"phase={session.phase}" if session else "None",
+                len(user_message),
+            )
             if session is None:
+                logger.debug(
+                    "🔍 [면접] session_store.get() 호출 전: key=%s",
+                    sanitize_log_input(session_key),
+                )
                 session_data = await session_store.get(session_key)
+                logger.debug(
+                    "🔍 [면접] session_store.get() 완료: data=%s",
+                    session_data is not None,
+                )
                 session = InterviewSession.model_validate(session_data) if session_data else None
                 if session:
                     safe_info(
@@ -437,6 +457,13 @@ async def generate_chat_stream(
                         session.phase,
                         session.current_question_id,
                     )
+            safe_info(
+                logger,
+                "🔍 [면접 진단] 최종 세션 상태: %s",
+                f"phase={session.phase}, Q{session.current_question_id}/5"
+                if session
+                else "None → PHASE 1 시작",
+            )
 
             model_choice = (
                 request.model.value if hasattr(request.model, "value") else str(request.model)
@@ -535,12 +562,50 @@ async def generate_chat_stream(
                         record_ttft()
                         full_response += chunk
                 else:
-                    full_response = await rag.llm.generate_response_non_stream(
-                        user_message=init_prompt,
-                        context=None,
-                        system_prompt=system_prompt,
-                        user_id=request.user_id,
+                    # Gunicorn + Nginx 환경에서 PHASE 1 LLM 대기(60~120초) 중
+                    # SSE idle timeout(proxy_read_timeout 기본 60s) 방지:
+                    # 1) 즉시 "생성 중" 이벤트 전송 → Nginx idle timer 리셋
+                    # 2) 25초마다 keepalive SSE comment 전송
+                    thinking_event = json.dumps(
+                        {"type": "thinking", "chunk": "⏳ 면접 질문을 생성하고 있습니다..."},
+                        ensure_ascii=False,
                     )
+                    yield f"data: {thinking_event}{sse_end}"
+
+                    safe_info(
+                        logger,
+                        "⏳ [PHASE 1] LLM 비스트리밍 호출 시작 | user=%s room=%s",
+                        request.user_id,
+                        request.room_id,
+                    )
+                    llm_task = asyncio.create_task(
+                        rag.llm.generate_response_non_stream(
+                            user_message=init_prompt,
+                            context=None,
+                            system_prompt=system_prompt,
+                            user_id=request.user_id,
+                            max_tokens=get_settings().llm_max_tokens_interview,
+                        )
+                    )
+                    try:
+                        while not llm_task.done():
+                            try:
+                                await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
+                                break
+                            except asyncio.TimeoutError:
+                                logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
+                                yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
+                        full_response = llm_task.result()
+                        safe_info(
+                            logger,
+                            "✅ [PHASE 1] LLM 응답 수신 완료 (%s자) | user=%s room=%s",
+                            len(full_response),
+                            request.user_id,
+                            request.room_id,
+                        )
+                    except BaseException:
+                        llm_task.cancel()
+                        raise
 
                 # JSON 파싱하여 세션 생성
                 try:
@@ -604,9 +669,7 @@ async def generate_chat_stream(
 
                         logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
 
-                        await session_store.set(session_key, new_session.model_dump())
-                        safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
-
+                        # 질문 스트리밍을 먼저 수행 (Redis 저장 실패해도 사용자에게 질문 전달)
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
@@ -621,6 +684,16 @@ async def generate_chat_stream(
                                 "session": new_session.model_dump(),
                             }
                             yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
+
+                        # 세션 저장 (실패해도 질문은 이미 전달됨)
+                        try:
+                            await session_store.set(session_key, new_session.model_dump())
+                            safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
+                        except Exception as e:
+                            logger.error(
+                                "💾 [면접] 세션 저장 실패 (질문은 전달됨): %s",
+                                type(e).__name__,
+                            )
                     else:
                         raise ValueError("JSON 형식을 찾을 수 없습니다")
 
@@ -673,6 +746,15 @@ async def generate_chat_stream(
                     full_response = ""
                     system_prompt = get_system_tech_interview()
 
+                    safe_info(
+                        logger,
+                        "🔍 [꼬리질문 진단] Q%s depth=%s/%s → 꼬리질문 생성 시도",
+                        current_q_id,
+                        current_q.current_depth,
+                        current_q.max_depth,
+                    )
+                    yield ": keepalive\n\n"
+
                     if model_choice == "vllm" and rag.vllm:
                         async for chunk in rag.vllm.generate_response(
                             user_message=followup_prompt,
@@ -682,6 +764,7 @@ async def generate_chat_stream(
                         ):
                             record_ttft()
                             full_response += chunk
+                            yield ": k\n\n"
                     else:
                         async for chunk in rag.llm.generate_response(
                             user_message=followup_prompt,
@@ -692,12 +775,22 @@ async def generate_chat_stream(
                         ):
                             record_ttft()
                             full_response += chunk
+                            yield ": k\n\n"
+
+                    safe_info(logger, "🔍 [꼬리질문 진단] LLM 응답 앞 400자: %s", full_response[:400])
 
                     try:
                         json_start = full_response.find("{")
                         json_end = full_response.rfind("}") + 1
                         if json_start != -1 and json_end > json_start:
                             followup_data = json.loads(full_response[json_start:json_end])
+
+                            safe_info(
+                                logger,
+                                "🔍 [꼬리질문 진단] should_continue=%s | followup 존재=%s",
+                                followup_data.get("should_continue"),
+                                bool(followup_data.get("followup")),
+                            )
 
                             if followup_data.get("should_continue", True) and followup_data.get(
                                 "followup"
@@ -719,6 +812,11 @@ async def generate_chat_stream(
                                     yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
                                     await asyncio.sleep(0.015)
                             else:
+                                safe_info(
+                                    logger,
+                                    "🔍 [꼬리질문 진단] 꼬리질문 스킵 → is_completed=True (Q%s)",
+                                    current_q_id,
+                                )
                                 current_q.is_completed = True
 
                                 # ADR-066: answer_quality 파싱 → 마스터한 질문 수집
