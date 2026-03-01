@@ -339,6 +339,14 @@ class Settings(BaseSettings):
         default=86400,
         description="Task TTL in seconds (24 hours)",
     )
+    redis_socket_timeout: float = Field(
+        default=2.0,
+        description="Redis 소켓 타임아웃 (초) — 장애 시 빠른 폴백을 위해 짧게 설정",
+    )
+    redis_connect_timeout: float = Field(
+        default=2.0,
+        description="Redis 연결 타임아웃 (초)",
+    )
 
     # ============================================
     # Task Queue Configuration
