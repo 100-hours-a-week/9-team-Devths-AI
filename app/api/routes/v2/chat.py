@@ -39,7 +39,7 @@ from app.schemas.chat import (
 from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
 from app.services.interview_dedup import is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
-from app.utils.log_sanitizer import safe_info, safe_warning
+from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
@@ -438,7 +438,15 @@ async def generate_chat_stream(
                 len(user_message),
             )
             if session is None:
+                logger.debug(
+                    "🔍 [면접] session_store.get() 호출 전: key=%s",
+                    sanitize_log_input(session_key),
+                )
                 session_data = await session_store.get(session_key)
+                logger.debug(
+                    "🔍 [면접] session_store.get() 완료: data=%s",
+                    session_data is not None,
+                )
                 session = InterviewSession.model_validate(session_data) if session_data else None
                 if session:
                     safe_info(

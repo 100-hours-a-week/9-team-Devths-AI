@@ -9,6 +9,8 @@ import json
 import logging
 from typing import Any
 
+from app.utils.log_sanitizer import sanitize_log_input
+
 from .base import BaseSessionStore
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,8 @@ class RedisSessionStore(BaseSessionStore):
         redis_url: str = "redis://localhost:6379/0",
         default_ttl: int = 3600,
         key_prefix: str = "session:",
+        socket_timeout: float = 5.0,
+        socket_connect_timeout: float = 5.0,
     ):
         """Initialize Redis session store.
 
@@ -32,13 +36,20 @@ class RedisSessionStore(BaseSessionStore):
             redis_url: Redis connection URL.
             default_ttl: Default TTL in seconds (1 hour).
             key_prefix: Prefix for all session keys.
+            socket_timeout: Socket timeout in seconds.
+            socket_connect_timeout: Connection timeout in seconds.
         """
         try:
             import redis.asyncio as redis
         except ImportError as err:
             raise ImportError("redis package is required. Install with: pip install redis") from err
 
-        self._redis = redis.from_url(redis_url, decode_responses=True)
+        self._redis = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
+        )
         self._default_ttl = default_ttl
         self._key_prefix = key_prefix
 
@@ -70,12 +81,16 @@ class RedisSessionStore(BaseSessionStore):
             Session data dict if found, None otherwise.
         """
         try:
+            safe_key = sanitize_log_input(key)
+            logger.debug("Redis GET: %s", sanitize_log_input(self._make_key(key)))
             data = await self._redis.get(self._make_key(key))
             if data is None:
+                logger.debug("Redis GET: %s not found", safe_key)
                 return None
+            logger.debug("Redis GET: %s found, size=%d", safe_key, len(data))
             return json.loads(data)
         except Exception as e:
-            logger.error(f"Error getting session {key}: {e}")
+            logger.error("Redis GET error for %s: %s", safe_key, type(e).__name__)
             return None
 
     async def set(
