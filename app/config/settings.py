@@ -501,8 +501,8 @@ class Settings(BaseSettings):
         description="분석 최대 토큰 수",
     )
     llm_max_tokens_interview: int = Field(
-        default=2048,
-        description="면접 질문/평가 최대 토큰 수",
+        default=4096,
+        description="면접 질문/평가 최대 토큰 수 (JSON 5개 질문 생성에 충분한 값)",
     )
 
     # ============================================

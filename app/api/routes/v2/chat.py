@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from app.api.routes.v2._helpers import get_services, get_session_key
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
+from app.config.settings import get_settings
 from app.prompts import (
     get_extract_title_prompt,
 )
@@ -583,6 +584,7 @@ async def generate_chat_stream(
                             context=None,
                             system_prompt=system_prompt,
                             user_id=request.user_id,
+                            max_tokens=get_settings().llm_max_tokens_interview,
                         )
                     )
                     try:
