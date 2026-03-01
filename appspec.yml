@@ -30,6 +30,13 @@ permissions:
     mode: 755
     type:
       - file
+  - object: /home/ubuntu/ai/data
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - directory
+    - file
 
 hooks:
   ApplicationStart:
