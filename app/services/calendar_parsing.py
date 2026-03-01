@@ -16,6 +16,8 @@ from google.genai import types
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from app.config.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,7 +57,7 @@ class CalendarParsingService:
 
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-3-flash-preview"
+        self.model_name = get_settings().gemini_model
 
         logger.info(f"Calendar Parsing Service initialized with model: {self.model_name}")
 

@@ -65,8 +65,8 @@ class LLMService:
         # 각 키별 Gemini 클라이언트 생성
         self._clients = [genai.Client(api_key=k) for k in api_keys]
         self.client = self._clients[0]  # 기본 클라이언트 (하위 호환)
-        self.model_name = "gemini-3-flash-preview"
-        self.analysis_model = "gemini-3-flash-preview"
+        self.model_name = self._settings.gemini_model
+        self.analysis_model = self._settings.gemini_model
 
         logger.info(
             f"LLM Service initialized with model: {self.model_name}, "
@@ -366,6 +366,7 @@ class LLMService:
         context: str | None = None,
         system_prompt: str | None = None,
         user_id: str | None = None,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Generate non-streaming response from LLM (JSON 응답 등에 적합)
@@ -375,6 +376,7 @@ class LLMService:
             context: RAG context from VectorDB (optional)
             system_prompt: System instructions (optional)
             user_id: User ID for tracing
+            max_tokens: 최대 출력 토큰 수. None이면 llm_max_tokens_chat 기본값 사용.
 
         Returns:
             Complete response text
@@ -410,7 +412,7 @@ class LLMService:
                 temperature=self._settings.llm_temperature_chat,
                 top_p=0.9,
                 top_k=40,
-                max_output_tokens=self._settings.llm_max_tokens_chat,
+                max_output_tokens=max_tokens or self._settings.llm_max_tokens_chat,
                 system_instruction=system_prompt if system_prompt else None,
             )
 
