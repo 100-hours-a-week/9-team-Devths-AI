@@ -52,6 +52,8 @@ class RedisSessionStore(BaseSessionStore):
         )
         self._default_ttl = default_ttl
         self._key_prefix = key_prefix
+        # Redis 장애 시 임시 in-memory 폴백 (프로세스 재시작 시 초기화됨)
+        self._fallback: dict[str, Any] = {}
 
         logger.info(f"RedisSessionStore initialized with URL: {redis_url}")
 
@@ -79,19 +81,29 @@ class RedisSessionStore(BaseSessionStore):
 
         Returns:
             Session data dict if found, None otherwise.
+            Redis 장애 시 in-memory 폴백에서 복원 시도.
         """
+        safe_key = sanitize_log_input(key)
         try:
-            safe_key = sanitize_log_input(key)
             logger.debug("Redis GET: %s", sanitize_log_input(self._make_key(key)))
             data = await self._redis.get(self._make_key(key))
             if data is None:
                 logger.debug("Redis GET: %s not found", safe_key)
-                return None
+                # Redis에 없으면 폴백 체크 (이전 SET이 실패했을 수 있음)
+                fallback = self._fallback.get(key)
+                if fallback:
+                    logger.warning("Redis miss — 메모리 폴백에서 세션 복원: %s", safe_key)
+                return fallback
+            result = json.loads(data)
             logger.debug("Redis GET: %s found, size=%d", safe_key, len(data))
-            return json.loads(data)
+            self._fallback[key] = result  # 폴백 동기화
+            return result
         except Exception as e:
             logger.error("Redis GET error for %s: %s", safe_key, type(e).__name__)
-            return None
+            fallback = self._fallback.get(key)
+            if fallback:
+                logger.warning("Redis 장애 — 메모리 폴백으로 세션 복원: %s", safe_key)
+            return fallback
 
     async def set(
         self,
@@ -106,6 +118,8 @@ class RedisSessionStore(BaseSessionStore):
             value: Session data to store.
             ttl: Time-to-live in seconds (None for default).
         """
+        # 폴백 먼저 저장 (항상 성공 — Redis 장애 시에도 세션 보존)
+        self._fallback[key] = value
         try:
             ttl_seconds = ttl if ttl is not None else self._default_ttl
             data = json.dumps(value)
@@ -121,8 +135,7 @@ class RedisSessionStore(BaseSessionStore):
 
             logger.debug(f"Set session {key} with TTL {ttl_seconds}s")
         except Exception as e:
-            logger.error(f"Error setting session {key}: {e}")
-            raise
+            logger.error(f"Error setting session {key}: {e} (메모리 폴백 사용 중)")
 
     async def delete(self, key: str) -> bool:
         """Delete session data.
@@ -133,6 +146,7 @@ class RedisSessionStore(BaseSessionStore):
         Returns:
             True if deleted, False if not found.
         """
+        self._fallback.pop(key, None)  # 폴백에서도 삭제
         try:
             result = await self._redis.delete(self._make_key(key))
             if result > 0:
