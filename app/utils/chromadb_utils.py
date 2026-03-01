@@ -4,6 +4,8 @@ ChromaDB 유틸리티 함수
 ChromaDB where 필터 정규화 등 공통 로직을 제공합니다.
 """
 
+import importlib
+import logging
 from typing import Any
 
 
@@ -49,10 +51,7 @@ def apply_chromadb_query_fix() -> None:
 
     chromadb 업그레이드 시 자동으로 무해(harmless)해지는 구조.
     """
-    import importlib
-    import logging as _logging
-
-    _patch_logger = _logging.getLogger(__name__)
+    _patch_logger = logging.getLogger(__name__)
     patched_any = False
 
     for module_path, class_name in [
@@ -70,7 +69,10 @@ def apply_chromadb_query_fix() -> None:
 
             def _make_fixed(orig):
                 def _fixed_query(self, *args, **kwargs):
-                    # {} → None 변환 (chromadb 0.4.x 버그 수정)
+                    # chromadb 0.4.x에서 Collection.query()는 _client._query()를
+                    # 항상 keyword argument로만 호출하므로 kwargs로 체크.
+                    # chromadb 업그레이드 후 positional 방식으로 변경되면
+                    # kwargs 체크가 무효화되므로 업그레이드 시 재확인 필요.
                     if kwargs.get("where") == {}:
                         kwargs["where"] = None
                     if kwargs.get("where_document") == {}:

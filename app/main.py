@@ -80,7 +80,10 @@ settings = get_settings()
 # 로깅 초기화
 setup_logging(settings)
 
-# chromadb 0.4.x where_document={} 버그 패치 (서버 시작 시 1회 적용)
+# chromadb 0.4.x where_document={} 버그 패치.
+# lifespan/startup_event가 아닌 모듈 레벨에서 호출하는 이유:
+#   - 라우터 임포트 시점에 chromadb 클라이언트가 초기화될 수 있으므로
+#     FastAPI 앱 생성 이전에 패치를 적용해야 안전.
 apply_chromadb_query_fix()
 
 logger = logging.getLogger(__name__)
