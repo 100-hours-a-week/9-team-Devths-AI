@@ -7,6 +7,9 @@ files:
   - source: docker-compose.cicd.yml
     destination: /home/ubuntu/ai
     overwrite: yes
+  - source: data/
+    destination: /home/ubuntu/ai/data
+    overwrite: yes
 
 permissions:
   - object: /home/ubuntu/ai/deploy
