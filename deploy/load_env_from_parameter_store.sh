@@ -47,13 +47,14 @@ if [ -z "$AWS_REGION" ] && [ -z "$AWS_DEFAULT_REGION" ]; then
     echo "🌍 AWS Region set to: $REGION"
 fi
 
-# Parameter Store에서 모든 파라미터 가져오기 (Recursive 옵션 유지, 로그 숨김 해제)
+# Parameter Store에서 모든 파라미터 가져오기
+# --no-paginate: NextToken 페이지네이션 없이 전체 결과 한 번에 반환 (--max-items 제거)
 PARAMS=$(aws ssm get-parameters-by-path \
     --region "${AWS_REGION:-ap-northeast-2}" \
     --path "$PARAMETER_PATH" \
     --recursive \
     --with-decryption \
-    --max-items 100 \
+    --no-paginate \
     --query 'Parameters[*].[Name,Value]' \
     --output text)
 
@@ -72,16 +73,31 @@ fi
 # 파라미터를 환경변수로 export
 echo "📥 Exporting parameters as environment variables..."
 PARAM_KEYS=()
+
+# herestring(<<<) 대신 process substitution(<())으로 변경
+# → trailing newline으로 인한 마지막 줄 파싱 오류 방지
 while IFS=$'\t' read -r name value; do
-    # 파라미터 이름에서 경로 제거 (예: /devths/ai/prod/API_KEY -> API_KEY)
-    var_name=$(echo "$name" | sed "s|${PARAMETER_PATH}||")
-    export "$var_name=$value"
+    # bash parameter expansion으로 경로 제거 (sed 특수문자 문제 방지)
+    # 예: /Dev/AI/GOOGLE_API_KEY → GOOGLE_API_KEY
+    var_name="${name#"${PARAMETER_PATH}"}"
+
+    # 변수명이 비어있거나 경로 제거가 안 된 경우 건너뜀
+    if [ -z "$var_name" ] || [ "$var_name" = "$name" ]; then
+        echo "   ⏭️  Skipping invalid parameter: $name"
+        continue
+    fi
+
+    # export 시 값에 공백·특수문자 포함돼도 안전하도록 printf + declare 활용
+    export "$var_name"
+    printf -v "$var_name" '%s' "$value"
+    declare -gx "$var_name"
+
     PARAM_KEYS+=("$var_name")
     echo "   ✓ $var_name"
-done <<< "$PARAMS"
+done < <(echo "$PARAMS")
 
 export LOADED_PARAM_KEYS="${PARAM_KEYS[*]}"
-echo "✅ Environment variables loaded from Parameter Store (Exported keys: $LOADED_PARAM_KEYS)"
+echo "✅ Loaded ${#PARAM_KEYS[@]} variables from Parameter Store (Path: $PARAMETER_PATH)"
 
 # 필수 환경변수 검증
 REQUIRED_VARS=("API_KEY")
