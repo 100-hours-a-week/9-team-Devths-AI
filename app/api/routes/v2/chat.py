@@ -428,7 +428,7 @@ async def generate_chat_stream(
             session = request.context.interview_session
             safe_info(
                 logger,
-                "🔍 [면접 진단] session_key=%s | request.interview_session=%s | user_msg_len=%d",
+                "🔍 [면접 진단] session_key=%s | request.interview_session=%s | user_msg_len=%s",
                 session_key,
                 f"phase={session.phase}" if session else "None",
                 len(user_message),
