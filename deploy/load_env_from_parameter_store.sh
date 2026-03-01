@@ -48,13 +48,15 @@ if [ -z "$AWS_REGION" ] && [ -z "$AWS_DEFAULT_REGION" ]; then
 fi
 
 # Parameter Store에서 모든 파라미터 가져오기
-# --no-paginate: NextToken 페이지네이션 없이 전체 결과 한 번에 반환 (--max-items 제거)
+# 주의: --max-items, --no-paginate 사용 금지
+#   --no-paginate: 첫 페이지(10개)만 반환 → 변수 누락 버그
+#   --max-items N: 클라이언트 페이지네이션 제한 → 누락 가능
+# AWS CLI 기본값(옵션 없음): 자동 페이지네이션으로 전체 결과 반환 ✅
 PARAMS=$(aws ssm get-parameters-by-path \
     --region "${AWS_REGION:-ap-northeast-2}" \
     --path "$PARAMETER_PATH" \
     --recursive \
     --with-decryption \
-    --no-paginate \
     --query 'Parameters[*].[Name,Value]' \
     --output text)
 
