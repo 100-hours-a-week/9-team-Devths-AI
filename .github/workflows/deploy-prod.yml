@@ -183,6 +183,7 @@ jobs:
           cp -r deploy/ deploy-package/
           cp appspec.yml deploy-package/
           cp docker-compose.cicd.yml deploy-package/  # EC2에 복사될 Compose 파일
+          cp -r data/ deploy-package/ 2>/dev/null || true # 데이터 디렉터리 (EC2 볼륨 마운트 용도)
 
           # .deploy-env: 환경 식별 정보
           echo "export DEPLOY_BRANCH=\"main\"" > deploy-package/.deploy-env
