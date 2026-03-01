@@ -3,7 +3,7 @@ ADR-091: LLM-as-Judge 서비스.
 
 Gemini Judge LLM으로 RAG 파이프라인 응답 품질을 채점하고 Langfuse에 기록한다.
 
-Judge 모델: settings.eval_gemini_model (gemini-3-pro-preview)
+Judge 모델: settings.eval_gemini_model (gemini-3.1-pro-preview)
 채점 기준: relevance / accuracy / fluency / completeness (각 1~5점)
 """
 
@@ -40,7 +40,7 @@ def _load_judge_prompt() -> str:
 class JudgeService:
     """ADR-091: LLM-as-Judge — RAG 파이프라인 응답 품질 채점.
 
-    Judge 모델: settings.eval_gemini_model (gemini-3-pro-preview).
+    Judge 모델: settings.eval_gemini_model (gemini-3.1-pro-preview).
     google-genai SDK 직접 사용 (InterviewAnalyzer와 동일 패턴).
     채점 결과는 Langfuse trace에 자동 기록된다.
 

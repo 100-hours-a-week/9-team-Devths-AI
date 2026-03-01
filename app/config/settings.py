@@ -339,6 +339,14 @@ class Settings(BaseSettings):
         default=86400,
         description="Task TTL in seconds (24 hours)",
     )
+    redis_socket_timeout: float = Field(
+        default=2.0,
+        description="Redis 소켓 타임아웃 (초) — 장애 시 빠른 폴백을 위해 짧게 설정",
+    )
+    redis_connect_timeout: float = Field(
+        default=2.0,
+        description="Redis 연결 타임아웃 (초)",
+    )
 
     # ============================================
     # Task Queue Configuration
@@ -441,7 +449,7 @@ class Settings(BaseSettings):
     # Evaluation Configuration (면접 답변 분석)
     # ============================================
     eval_gemini_model: str = Field(
-        default="gemini-3-pro-preview",
+        default="gemini-3.1-pro-preview",
         description="Gemini model for interview evaluation",
     )
     eval_thinking_level: str = Field(
@@ -501,8 +509,8 @@ class Settings(BaseSettings):
         description="분석 최대 토큰 수",
     )
     llm_max_tokens_interview: int = Field(
-        default=1024,
-        description="면접 질문/평가 최대 토큰 수",
+        default=4096,
+        description="면접 질문/평가 최대 토큰 수 (JSON 5개 질문 생성에 충분한 값)",
     )
 
     # ============================================
