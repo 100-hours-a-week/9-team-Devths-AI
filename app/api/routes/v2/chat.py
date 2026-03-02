@@ -39,12 +39,17 @@ from app.schemas.chat import (
     InterviewSession,
 )
 from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
-from app.services.interview_dedup import is_mastered_quality
+from app.services.interview_dedup import cosine_similarity, is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
+
+# 인성 면접 질문 선택 관련 상수
+PERSONALITY_SIMILARITY_THRESHOLD = 0.80  # 질문 간 유사도 임계값
+PERSONALITY_QUERY_COUNT = 6  # 검색할 카테고리 수
+PERSONALITY_RESULTS_PER_QUERY = 15  # 카테고리당 검색 결과 수
 
 router = APIRouter()
 
@@ -564,8 +569,6 @@ async def generate_chat_stream(
                         "keywords": ["자기소개", "경력", "역량"],
                     }
                     try:
-                        from app.services.interview_dedup import cosine_similarity
-
                         # 다양한 카테고리의 쿼리로 검색하여 질문 다양성 확보
                         _personality_queries = [
                             "팀워크 협업 경험",
@@ -579,9 +582,9 @@ async def generate_chat_stream(
                             "동기부여 열정",
                             "적응력 변화 대응",
                         ]
-                        # 랜덤하게 6개 카테고리 선택 (더 많은 후보 확보)
                         _selected_queries = random.sample(
-                            _personality_queries, min(6, len(_personality_queries))
+                            _personality_queries,
+                            min(PERSONALITY_QUERY_COUNT, len(_personality_queries)),
                         )
 
                         # 병렬 VectorDB 쿼리로 성능 최적화
@@ -589,7 +592,7 @@ async def generate_chat_stream(
                             return await rag.vectordb.query(
                                 query_text=query_text,
                                 collection_type="interview_feedback",
-                                n_results=15,
+                                n_results=PERSONALITY_RESULTS_PER_QUERY,
                                 where={"interview_type": "personality"},
                                 max_distance=1.8,
                             )
@@ -619,7 +622,6 @@ async def generate_chat_stream(
                             random.shuffle(_all_candidates)
                             _selected: list[dict] = []
                             _selected_embeddings: list[list[float]] = []
-                            _similarity_threshold = 0.80
 
                             for candidate in _all_candidates:
                                 if len(_selected) >= 4:
@@ -632,7 +634,7 @@ async def generate_chat_stream(
                                 is_similar = False
                                 for existing_emb in _selected_embeddings:
                                     sim = cosine_similarity(q_embedding, existing_emb)
-                                    if sim >= _similarity_threshold:
+                                    if sim >= PERSONALITY_SIMILARITY_THRESHOLD:
                                         logger.debug(
                                             "🔄 유사 질문 스킵 (sim=%.2f): %s", sim, q_text[:30]
                                         )
