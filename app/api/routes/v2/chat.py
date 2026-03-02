@@ -39,12 +39,17 @@ from app.schemas.chat import (
     InterviewSession,
 )
 from app.services.example_selector import get_few_shot_for_personality, get_few_shot_for_technical
-from app.services.interview_dedup import is_mastered_quality
+from app.services.interview_dedup import cosine_similarity, is_mastered_quality
 from app.services.web_loader_service import WebLoaderService
 from app.utils.log_sanitizer import safe_info, safe_warning, sanitize_log_input
 from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
+
+# 인성 면접 질문 선택 관련 상수
+PERSONALITY_SIMILARITY_THRESHOLD = 0.80  # 질문 간 유사도 임계값
+PERSONALITY_QUERY_COUNT = 6  # 검색할 카테고리 수
+PERSONALITY_RESULTS_PER_QUERY = 15  # 카테고리당 검색 결과 수
 
 router = APIRouter()
 
@@ -577,9 +582,9 @@ async def generate_chat_stream(
                             "동기부여 열정",
                             "적응력 변화 대응",
                         ]
-                        # 랜덤하게 4개 카테고리 선택
                         _selected_queries = random.sample(
-                            _personality_queries, min(4, len(_personality_queries))
+                            _personality_queries,
+                            min(PERSONALITY_QUERY_COUNT, len(_personality_queries)),
                         )
 
                         # 병렬 VectorDB 쿼리로 성능 최적화
@@ -587,7 +592,7 @@ async def generate_chat_stream(
                             return await rag.vectordb.query(
                                 query_text=query_text,
                                 collection_type="interview_feedback",
-                                n_results=10,
+                                n_results=PERSONALITY_RESULTS_PER_QUERY,
                                 where={"interview_type": "personality"},
                                 max_distance=1.8,
                             )
@@ -612,21 +617,55 @@ async def generate_chat_stream(
                             _selected_queries,
                         )
 
+                        # 유사도 기반 중복 제거하며 4개 선택
                         if len(_all_candidates) >= 4:
-                            _selected = random.sample(_all_candidates, 4)
-                            _fb_qs = [
-                                {
-                                    "id": i + 2,
-                                    "category": f"personality_q{i + 2}",
-                                    "category_name": "인성",
-                                    "question": r["metadata"]["question_only"],
-                                    "intent": "",
-                                    "keywords": [],
-                                }
-                                for i, r in enumerate(_selected)
-                            ]
-                            logger.info("✅ interview_feedback 인성 질문 4개 랜덤 선택 → LLM 스킵")
-                            behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs}
+                            random.shuffle(_all_candidates)
+                            _selected: list[dict] = []
+                            _selected_embeddings: list[list[float]] = []
+
+                            for candidate in _all_candidates:
+                                if len(_selected) >= 4:
+                                    break
+
+                                q_text = candidate["metadata"]["question_only"]
+                                q_embedding = await rag.vectordb.create_embedding(q_text)
+
+                                # 이미 선택된 질문들과 유사도 체크
+                                is_similar = False
+                                for existing_emb in _selected_embeddings:
+                                    sim = cosine_similarity(q_embedding, existing_emb)
+                                    if sim >= PERSONALITY_SIMILARITY_THRESHOLD:
+                                        logger.debug(
+                                            "🔄 유사 질문 스킵 (sim=%.2f): %s", sim, q_text[:30]
+                                        )
+                                        is_similar = True
+                                        break
+
+                                if not is_similar:
+                                    _selected.append(candidate)
+                                    _selected_embeddings.append(q_embedding)
+
+                            if len(_selected) >= 4:
+                                _fb_qs = [
+                                    {
+                                        "id": i + 2,
+                                        "category": f"personality_q{i + 2}",
+                                        "category_name": "인성",
+                                        "question": r["metadata"]["question_only"],
+                                        "intent": "",
+                                        "keywords": [],
+                                    }
+                                    for i, r in enumerate(_selected[:4])
+                                ]
+                                logger.info(
+                                    "✅ interview_feedback 인성 질문 4개 선택 (유사도 필터 적용)"
+                                )
+                                behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs}
+                            else:
+                                logger.warning(
+                                    "⚠️ 유사도 필터 후 질문 부족 (%d개) → LLM 폴백",
+                                    len(_selected),
+                                )
                     except Exception as _e:
                         logger.warning("interview_feedback 선 조회 실패 → LLM 폴백: %s", _e)
 
