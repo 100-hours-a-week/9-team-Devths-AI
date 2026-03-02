@@ -5,6 +5,7 @@ Implements the BaseSessionStore interface with Redis backend.
 Used for production environments with distributed systems.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -75,9 +76,8 @@ class RedisSessionStore(BaseSessionStore):
         try:
             if not os.path.exists(_PERSIST_FILE):
                 return
-            with self._file_lock:
-                with open(_PERSIST_FILE, "r", encoding="utf-8") as f:
-                    raw: dict[str, Any] = json.load(f)
+            with self._file_lock, open(_PERSIST_FILE, encoding="utf-8") as f:
+                raw: dict[str, Any] = json.load(f)
             now = time.time()
             valid = {
                 k: v["data"]
@@ -91,15 +91,22 @@ class RedisSessionStore(BaseSessionStore):
             logger.warning("파일 폴백 로드 실패 (무시): %s", e)
 
     def _save_file_fallback(self, key: str, value: dict[str, Any]) -> None:
-        """세션을 파일에 저장 (서버 재시작 대비)."""
+        """세션을 파일에 저장 (서버 재시작 대비). 만료 항목 동시 정리."""
         try:
             with self._file_lock:
                 try:
-                    with open(_PERSIST_FILE, "r", encoding="utf-8") as f:
+                    with open(_PERSIST_FILE, encoding="utf-8") as f:
                         raw: dict[str, Any] = json.load(f)
                 except (FileNotFoundError, json.JSONDecodeError):
                     raw = {}
-                raw[key] = {"data": value, "ts": time.time()}
+                # 저장 시 만료 항목 정리 — 파일 무한 증가 방지
+                now = time.time()
+                raw = {
+                    k: v
+                    for k, v in raw.items()
+                    if isinstance(v, dict) and now - v.get("ts", 0) < _PERSIST_TTL
+                }
+                raw[key] = {"data": value, "ts": now}
                 with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
                     json.dump(raw, f, ensure_ascii=False)
         except Exception as e:
@@ -110,7 +117,7 @@ class RedisSessionStore(BaseSessionStore):
         try:
             with self._file_lock:
                 try:
-                    with open(_PERSIST_FILE, "r", encoding="utf-8") as f:
+                    with open(_PERSIST_FILE, encoding="utf-8") as f:
                         raw: dict[str, Any] = json.load(f)
                 except (FileNotFoundError, json.JSONDecodeError):
                     return
@@ -169,8 +176,8 @@ class RedisSessionStore(BaseSessionStore):
             if fallback:
                 logger.warning("Redis 장애 — 메모리 폴백으로 세션 복원: %s", safe_key)
                 return fallback
-            # 2단계: 파일 폴백 (서버 재시작 후 메모리가 비어 있을 때)
-            self._load_file_fallback()
+            # 2단계: 파일 폴백 (서버 재시작 후 메모리가 비어 있을 때) — 별도 스레드로 비블로킹
+            await asyncio.to_thread(self._load_file_fallback)
             fallback = self._fallback.get(key)
             if fallback:
                 logger.warning("Redis 장애 — 파일 폴백으로 세션 복원 (재시작 후): %s", safe_key)
@@ -191,7 +198,8 @@ class RedisSessionStore(BaseSessionStore):
         """
         # 폴백 먼저 저장 (항상 성공 — Redis 장애 및 재시작에도 세션 보존)
         self._fallback[key] = value
-        self._save_file_fallback(key, value)  # 파일 폴백 저장 (재시작 대비)
+        # 파일 폴백 저장 — 이벤트 루프 비블로킹 (스레드 풀에서 실행)
+        asyncio.get_running_loop().run_in_executor(None, self._save_file_fallback, key, value)
         try:
             ttl_seconds = ttl if ttl is not None else self._default_ttl
             data = json.dumps(value)
@@ -219,7 +227,8 @@ class RedisSessionStore(BaseSessionStore):
             True if deleted, False if not found.
         """
         self._fallback.pop(key, None)  # 메모리 폴백에서 삭제
-        self._delete_file_fallback(key)  # 파일 폴백에서도 삭제
+        # 파일 폴백 삭제 — 이벤트 루프 비블로킹 (스레드 풀에서 실행)
+        asyncio.get_running_loop().run_in_executor(None, self._delete_file_fallback, key)
         try:
             result = await self._redis.delete(self._make_key(key))
             if result > 0:
