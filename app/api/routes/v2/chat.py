@@ -551,124 +551,131 @@ async def generate_chat_stream(
                     except Exception as e:
                         logger.debug("Few-shot tech selection skipped: %s", e)
 
-                if model_choice == "vllm" and rag.vllm:
-                    full_response = ""
-                    async for chunk in rag.vllm.generate_response(
-                        user_message=init_prompt,
-                        context=None,
-                        history=[],
-                        system_prompt=system_prompt,
-                    ):
-                        record_ttft()
-                        full_response += chunk
-                else:
-                    # Gunicorn + Nginx 환경에서 PHASE 1 LLM 대기(60~120초) 중
-                    # SSE idle timeout(proxy_read_timeout 기본 60s) 방지:
-                    # 1) 즉시 "생성 중" 이벤트 전송 → Nginx idle timer 리셋
-                    # 2) 25초마다 keepalive SSE comment 전송
-                    thinking_event = json.dumps(
-                        {"type": "thinking", "chunk": "⏳ 면접 질문을 생성하고 있습니다..."},
-                        ensure_ascii=False,
-                    )
-                    yield f"data: {thinking_event}{sse_end}"
+                # 인성 면접: interview_feedback에서 미리 질문 로드 (LLM 스킵)
+                behavior_questions_data: dict | None = None
+                if interview_type == "behavior":
+                    _fixed_q1 = {
+                        "id": 1,
+                        "category": "intro_self",
+                        "category_name": "자기소개",
+                        "question": "자기소개 해보세요.",
+                        "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                        "keywords": ["자기소개", "경력", "역량"],
+                    }
+                    try:
+                        _fb = await rag.vectordb.query(
+                            query_text="인성 면접 질문",
+                            collection_type="interview_feedback",
+                            n_results=4,
+                            where={"interview_type": "personality"},
+                        )
+                        _fb_qs = [
+                            {
+                                "id": i + 2,
+                                "category": f"personality_q{i + 2}",
+                                "category_name": "인성",
+                                "question": r["metadata"]["question_only"],
+                                "intent": "",
+                                "keywords": [],
+                            }
+                            for i, r in enumerate(_fb)
+                            if (r.get("metadata") or {}).get("question_only")
+                        ]
+                        if len(_fb_qs) >= 4:
+                            logger.info(
+                                "✅ interview_feedback 인성 질문 %d개 → LLM 스킵", len(_fb_qs)
+                            )
+                            behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs[:4]}
+                    except Exception as _e:
+                        logger.warning("interview_feedback 선 조회 실패 → LLM 폴백: %s", _e)
 
-                    safe_info(
-                        logger,
-                        "⏳ [PHASE 1] LLM 비스트리밍 호출 시작 | user=%s room=%s",
-                        request.user_id,
-                        request.room_id,
-                    )
-                    llm_task = asyncio.create_task(
-                        rag.llm.generate_response_non_stream(
+                full_response = ""  # 기본값 (except block에서 full_response[:500] 참조)
+                if behavior_questions_data is None:
+                    if model_choice == "vllm" and rag.vllm:
+                        async for chunk in rag.vllm.generate_response(
                             user_message=init_prompt,
                             context=None,
+                            history=[],
                             system_prompt=system_prompt,
-                            user_id=request.user_id,
-                            max_tokens=get_settings().llm_max_tokens_interview,
+                        ):
+                            record_ttft()
+                            full_response += chunk
+                    else:
+                        # Gunicorn + Nginx 환경에서 PHASE 1 LLM 대기(60~120초) 중
+                        # SSE idle timeout(proxy_read_timeout 기본 60s) 방지:
+                        # 1) 즉시 "생성 중" 이벤트 전송 → Nginx idle timer 리셋
+                        # 2) 25초마다 keepalive SSE comment 전송
+                        thinking_event = json.dumps(
+                            {"type": "thinking", "chunk": "⏳ 면접 질문을 생성하고 있습니다..."},
+                            ensure_ascii=False,
                         )
-                    )
-                    try:
-                        while not llm_task.done():
-                            try:
-                                await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
-                                break
-                            except asyncio.TimeoutError:
-                                logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
-                                yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
-                        full_response = llm_task.result()
+                        yield f"data: {thinking_event}{sse_end}"
+
                         safe_info(
                             logger,
-                            "✅ [PHASE 1] LLM 응답 수신 완료 (%s자) | user=%s room=%s",
-                            len(full_response),
+                            "⏳ [PHASE 1] LLM 비스트리밍 호출 시작 | user=%s room=%s",
                             request.user_id,
                             request.room_id,
                         )
-                    except BaseException:
-                        llm_task.cancel()
-                        raise
+                        llm_task = asyncio.create_task(
+                            rag.llm.generate_response_non_stream(
+                                user_message=init_prompt,
+                                context=None,
+                                system_prompt=system_prompt,
+                                user_id=request.user_id,
+                                max_tokens=get_settings().llm_max_tokens_interview,
+                            )
+                        )
+                        try:
+                            while not llm_task.done():
+                                try:
+                                    await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
+                                    break
+                                except asyncio.TimeoutError:
+                                    logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
+                                    yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
+                            full_response = llm_task.result()
+                            safe_info(
+                                logger,
+                                "✅ [PHASE 1] LLM 응답 수신 완료 (%s자) | user=%s room=%s",
+                                len(full_response),
+                                request.user_id,
+                                request.room_id,
+                            )
+                        except BaseException:
+                            llm_task.cancel()
+                            raise
 
-                # JSON 파싱하여 세션 생성
+                # JSON 파싱 또는 vectordb 직접 구성
                 try:
-                    json_content = re.sub(r"```json\s*", "", full_response)
-                    json_content = re.sub(r"```\s*$", "", json_content)
-                    json_content = json_content.strip()
+                    if behavior_questions_data is not None:
+                        # 인성 면접 vectordb 경로: LLM 없이 직접 세션 구성
+                        questions_data = behavior_questions_data
+                    else:
+                        # LLM 응답 파싱 (기존 경로)
+                        json_content = re.sub(r"```json\s*", "", full_response)
+                        json_content = re.sub(r"```\s*$", "", json_content)
+                        json_content = json_content.strip()
 
-                    json_start = json_content.find("{")
-                    json_end = json_content.rfind("}") + 1
+                        json_start = json_content.find("{")
+                        json_end = json_content.rfind("}") + 1
 
-                    if json_start != -1 and json_end > json_start:
-                        json_str = json_content[json_start:json_end]
-                        logger.info(f"JSON 파싱 시도 (첫 200자): {json_str[:200]}")
+                        if json_start != -1 and json_end > json_start:
+                            json_str = json_content[json_start:json_end]
+                            logger.info(f"JSON 파싱 시도 (첫 200자): {json_str[:200]}")
 
-                        questions_data = json.loads(json_str)
+                            questions_data = json.loads(json_str)
 
-                        # 인성 면접: Q1 고정 + Q2-Q5는 interview_feedback VectorDB에서 로드
-                        if interview_type == "behavior":
-                            fixed_q1 = {
-                                "id": 1,
-                                "category": "intro_self",
-                                "category_name": "자기소개",
-                                "question": "자기소개 해보세요.",
-                                "intent": "지원자의 전반적인 역량과 경력 요약 파악",
-                                "keywords": ["자기소개", "경력", "역량"],
-                            }
-
-                            # interview_feedback에서 인성 면접 Q2-Q5 로드 시도
-                            fb_personality_qs: list[dict] = []
-                            try:
-                                fb_results = await rag.vectordb.query(
-                                    query_text="인성 면접 질문",
-                                    collection_type="interview_feedback",
-                                    n_results=4,
-                                    where={"interview_type": "personality"},
-                                )
-                                for i, r in enumerate(fb_results):
-                                    q_text = (r.get("metadata") or {}).get("question_only", "")
-                                    if q_text:
-                                        fb_personality_qs.append({
-                                            "id": i + 2,
-                                            "category": f"personality_q{i + 2}",
-                                            "category_name": "인성",
-                                            "question": q_text,
-                                            "intent": "",
-                                            "keywords": [],
-                                        })
-                            except Exception as fb_err:
-                                logger.warning(
-                                    "interview_feedback 인성 질문 조회 실패 → LLM 폴백: %s", fb_err
-                                )
-
-                            if len(fb_personality_qs) >= 4:
-                                logger.info(
-                                    "✅ interview_feedback에서 인성 면접 Q2-Q5 로드 완료: %d개",
-                                    len(fb_personality_qs),
-                                )
-                                questions_data["questions"] = [fixed_q1] + fb_personality_qs[:4]
-                            else:
-                                logger.info(
-                                    "interview_feedback 인성 질문 부족 (%d개) → LLM 생성 질문 사용",
-                                    len(fb_personality_qs),
-                                )
+                            # 인성 면접 LLM 폴백: Q1+Q2 하드코딩 + Q3-Q5 LLM
+                            if interview_type == "behavior":
+                                fixed_q1 = {
+                                    "id": 1,
+                                    "category": "intro_self",
+                                    "category_name": "자기소개",
+                                    "question": "자기소개 해보세요.",
+                                    "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                                    "keywords": ["자기소개", "경력", "역량"],
+                                }
                                 fixed_q2 = {
                                     "id": 2,
                                     "category": "intro_motivation",
@@ -683,54 +690,56 @@ async def generate_chat_stream(
                                     if q.get("id", 0) >= 3
                                 ]
                                 questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
+                                logger.info("인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)")
+                        else:
+                            raise ValueError("JSON 형식을 찾을 수 없습니다")
 
-                        new_session = InterviewSession(
-                            session_id=str(uuid.uuid4()),
-                            interview_type=interview_type,
-                            questions=[
-                                InterviewQuestionState(
-                                    id=q["id"],
-                                    category=q["category"],
-                                    category_name=q["category_name"],
-                                    question=q["question"],
-                                    intent=q.get("intent", ""),
-                                    keywords=q.get("keywords", []),
-                                )
-                                for q in questions_data.get("questions", [])
-                            ],
-                            current_question_id=1,
-                            phase="questioning",
+                    # 공통: 세션 생성 + 스트리밍 + 저장
+                    new_session = InterviewSession(
+                        session_id=str(uuid.uuid4()),
+                        interview_type=interview_type,
+                        questions=[
+                            InterviewQuestionState(
+                                id=q["id"],
+                                category=q["category"],
+                                category_name=q["category_name"],
+                                question=q["question"],
+                                intent=q.get("intent", ""),
+                                keywords=q.get("keywords", []),
+                            )
+                            for q in questions_data.get("questions", [])
+                        ],
+                        current_question_id=1,
+                        phase="questioning",
+                    )
+
+                    logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
+
+                    # 질문 스트리밍을 먼저 수행 (Redis 저장 실패해도 사용자에게 질문 전달)
+                    first_q = new_session.questions[0] if new_session.questions else None
+                    if first_q:
+                        question_text = (
+                            f"{format_main_question_label(1)}{newline}{first_q.question}"
                         )
+                        for char in question_text:
+                            yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+                            await asyncio.sleep(0.015)
 
-                        logger.info("✅ 면접 질문 세트 생성 완료: %d개", len(new_session.questions))
+                        session_meta = {
+                            "type": "session_state",
+                            "session": new_session.model_dump(),
+                        }
+                        yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
 
-                        # 질문 스트리밍을 먼저 수행 (Redis 저장 실패해도 사용자에게 질문 전달)
-                        first_q = new_session.questions[0] if new_session.questions else None
-                        if first_q:
-                            question_text = (
-                                f"{format_main_question_label(1)}{newline}{first_q.question}"
-                            )
-                            for char in question_text:
-                                yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
-                                await asyncio.sleep(0.015)
-
-                            session_meta = {
-                                "type": "session_state",
-                                "session": new_session.model_dump(),
-                            }
-                            yield f"data: {json.dumps(session_meta, ensure_ascii=False)}{sse_end}"
-
-                        # 세션 저장 (실패해도 질문은 이미 전달됨)
-                        try:
-                            await session_store.set(session_key, new_session.model_dump())
-                            safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
-                        except Exception as e:
-                            logger.error(
-                                "💾 [면접] 세션 저장 실패 (질문은 전달됨): %s",
-                                type(e).__name__,
-                            )
-                    else:
-                        raise ValueError("JSON 형식을 찾을 수 없습니다")
+                    # 세션 저장 (실패해도 질문은 이미 전달됨)
+                    try:
+                        await session_store.set(session_key, new_session.model_dump())
+                        safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
+                    except Exception as e:
+                        logger.error(
+                            "💾 [면접] 세션 저장 실패 (질문은 전달됨): %s",
+                            type(e).__name__,
+                        )
 
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.error(f"질문 세트 파싱 실패: {e}")
@@ -768,7 +777,11 @@ async def generate_chat_stream(
                 )
                 current_q.current_depth += 1
 
-                if current_q.current_depth < current_q.max_depth:
+                if interview_type == "behavior":
+                    # 인성 면접: 꼬리질문 없이 바로 다음 질문으로
+                    logger.info("📋 [인성 면접] 꼬리질문 스킵 → Q%s 완료", current_q_id)
+                    current_q.is_completed = True
+                elif current_q.current_depth < current_q.max_depth:
                     followup_prompt = create_tech_followup_prompt(
                         question_id=current_q.id,
                         category_name=current_q.category_name,
