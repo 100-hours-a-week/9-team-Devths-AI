@@ -182,21 +182,11 @@ log "✅ Pre-flight check passed."
 # 5. Stop existing services (if any)
 log "🛑 Stopping existing services..."
 
-# [마이그레이션 정리] 이전 docker run 기반 컨테이너 강제 삭제
-# docker compose down은 docker run으로 시작된 컨테이너를 인식하지 못해
-# container_name 충돌로 compose up이 실패하는 것을 방지
-log "🧹 Removing legacy containers (docker run → docker compose migration)..."
-LEGACY_NAMES=("ai-service" "ai-promtail" "celery_worker_trend" "celery_worker_extract" "celery_beat")
-for name in "${LEGACY_NAMES[@]}"; do
-    if docker ps -aq --filter "name=^${name}$" | grep -q .; then
-        docker rm -f "$name" 2>&1 | tee -a "$LOG_FILE"
-        if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            log "   🗑️  Removed legacy container: $name"
-        else
-            log "   ⚠️  Failed to remove legacy container: $name (continuing anyway)"
-        fi
-    fi
-done
+# [마이그레이션 정리] 기존 컨테이너 정리 로직 수정
+# docker compose down이 이전 배포 버전의 컨테이너를 Graceful(SIGTERM)하게 꺼줍니다.
+# 잔여 고아(Orphan) 컨테이너 및 죽은(Exited) 컨테이너만 정리합니다.
+log "🧹 Removing legacy or orphaned containers..."
+docker container prune -f 2>&1 | tee -a "$LOG_FILE"
 
 if [ -f "$COMPOSE_FILE" ]; then
     docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --remove-orphans 2>&1 | tee -a "$LOG_FILE"

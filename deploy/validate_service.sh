@@ -38,9 +38,9 @@ done
 
 for CNAME in "${OPTIONAL_CONTAINERS[@]}"; do
     if docker ps --format '{{.Names}}' | grep -q "^$CNAME$"; then
-        echo "   ✅ $CNAME is running. (optional)"
+        echo "   ✅ $CNAME is running. (optional/monitoring)"
     else
-        echo "   ⚠️  $CNAME is not running. (optional — monitoring may be unavailable)"
+        echo "   ⚠️  $CNAME is not running. (Monitoring logs will not be sent to Loki)"
     fi
 done
 
