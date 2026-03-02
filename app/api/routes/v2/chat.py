@@ -7,6 +7,7 @@ POST /ai/chat - 채팅 스트리밍 (SSE)
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 import uuid
@@ -563,29 +564,38 @@ async def generate_chat_stream(
                         "keywords": ["자기소개", "경력", "역량"],
                     }
                     try:
+                        # n_results를 크게 요청해 다양한 후보 확보 후 랜덤 샘플링
                         _fb = await rag.vectordb.query(
                             query_text="인성 면접 질문",
                             collection_type="interview_feedback",
-                            n_results=4,
+                            n_results=20,
                             where={"interview_type": "personality"},
                         )
-                        _fb_qs = [
-                            {
-                                "id": i + 2,
-                                "category": f"personality_q{i + 2}",
-                                "category_name": "인성",
-                                "question": r["metadata"]["question_only"],
-                                "intent": "",
-                                "keywords": [],
-                            }
-                            for i, r in enumerate(_fb)
+                        _fb_candidates = [
+                            r for r in _fb
                             if (r.get("metadata") or {}).get("question_only")
                         ]
-                        if len(_fb_qs) >= 4:
+                        logger.info(
+                            "📋 interview_feedback 인성 질문 후보 %d개 조회", len(_fb_candidates)
+                        )
+                        if len(_fb_candidates) >= 4:
+                            # 랜덤 샘플링으로 매 세션마다 다양한 질문 선택
+                            _selected = random.sample(_fb_candidates, 4)
+                            _fb_qs = [
+                                {
+                                    "id": i + 2,
+                                    "category": f"personality_q{i + 2}",
+                                    "category_name": "인성",
+                                    "question": r["metadata"]["question_only"],
+                                    "intent": "",
+                                    "keywords": [],
+                                }
+                                for i, r in enumerate(_selected)
+                            ]
                             logger.info(
-                                "✅ interview_feedback 인성 질문 %d개 → LLM 스킵", len(_fb_qs)
+                                "✅ interview_feedback 인성 질문 4개 랜덤 선택 → LLM 스킵"
                             )
-                            behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs[:4]}
+                            behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs}
                     except Exception as _e:
                         logger.warning("interview_feedback 선 조회 실패 → LLM 폴백: %s", _e)
 
