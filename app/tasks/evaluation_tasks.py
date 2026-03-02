@@ -55,7 +55,7 @@ async def _ingest_interview_qa_async(
 ) -> dict:
     """비동기 면접 Q&A 적재 로직 (기존 _ingest_interview_qa_best_effort 로직 이관)."""
     from app.api.routes.v2._helpers import get_services
-    from app.schemas.evaluation import InterviewIngestionInput, InterviewResultDocument
+    from app.schemas.ingestion import InterviewIngestionInput, InterviewResultDocument
     from app.services.interview_ingestion_service import InterviewIngestionService
 
     try:

@@ -622,32 +622,67 @@ async def generate_chat_stream(
 
                         questions_data = json.loads(json_str)
 
-                        # 인성 면접: Q1·Q2 고정 (LLM 출력과 무관하게 강제 적용)
+                        # 인성 면접: Q1 고정 + Q2-Q5는 interview_feedback VectorDB에서 로드
                         if interview_type == "behavior":
-                            fixed_q1_q2 = [
-                                {
-                                    "id": 1,
-                                    "category": "intro_self",
-                                    "category_name": "자기소개",
-                                    "question": "자기소개 해보세요.",
-                                    "intent": "지원자의 전반적인 역량과 경력 요약 파악",
-                                    "keywords": ["자기소개", "경력", "역량"],
-                                },
-                                {
+                            fixed_q1 = {
+                                "id": 1,
+                                "category": "intro_self",
+                                "category_name": "자기소개",
+                                "question": "자기소개 해보세요.",
+                                "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                                "keywords": ["자기소개", "경력", "역량"],
+                            }
+
+                            # interview_feedback에서 인성 면접 Q2-Q5 로드 시도
+                            fb_personality_qs: list[dict] = []
+                            try:
+                                fb_results = await rag.vectordb.query(
+                                    query_text="인성 면접 질문",
+                                    collection_type="interview_feedback",
+                                    n_results=4,
+                                    where={"interview_type": "personality"},
+                                )
+                                for i, r in enumerate(fb_results):
+                                    q_text = (r.get("metadata") or {}).get("question_only", "")
+                                    if q_text:
+                                        fb_personality_qs.append({
+                                            "id": i + 2,
+                                            "category": f"personality_q{i + 2}",
+                                            "category_name": "인성",
+                                            "question": q_text,
+                                            "intent": "",
+                                            "keywords": [],
+                                        })
+                            except Exception as fb_err:
+                                logger.warning(
+                                    "interview_feedback 인성 질문 조회 실패 → LLM 폴백: %s", fb_err
+                                )
+
+                            if len(fb_personality_qs) >= 4:
+                                logger.info(
+                                    "✅ interview_feedback에서 인성 면접 Q2-Q5 로드 완료: %d개",
+                                    len(fb_personality_qs),
+                                )
+                                questions_data["questions"] = [fixed_q1] + fb_personality_qs[:4]
+                            else:
+                                logger.info(
+                                    "interview_feedback 인성 질문 부족 (%d개) → LLM 생성 질문 사용",
+                                    len(fb_personality_qs),
+                                )
+                                fixed_q2 = {
                                     "id": 2,
                                     "category": "intro_motivation",
                                     "category_name": "지원동기",
                                     "question": "우리 회사를 지원하는 이유가 뭔가요?",
                                     "intent": "지원 동기와 회사/직무 이해도 확인",
                                     "keywords": ["지원동기", "회사이해", "직무"],
-                                },
-                            ]
-                            llm_questions = [
-                                q
-                                for q in questions_data.get("questions", [])
-                                if q.get("id", 0) >= 3
-                            ]
-                            questions_data["questions"] = fixed_q1_q2 + llm_questions
+                                }
+                                llm_questions = [
+                                    q
+                                    for q in questions_data.get("questions", [])
+                                    if q.get("id", 0) >= 3
+                                ]
+                                questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
 
                         new_session = InterviewSession(
                             session_id=str(uuid.uuid4()),
