@@ -36,7 +36,7 @@ permissions:
     mode: 755
     type:
       - directory
-    - file
+      - file
 
 hooks:
   ApplicationStart:
