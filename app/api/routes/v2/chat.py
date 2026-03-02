@@ -642,9 +642,9 @@ async def generate_chat_stream(
                                 request.user_id,
                                 request.room_id,
                             )
-                        except BaseException:
-                            llm_task.cancel()
-                            raise
+                        finally:
+                            if not llm_task.done():
+                                llm_task.cancel()
 
                 # JSON 파싱 또는 vectordb 직접 구성
                 try:
