@@ -564,23 +564,56 @@ async def generate_chat_stream(
                         "keywords": ["자기소개", "경력", "역량"],
                     }
                     try:
-                        # n_results를 크게 요청해 다양한 후보 확보 후 랜덤 샘플링
-                        _fb = await rag.vectordb.query(
-                            query_text="인성 면접 질문",
-                            collection_type="interview_feedback",
-                            n_results=20,
-                            where={"interview_type": "personality"},
-                        )
-                        _fb_candidates = [
-                            r for r in _fb
-                            if (r.get("metadata") or {}).get("question_only")
+                        # 다양한 카테고리의 쿼리로 검색하여 질문 다양성 확보
+                        _personality_queries = [
+                            "팀워크 협업 경험",
+                            "갈등 해결 문제 상황",
+                            "리더십 경험 사례",
+                            "실패 극복 경험",
+                            "스트레스 관리 방법",
+                            "장단점 자기 분석",
+                            "목표 달성 성취 경험",
+                            "의사소통 커뮤니케이션",
+                            "동기부여 열정",
+                            "적응력 변화 대응",
                         ]
-                        logger.info(
-                            "📋 interview_feedback 인성 질문 후보 %d개 조회", len(_fb_candidates)
+                        # 랜덤하게 4개 카테고리 선택
+                        _selected_queries = random.sample(
+                            _personality_queries, min(4, len(_personality_queries))
                         )
-                        if len(_fb_candidates) >= 4:
-                            # 랜덤 샘플링으로 매 세션마다 다양한 질문 선택
-                            _selected = random.sample(_fb_candidates, 4)
+
+                        # 병렬 VectorDB 쿼리로 성능 최적화
+                        async def _query_personality(query_text: str) -> list[dict]:
+                            return await rag.vectordb.query(
+                                query_text=query_text,
+                                collection_type="interview_feedback",
+                                n_results=10,
+                                where={"interview_type": "personality"},
+                                max_distance=1.8,
+                            )
+
+                        _query_results = await asyncio.gather(
+                            *[_query_personality(q) for q in _selected_queries]
+                        )
+
+                        _all_candidates = []
+                        _seen_questions: set[str] = set()
+
+                        for _fb in _query_results:
+                            for r in _fb:
+                                q_text = (r.get("metadata") or {}).get("question_only", "")
+                                if q_text and q_text not in _seen_questions:
+                                    _seen_questions.add(q_text)
+                                    _all_candidates.append(r)
+
+                        logger.info(
+                            "📋 interview_feedback 인성 질문 후보 %d개 조회 (카테고리: %s)",
+                            len(_all_candidates),
+                            _selected_queries,
+                        )
+
+                        if len(_all_candidates) >= 4:
+                            _selected = random.sample(_all_candidates, 4)
                             _fb_qs = [
                                 {
                                     "id": i + 2,
@@ -592,9 +625,7 @@ async def generate_chat_stream(
                                 }
                                 for i, r in enumerate(_selected)
                             ]
-                            logger.info(
-                                "✅ interview_feedback 인성 질문 4개 랜덤 선택 → LLM 스킵"
-                            )
+                            logger.info("✅ interview_feedback 인성 질문 4개 랜덤 선택 → LLM 스킵")
                             behavior_questions_data = {"questions": [_fixed_q1] + _fb_qs}
                     except Exception as _e:
                         logger.warning("interview_feedback 선 조회 실패 → LLM 폴백: %s", _e)
@@ -642,7 +673,9 @@ async def generate_chat_stream(
                                     await asyncio.wait_for(asyncio.shield(llm_task), timeout=25)
                                     break
                                 except asyncio.TimeoutError:
-                                    logger.debug("⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)")
+                                    logger.debug(
+                                        "⏳ [PHASE 1] keepalive 전송 (LLM 응답 대기 중...)"
+                                    )
                                     yield ": keepalive\n\n"  # SSE comment → Nginx idle timer 리셋
                             full_response = llm_task.result()
                             safe_info(
@@ -700,7 +733,9 @@ async def generate_chat_stream(
                                     if q.get("id", 0) >= 3
                                 ]
                                 questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
-                                logger.info("인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)")
+                                logger.info(
+                                    "인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)"
+                                )
                         else:
                             raise ValueError("JSON 형식을 찾을 수 없습니다")
 
@@ -835,7 +870,9 @@ async def generate_chat_stream(
                             full_response += chunk
                             yield ": k\n\n"
 
-                    safe_info(logger, "🔍 [꼬리질문 진단] LLM 응답 앞 400자: %s", full_response[:400])
+                    safe_info(
+                        logger, "🔍 [꼬리질문 진단] LLM 응답 앞 400자: %s", full_response[:400]
+                    )
 
                     try:
                         json_start = full_response.find("{")

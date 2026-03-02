@@ -171,7 +171,7 @@ services:
   # 5. VectorDB (ChromaDB, CPU)
   # -----------------------------------------
   vectordb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:0.4.24
     container_name: chromadb_server
     ports:
       - "8001:8000"
