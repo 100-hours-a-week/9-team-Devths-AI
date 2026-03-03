@@ -119,7 +119,8 @@ if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "$SCRIPT_DIR/load_env_from_parameter_store.sh" ]; then
-    source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
+    log "🔍 SCRIPT_DIR: $SCRIPT_DIR"
+    source "$SCRIPT_DIR/load_env_from_parameter_store.sh" 2>&1 | tee -a "$LOG_FILE"
 else
     log "⚠️  load_env_from_parameter_store.sh not found at $SCRIPT_DIR. Skipping Parameter Store load."
 fi
