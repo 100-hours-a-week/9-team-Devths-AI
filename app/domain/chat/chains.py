@@ -2,19 +2,31 @@
 LangChain RAG Chain Implementation.
 
 Provides RAG (Retrieval-Augmented Generation) functionality using LangChain.
+Supports per-collection MMR (Maximal Marginal Relevance) retrieval.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+from app.utils.chromadb_utils import normalize_chromadb_filter
+from app.utils.langfuse_client import get_langfuse_callback_handler
 
 logger = logging.getLogger(__name__)
+
+# 컬렉션 타입 -> Chroma 컬렉션 이름 (VectorDBService와 동일)
+COLLECTION_NAME_MAP = {
+    "resume": "resumes",
+    "job_posting": "job_postings",
+    "portfolio": "portfolios",
+}
 
 
 # RAG System Prompts
@@ -39,27 +51,37 @@ class RAGChain:
     """RAG Chain using LangChain.
 
     Provides context-aware chat functionality with document retrieval.
+    Supports per-collection MMR (Maximal Marginal Relevance) when vectorstores dict is provided.
     """
 
     def __init__(
         self,
         llm_gateway: LangChainLLMGateway,
         vectorstore: Chroma | None = None,
-        max_context_length: int = 4000,
-        retrieval_k: int = 3,
+        vectorstores: dict[str, Chroma] | None = None,
+        max_context_length: int = 6000,
+        retrieval_k: int = 5,
+        fetch_k: int = 30,
+        lambda_mult: float = 0.5,
     ):
         """Initialize RAG Chain.
 
         Args:
             llm_gateway: LangChain LLM Gateway instance.
-            vectorstore: LangChain Chroma vectorstore (optional).
+            vectorstore: LangChain Chroma vectorstore (optional, single collection).
+            vectorstores: Map collection_type -> Chroma (resume, job_posting, portfolio). Used for MMR.
             max_context_length: Maximum context length in characters.
-            retrieval_k: Number of documents to retrieve.
+            retrieval_k: Number of documents to retrieve per collection.
+            fetch_k: MMR candidate pool size per collection.
+            lambda_mult: MMR diversity (0=diverse, 1=relevant). 0.5 balanced.
         """
         self._llm_gateway = llm_gateway
         self._vectorstore = vectorstore
+        self._vectorstores = vectorstores or {}
         self._max_context_length = max_context_length
         self._retrieval_k = retrieval_k
+        self._fetch_k = fetch_k
+        self._lambda_mult = lambda_mult
         self._output_parser = StrOutputParser()
 
         # Create RAG prompt template
@@ -89,6 +111,19 @@ class RAGChain:
 
         logger.info("RAGChain initialized")
 
+    # ADR-106: LLM bind 로직 공통화 (중복 제거)
+    def _build_llm(self, temperature: float | None = None, max_tokens: int | None = None):
+        """ADR-106: temperature/max_tokens가 적용된 LLM 반환."""
+        llm = self._llm_gateway.llm
+        if temperature is not None or max_tokens is not None:
+            bind_kwargs = {}
+            if temperature is not None:
+                bind_kwargs["temperature"] = temperature
+            if max_tokens is not None:
+                bind_kwargs["max_output_tokens"] = max_tokens
+            llm = llm.bind(**bind_kwargs)
+        return llm
+
     def set_vectorstore(self, vectorstore: Chroma) -> None:
         """Set the vectorstore for retrieval.
 
@@ -97,69 +132,125 @@ class RAGChain:
         """
         self._vectorstore = vectorstore
 
+    def _source_name(self, collection_type: str) -> str:
+        return {
+            "resume": "이력서",
+            "job_posting": "채용공고",
+            "portfolio": "포트폴리오",
+        }.get(collection_type, collection_type)
+
+    def _mmr_search_one(
+        self,
+        collection_type: str,
+        store: Chroma,
+        query: str,
+        filter_dict: dict[str, Any] | None,
+    ) -> list[tuple[str, Document]]:
+        """Run MMR search on one collection (sync method in thread)."""
+        try:
+            effective_filter = normalize_chromadb_filter(filter_dict)
+            docs = store.max_marginal_relevance_search(
+                query,
+                k=self._retrieval_k,
+                fetch_k=self._fetch_k,
+                lambda_mult=self._lambda_mult,
+                filter=effective_filter,
+            )
+            return [(collection_type, doc) for doc in docs]
+        except Exception as e:
+            logger.warning("MMR search failed for %s: %s", collection_type, e)
+            return []
+
+    async def retrieve_context_documents(
+        self,
+        query: str,
+        user_id: str,
+        collection_types: list[str] | None = None,
+    ) -> list[tuple[str, Document]]:
+        """Retrieve (collection_type, Document) pairs with MMR (for ensemble with BM25).
+
+        Returns:
+            List of (collection_type, Document). Empty if no vectorstore.
+        """
+        if collection_types is None:
+            collection_types = ["resume", "job_posting"]
+
+        all_pairs: list[tuple[str, Document]] = []
+
+        if self._vectorstores:
+            for ct in collection_types:
+                store = self._vectorstores.get(ct)
+                if not store:
+                    continue
+                # user_id가 있고 portfolio가 아닌 경우에만 필터 적용
+                filter_dict = None
+                if ct != "portfolio" and user_id:
+                    filter_dict = {"user_id": user_id}
+                pairs = await asyncio.to_thread(
+                    self._mmr_search_one,
+                    ct,
+                    store,
+                    query,
+                    filter_dict,
+                )
+                all_pairs.extend(pairs)
+        elif self._vectorstore:
+            # normalize_chromadb_filter로 user_id 정규화
+            effective_filter = normalize_chromadb_filter({"user_id": user_id}) if user_id else None
+            filter_kwargs: dict[str, Any] = {"score_threshold": 0.3, "k": self._retrieval_k}
+            if effective_filter:
+                filter_kwargs["filter"] = effective_filter
+            retriever = self._vectorstore.as_retriever(
+                search_type="similarity_score_threshold",
+                search_kwargs=filter_kwargs,
+            )
+            docs = await retriever.aget_relevant_documents(query)
+            for doc in docs:
+                source = doc.metadata.get("collection_type", "document")
+                ct = source if source in COLLECTION_NAME_MAP else "resume"
+                all_pairs.append((ct, doc))
+
+        return all_pairs
+
+    def _format_pairs_to_context(self, all_pairs: list[tuple[str, Document]]) -> str:
+        """Format (collection_type, Document) pairs to context string with length limit."""
+        if not all_pairs:
+            return ""
+        context_parts = []
+        total_length = 0
+        for collection_type, doc in all_pairs:
+            source_name = self._source_name(collection_type)
+            doc_text = doc.page_content
+            remaining = self._max_context_length - total_length
+            if len(doc_text) > remaining:
+                doc_text = doc_text[:remaining] + "..."
+            context_parts.append(f"[출처: {source_name}]\n{doc_text}")
+            total_length += len(doc_text)
+            if total_length >= self._max_context_length:
+                break
+        return "\n\n".join(context_parts)
+
     async def retrieve_context(
         self,
         query: str,
         user_id: str,
         collection_types: list[str] | None = None,
     ) -> str:
-        """Retrieve relevant context from vectorstore.
+        """Retrieve relevant context with per-collection MMR (or single vectorstore fallback).
 
         Args:
             query: Query text for retrieval.
-            user_id: User ID for filtering documents.
-            collection_types: Types of collections to search.
+            user_id: User ID for filtering documents (resume, job_posting only).
+            collection_types: Types of collections to search (resume, job_posting, portfolio).
 
         Returns:
             Formatted context string.
         """
-        if self._vectorstore is None:
-            return ""
-
-        if collection_types is None:
-            collection_types = ["resume", "job_posting"]
-
         try:
-            # Build retriever with user filter
-            retriever = self._vectorstore.as_retriever(
-                search_kwargs={
-                    "k": self._retrieval_k,
-                    "filter": {"user_id": user_id},
-                }
-            )
-
-            # Retrieve documents
-            docs = await retriever.aget_relevant_documents(query)
-
-            # Format context
-            context_parts = []
-            total_length = 0
-
-            for doc in docs:
-                source = doc.metadata.get("collection_type", "document")
-                source_name = {
-                    "resume": "이력서",
-                    "job_posting": "채용공고",
-                    "portfolio": "포트폴리오",
-                }.get(source, source)
-
-                doc_text = doc.page_content
-
-                # Truncate if needed
-                remaining = self._max_context_length - total_length
-                if len(doc_text) > remaining:
-                    doc_text = doc_text[:remaining] + "..."
-
-                context_parts.append(f"[{source_name}]\n{doc_text}")
-                total_length += len(doc_text)
-
-                if total_length >= self._max_context_length:
-                    break
-
-            return "\n\n".join(context_parts)
-
+            all_pairs = await self.retrieve_context_documents(query, user_id, collection_types)
+            return self._format_pairs_to_context(all_pairs)
         except Exception as e:
-            logger.error(f"Error retrieving context: {e}")
+            logger.error("Error retrieving context: %s", e)
             return ""
 
     async def chat(
@@ -168,6 +259,7 @@ class RAGChain:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_retrieval: bool = True,
+        session_id: str | None = None,
     ) -> str:
         """Generate a chat response.
 
@@ -176,28 +268,26 @@ class RAGChain:
             user_id: User ID for context retrieval.
             history: Chat history.
             use_retrieval: Whether to use RAG retrieval.
+            session_id: Session ID for Langfuse tracking (optional).
 
         Returns:
             Generated response text.
         """
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id,
+            user_id=user_id,
+            trace_name="rag-chat" if use_retrieval else "chat",
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
+
         if use_retrieval:
-            # Retrieve context
             context = await self.retrieve_context(question, user_id)
-
-            # Create chain with retrieval
-            chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
-
-            response = await chain.ainvoke(
-                {
-                    "context": context,
-                    "question": question,
-                }
+            chain = self._rag_prompt | self._build_llm() | self._output_parser
+            return await chain.ainvoke(
+                {"context": context, "question": question},
+                config=_cfg,
             )
         else:
-            # Create chain without retrieval
-            chain = self._chat_prompt | self._llm_gateway.llm | self._output_parser
-
-            # Convert history to LangChain messages
             from langchain_core.messages import AIMessage, HumanMessage
 
             lc_history = []
@@ -209,15 +299,11 @@ class RAGChain:
                         lc_history.append(AIMessage(content=content))
                     else:
                         lc_history.append(HumanMessage(content=content))
-
-            response = await chain.ainvoke(
-                {
-                    "history": lc_history,
-                    "question": question,
-                }
+            chain = self._chat_prompt | self._build_llm() | self._output_parser
+            return await chain.ainvoke(
+                {"history": lc_history, "question": question},
+                config=_cfg,
             )
-
-        return response
 
     async def chat_stream(
         self,
@@ -225,6 +311,7 @@ class RAGChain:
         user_id: str,
         history: list[dict[str, str]] | None = None,
         use_retrieval: bool = True,
+        session_id: str | None = None,
     ) -> AsyncIterator[str]:
         """Generate a streaming chat response.
 
@@ -233,29 +320,27 @@ class RAGChain:
             user_id: User ID for context retrieval.
             history: Chat history.
             use_retrieval: Whether to use RAG retrieval.
+            session_id: Session ID for Langfuse tracking (optional).
 
         Yields:
             Chunks of generated response.
         """
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id,
+            user_id=user_id,
+            trace_name="rag-chat-stream" if use_retrieval else "chat-stream",
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
+
         if use_retrieval:
-            # Retrieve context
             context = await self.retrieve_context(question, user_id)
-
-            # Create chain with retrieval
-            chain = self._rag_prompt | self._llm_gateway.llm | self._output_parser
-
+            chain = self._rag_prompt | self._build_llm() | self._output_parser
             async for chunk in chain.astream(
-                {
-                    "context": context,
-                    "question": question,
-                }
+                {"context": context, "question": question},
+                config=_cfg,
             ):
                 yield chunk
         else:
-            # Create chain without retrieval
-            chain = self._chat_prompt | self._llm_gateway.llm | self._output_parser
-
-            # Convert history
             from langchain_core.messages import AIMessage, HumanMessage
 
             lc_history = []
@@ -267,12 +352,10 @@ class RAGChain:
                         lc_history.append(AIMessage(content=content))
                     else:
                         lc_history.append(HumanMessage(content=content))
-
+            chain = self._chat_prompt | self._build_llm() | self._output_parser
             async for chunk in chain.astream(
-                {
-                    "history": lc_history,
-                    "question": question,
-                }
+                {"history": lc_history, "question": question},
+                config=_cfg,
             ):
                 yield chunk
 
@@ -281,6 +364,8 @@ class RAGChain:
         original_question: str,
         user_answer: str,
         context: str | None = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         """Generate a follow-up question based on user's answer.
 
@@ -288,6 +373,8 @@ class RAGChain:
             original_question: The original question asked.
             user_answer: User's answer to analyze.
             context: Additional context (optional).
+            session_id: Session ID for Langfuse tracking (optional).
+            user_id: User ID for Langfuse tracking (optional).
 
         Returns:
             Generated follow-up question.
@@ -312,12 +399,17 @@ class RAGChain:
 
         context_section = f"관련 컨텍스트:\n{context}" if context else ""
 
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="followup-question"
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
         response = await chain.ainvoke(
             {
                 "original_question": original_question,
                 "user_answer": user_answer,
                 "context_section": context_section,
-            }
+            },
+            config=_cfg,
         )
 
         return response
@@ -326,12 +418,16 @@ class RAGChain:
         self,
         resume_text: str,
         posting_text: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         """Generate analysis of resume and job posting match.
 
         Args:
             resume_text: Resume text.
             posting_text: Job posting text.
+            session_id: Session ID for Langfuse tracking (optional).
+            user_id: User ID for Langfuse tracking (optional).
 
         Returns:
             Analysis result as dictionary.
@@ -363,11 +459,16 @@ class RAGChain:
 
         chain = prompt | self._llm_gateway.llm | self._output_parser
 
+        _handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="analysis"
+        )
+        _cfg = {"callbacks": [_handler]} if _handler else {}
         response = await chain.ainvoke(
             {
                 "resume_text": resume_text,
                 "posting_text": posting_text,
-            }
+            },
+            config=_cfg,
         )
 
         # Parse JSON response

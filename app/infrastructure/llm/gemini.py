@@ -24,7 +24,7 @@ class GeminiProvider(BaseLLMProvider):
         self,
         api_key: str | None = None,
         model_name: str = "gemini-2.0-flash",
-        embedding_model: str = "text-embedding-004",
+        embedding_model: str = "gemini-embedding-001",
     ):
         """Initialize Gemini provider.
 
@@ -33,9 +33,9 @@ class GeminiProvider(BaseLLMProvider):
             model_name: Gemini model name for text generation.
             embedding_model: Gemini model name for embeddings.
         """
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
         self.client = genai.Client(api_key=api_key)
         self._model_name = model_name

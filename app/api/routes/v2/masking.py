@@ -4,10 +4,12 @@ v2 PII 마스킹 API
 POST /ai/masking/draft - 게시판 첨부파일 PII 마스킹
 GET /ai/masking/task/{task_id} - 마스킹 작업 상태 조회
 GET /ai/masking/health - 마스킹 서비스 헬스 체크
+
+ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
 import asyncio
-import base64
 import logging
 import uuid
 from datetime import datetime
@@ -16,12 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.dependencies import get_legacy_task_storage
 from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
-from app.schemas.masking import (
-    DetectedPII,
-    MaskingDraftRequest,
-    MaskingDraftResult,
-    MaskingModelType,
-)
+from app.schemas.masking import MaskingDraftRequest
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
 from app.utils.log_sanitizer import sanitize_log_input
@@ -29,9 +26,6 @@ from app.utils.log_sanitizer import sanitize_log_input
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# 백그라운드 작업 추적 (가비지 컬렉션 방지)
-_background_tasks_set = set()
 
 
 @router.post(
@@ -71,123 +65,60 @@ async def masking_draft(
     request: MaskingDraftRequest,
     task_storage=Depends(get_legacy_task_storage),
 ):
-    """게시판 첨부파일 마스킹"""
+    """게시판 첨부파일 마스킹
+
+    ADR-102: Celery 태스크로 이관하여 504 타임아웃 해결.
+    """
     task_id = f"task_masking_{uuid.uuid4().hex[:12]}"
 
     logger.info("[MASKING_DRAFT] Creating new task: %s", task_id)
 
+    # Redis에 초기 상태 저장
     task_data = {
         "type": "masking",
         "status": TaskStatus.PROCESSING,
-        "created_at": datetime.now(),
+        "created_at": datetime.now().isoformat(),
         "progress": 0,
         "message": "마스킹 작업을 시작합니다...",
         "request": request.model_dump(),
     }
     task_storage.save(task_id, task_data)
 
-    async def process_masking(store):
-        logger.info("[PROCESS_MASKING] Starting masking task %s", task_id)
-        logger.info(f"[PROCESS_MASKING] Using model: {request.model}")
-        try:
-            if request.model == MaskingModelType.CHANDRA:
-                service = get_chandra_masking_service()
-                model_name = "Chandra"
-            else:
-                service = get_gemini_masking_service()
-                model_name = "Gemini"
+    # ADR-102: Celery 태스크로 이관 (asyncio.create_task 대신)
+    # ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback
+    from app.tasks.celery_utils import is_celery_available
 
-            task_data = store.get(task_id)
-            task_data["progress"] = 10
-            task_data["message"] = "파일을 다운로드 중입니다..."
-            store.save(task_id, task_data)
-            logger.info(f"Task {task_id}: Downloading file")
+    model_value = request.model.value if hasattr(request.model, "value") else str(request.model)
 
-            if request.file_type == "pdf":
-                task_data = store.get(task_id)
-                task_data["progress"] = 30
-                task_data["message"] = "PDF를 이미지로 변환 중입니다..."
-                store.save(task_id, task_data)
+    if is_celery_available():
+        # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
+        from app.tasks.masking_tasks import process_masking_task
 
-                task_data = store.get(task_id)
-                task_data["progress"] = 50
-                task_data["message"] = f"{model_name} API로 PII를 감지 중입니다..."
-                store.save(task_id, task_data)
+        process_masking_task.delay(
+            task_id=task_id,
+            file_url=str(request.file_url) if request.file_url else "",
+            s3_key=str(request.s3_key) if request.s3_key else "",
+            file_type=request.file_type,
+            model=model_value,
+        )
+        logger.info("[Masking] Celery 태스크 등록 완료: %s", task_id)
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.masking_tasks import _process_masking_async
 
-                masked_bytes, thumbnail_bytes, detections = await service.mask_pdf(
-                    file_url=str(request.file_url)
-                )
-            else:
-                task_data = store.get(task_id)
-                task_data["progress"] = 30
-                task_data["message"] = "이미지에서 PII를 감지 중입니다..."
-                store.save(task_id, task_data)
-
-                task_data = store.get(task_id)
-                task_data["progress"] = 50
-                task_data["message"] = f"{model_name} API로 PII를 감지 중입니다..."
-                store.save(task_id, task_data)
-
-                masked_bytes, thumbnail_bytes, detections = await service.mask_image_file(
-                    file_url=str(request.s3_key)
-                )
-
-            task_data = store.get(task_id)
-            task_data["progress"] = 80
-            task_data["message"] = "마스킹된 파일을 저장 중입니다..."
-            store.save(task_id, task_data)
-
-            masked_base64 = base64.b64encode(masked_bytes).decode("utf-8")
-            thumbnail_base64 = base64.b64encode(thumbnail_bytes).decode("utf-8")
-
-            file_ext = "pdf" if request.file_type == "pdf" else "png"
-            mime_type = f"application/{file_ext}" if request.file_type == "pdf" else "image/png"
-
-            masked_url = f"data:{mime_type};base64,{masked_base64}"
-            thumbnail_url = f"data:image/png;base64,{thumbnail_base64}"
-
-            detected_pii = []
-            for det in detections:
-                pii_type = det.get("type", "unknown")
-                try:
-                    detected_pii.append(
-                        DetectedPII(
-                            type=pii_type,
-                            coordinates=det.get("coordinates", [0, 0, 0, 0]),
-                            confidence=det.get("confidence", 0.0),
-                        )
-                    )
-                except ValueError:
-                    logger.warning(f"Unknown PII type: {pii_type}")
-
-            task_data = store.get(task_id)
-            task_data["status"] = TaskStatus.COMPLETED
-            task_data["progress"] = 100
-            task_data["message"] = "마스킹 작업이 완료되었습니다."
-            task_data["result"] = MaskingDraftResult(
-                success=True,
-                original_url=request.s3_key,
-                masked_url=masked_url,
-                thumbnail_url=thumbnail_url,
-                detected_pii=detected_pii,
-            ).model_dump()
-            store.save(task_id, task_data)
-
-            logger.info(f"Task {task_id} completed with {len(detected_pii)} PII detections")
-
-        except Exception as e:
-            logger.error(f"Task {task_id} failed: {str(e)}", exc_info=True)
-            task_data = store.get(task_id) or {}
-            task_data["status"] = TaskStatus.FAILED
-            task_data["message"] = f"마스킹 작업 실패: {str(e)}"
-            task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
-            store.save(task_id, task_data)
-
-    task = asyncio.create_task(process_masking(task_storage))
-    _background_tasks_set.add(task)
-    task.add_done_callback(lambda t: _background_tasks_set.discard(t))
-
-    logger.info(f"Created background task {task_id}, current tasks: {len(_background_tasks_set)}")
+        asyncio.create_task(
+            _process_masking_async(
+                task_id=task_id,
+                file_url=str(request.file_url) if request.file_url else "",
+                s3_key=str(request.s3_key) if request.s3_key else "",
+                file_type=request.file_type,
+                model=model_value,
+            )
+        )
+        logger.warning(
+            "[Masking] Celery 불가 → asyncio fallback: %s (Celery Worker 실행 권장)",
+            task_id,
+        )
 
     return AsyncTaskResponse(
         task_id=task_id,

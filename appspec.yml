@@ -1,17 +1,17 @@
 version: 0.0
 os: linux
 files:
-  - source: /
+  - source: deploy/
+    destination: /home/ubuntu/ai/deploy
+    overwrite: yes
+  - source: docker-compose.cicd.yml
     destination: /home/ubuntu/ai
+    overwrite: yes
+  - source: data/
+    destination: /home/ubuntu/ai/data
     overwrite: yes
 
 permissions:
-  - object: /home/ubuntu/ai
-    owner: ubuntu
-    group: ubuntu
-    mode: 755
-    type:
-      - directory
   - object: /home/ubuntu/ai/deploy
     owner: ubuntu
     group: ubuntu
@@ -24,32 +24,24 @@ permissions:
     mode: 755
     type:
       - file
-  - object: /home/ubuntu/ai/logs
+  - object: /home/ubuntu/ai/deploy/monitoring/*.sh
+    owner: ubuntu
+    group: ubuntu
+    mode: 755
+    type:
+      - file
+  - object: /home/ubuntu/ai/data
     owner: ubuntu
     group: ubuntu
     mode: 755
     type:
       - directory
+      - file
 
 hooks:
-  ApplicationStop:
-    - location: deploy/stop_server.sh
-      timeout: 60
-      runas: ubuntu
-
-  BeforeInstall:
-    - location: deploy/before_install.sh
-      timeout: 120
-      runas: ubuntu
-
-  AfterInstall:
-    - location: deploy/after_install.sh
-      timeout: 300
-      runas: ubuntu
-
   ApplicationStart:
-    - location: deploy/start_server_deploy.sh
-      timeout: 120
+    - location: deploy/docker_deploy.sh
+      timeout: 300
       runas: ubuntu
 
   ValidateService:

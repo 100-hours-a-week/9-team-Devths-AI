@@ -26,6 +26,7 @@ from app.prompts.interview import (
     SYSTEM_INTERVIEW,
     # 헬퍼 함수
     create_analysis_prompt,
+    create_feedback_prompt,
     create_followup_prompt,
     create_interview_question_prompt,
     create_interview_report_prompt,
@@ -34,9 +35,12 @@ from app.prompts.interview import (
     create_tech_next_question_prompt,
     format_completed_questions,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     # 기술 면접 5단계 프롬프트 (신규)
     get_system_tech_interview,
 )
+from app.prompts.loader import load_prompt_yaml
 
 __all__ = [
     # Interview prompts
@@ -49,6 +53,7 @@ __all__ = [
     "FOLLOWUP_PROMPT",
     "INTERVIEW_REPORT_PROMPT",
     "create_analysis_prompt",
+    "create_feedback_prompt",
     "create_interview_question_prompt",
     "create_followup_prompt",
     "create_interview_report_prompt",
@@ -59,6 +64,9 @@ __all__ = [
     "create_tech_next_question_prompt",
     "format_conversation_history",
     "format_completed_questions",
+    "format_main_question_label",
+    "format_followup_question_label",
+    "load_prompt_yaml",
     # Chat prompts
     "SYSTEM_GENERAL_CHAT",
     "SYSTEM_RAG_CHAT",

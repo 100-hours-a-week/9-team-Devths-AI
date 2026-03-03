@@ -2,28 +2,20 @@
 v2 텍스트 추출 + 임베딩 API
 
 POST /ai/text/extract - 이력서 + 채용공고 텍스트 추출 및 분석
+
+ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
 import asyncio
 import logging
-import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, status
 
-from app.api.routes.v2._helpers import format_analysis_text, get_services
 from app.config.dependencies import get_legacy_task_storage
-from app.prompts import get_extract_title_prompt, get_opening_prompt
-from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus
-from app.schemas.text_extract import (
-    DocumentExtractResult,
-    DocumentInput,
-    PageText,
-    TextExtractRequest,
-    TextExtractResult,
-)
-from app.services.cloudwatch_service import CloudWatchService
-from app.utils.log_sanitizer import safe_info, sanitize_log_input
+from app.schemas.common import AsyncTaskResponse, TaskStatus
+from app.schemas.text_extract import TextExtractRequest
 
 logger = logging.getLogger(__name__)
 
@@ -183,246 +175,61 @@ async def text_extract(
     request: TextExtractRequest,
     task_storage=Depends(get_legacy_task_storage),
 ):
-    """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
+    """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고
+
+    ADR-102: Celery 태스크로 이관하여 504 타임아웃 해결.
+    """
     task_id = request.task_id
 
-    # 모니터링 메트릭 전송
-    try:
-        cw = CloudWatchService.get_instance()
-        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
-    except Exception:
-        pass
-
-    # 비동기 작업 시작
+    # 비동기 작업 시작 — Redis에 초기 상태 저장
     task_key = str(task_id)
     task_storage.save(
         task_key,
         {
             "type": "text_extract",
             "status": TaskStatus.PROCESSING,
-            "created_at": datetime.now(),
+            "created_at": datetime.now().isoformat(),
             "room_id": request.room_id,
             "request": request.model_dump(),
         },
     )
 
-    async def process_text_extract(store):
-        try:
-            rag = get_services()
+    # ADR-102: Celery 태스크로 이관 (asyncio.create_task 대신)
+    # ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback
+    from app.tasks.celery_utils import is_celery_available
+    from app.utils.log_sanitizer import sanitize_log_input
 
-            model = request.model if hasattr(request, "model") and request.model else "gemini"
-            logger.info("")
-            logger.info(f"{'='*80}")
-            logger.info("=== 📄 텍스트 추출 시작 (이력서 + 채용공고) ===")
-            logger.info(f"{'='*80}")
-            logger.info(
-                f"📌 OCR 전략: {'GEMINI (V1 Temporary)' if model == 'auto' else model.upper()}"
+    model = request.model if hasattr(request, "model") and request.model else "gemini"
+    safe_task_key = sanitize_log_input(task_key)
+
+    if is_celery_available():
+        # Celery 태스크 비동기 실행 (즉시 반환, 블로킹 없음)
+        from app.tasks.text_extract_tasks import process_text_extract_task
+
+        process_text_extract_task.delay(
+            task_id=task_key,
+            user_id=request.user_id,
+            resume_data=request.resume.model_dump(),
+            job_posting_data=request.job_posting.model_dump(),
+            model=model,
+        )
+        logger.info("[TextExtract] Celery 태스크 등록 완료: %s", safe_task_key)
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.text_extract_tasks import _process_text_extract_async
+
+        asyncio.create_task(
+            _process_text_extract_async(
+                task_id=task_key,
+                user_id=request.user_id,
+                resume_data=request.resume.model_dump(),
+                job_posting_data=request.job_posting.model_dump(),
+                model=model,
             )
-            safe_info(logger, "📌 사용자 ID: %s", request.user_id)
-            logger.info(f"📌 vLLM 서비스: {'✅ 사용 가능' if rag.vllm else '❌ 사용 불가'}")
-            logger.info("")
-
-            async def extract_document(
-                doc_input: DocumentInput, doc_type: str
-            ) -> DocumentExtractResult:
-                """문서 추출 헬퍼 함수"""
-                logger.info(f"📄 [{doc_type.upper()}] 처리 시작")
-
-                if doc_input.s3_key:
-                    file_type = doc_input.get_file_type_simple() or "pdf"
-                    logger.info(f"   → 파일 타입 (MIME): {doc_input.file_type}")
-                    logger.info(f"   → 파일 타입 (단순): {file_type}")
-                    safe_s3_key = sanitize_log_input(doc_input.s3_key)
-                    logger.info("   → S3 키: %s", safe_s3_key)
-
-                    logger.info("   🔍 [OCRService] CLOVA OCR 우선 → Gemini Fallback 시작")
-                    ocr_result = await rag.ocr.extract_text(
-                        file_url=str(doc_input.s3_key),
-                        file_type=file_type,
-                        user_id=str(request.user_id),
-                        fallback_enabled=True,
-                    )
-                    ocr_engine = ocr_result.get("ocr_engine") or "gemini"
-                    fallback_reason = ocr_result.get("fallback_reason")
-                    extracted_text = ocr_result.get("extracted_text", "")
-                    pages = [PageText(**page) for page in ocr_result.get("pages", [])]
-
-                    if fallback_reason:
-                        logger.info(
-                            f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료 (폴백 사유: {fallback_reason}): "
-                            f"{len(extracted_text)}자 (페이지: {len(pages)})"
-                        )
-                    else:
-                        logger.info(
-                            f"   ✅ [{ocr_engine.upper()} OCR] 추출 완료: "
-                            f"{len(extracted_text)}자 (페이지: {len(pages)})"
-                        )
-                else:
-                    extracted_text = doc_input.text or ""
-                    pages = None
-                    logger.info(f"   → 텍스트 직접 입력: {len(extracted_text)} characters")
-
-                if extracted_text:
-                    document_id = f"{doc_type}_{uuid.uuid4().hex[:12]}"
-                    await rag.vectordb.add_document(
-                        document_id=document_id,
-                        text=extracted_text,
-                        collection_type=doc_type,
-                        metadata={
-                            "user_id": request.user_id,
-                            "file_id": doc_input.file_id,
-                            "created_at": datetime.now().isoformat(),
-                        },
-                    )
-                    safe_document_id = sanitize_log_input(document_id)
-                    logger.info("   ✅ VectorDB 저장 완료: %s", safe_document_id)
-
-                return DocumentExtractResult(
-                    file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
-                )
-
-            resume_result = await extract_document(request.resume, "resume")
-            job_posting_result = await extract_document(request.job_posting, "job_posting")
-
-            # 분석 리포트 생성
-            logger.info("")
-            logger.info("📊 분석 리포트 생성 시작...")
-            analysis_failed = False
-            try:
-                analysis_result = await rag.llm.generate_analysis(
-                    resume_text=resume_result.extracted_text,
-                    posting_text=job_posting_result.extracted_text,
-                    user_id=str(request.user_id),
-                )
-                logger.info("✅ 분석 리포트 생성 완료")
-                # 문서 설계: 분석 완료 시 analysis_results 컬렉션에 저장
-                try:
-                    matching = analysis_result.get("matching", {})
-                    analysis_doc_id = f"analysis_{request.user_id}_{uuid.uuid4().hex[:8]}"
-                    await rag.vectordb.add_document(
-                        document_id=analysis_doc_id,
-                        text=format_analysis_text(
-                            resume_analysis=analysis_result.get("resume_analysis"),
-                            posting_analysis=analysis_result.get("posting_analysis"),
-                            summary="",
-                        )
-                        or "분석 결과 없음",
-                        collection_type="analysis_results",
-                        metadata={
-                            "user_id": str(request.user_id),
-                            "analysis_type": "full",
-                            "score": matching.get("score"),
-                            "grade": matching.get("grade", ""),
-                            "created_at": datetime.now().isoformat(),
-                        },
-                    )
-                    logger.info("   ✅ VectorDB analysis_results 저장 완료")
-                except Exception as ex:
-                    logger.warning("   ⚠️ analysis_results 저장 건너뜀: %s", ex)
-            except Exception as e:
-                analysis_failed = True
-                logger.warning(
-                    "⚠️ 분석 리포트 생성 실패 (오프닝 메시지에 분석 내용이 비어 보일 수 있음): %s",
-                    e,
-                    exc_info=True,
-                )
-                analysis_result = {
-                    "resume_analysis": {"strengths": [], "weaknesses": [], "suggestions": []},
-                    "posting_analysis": {
-                        "company": "알 수 없음",
-                        "position": "알 수 없음",
-                        "required_skills": [],
-                        "preferred_skills": [],
-                    },
-                    "matching": {
-                        "score": 0,
-                        "grade": "F",
-                        "matched_skills": [],
-                        "missing_skills": [],
-                    },
-                }
-
-            # 채팅방 제목 추출
-            chat_title = ""
-            try:
-                logger.info("📝 채팅방 제목 추출 중...")
-                posting_text = job_posting_result.extracted_text[:1000]
-                title_prompt = f"""{get_extract_title_prompt()}
-
-## 채용공고 텍스트
-{posting_text}
-"""
-                title_response = ""
-                async for chunk in rag.llm.generate_response(
-                    user_message=title_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt="당신은 채용공고에서 회사명과 직무를 정확히 추출하는 AI입니다.",
-                ):
-                    title_response += chunk
-
-                chat_title = title_response.strip()
-                logger.info(f"✅ 채팅방 제목: {chat_title}")
-            except Exception as e:
-                logger.error(f"❌ 채팅방 제목 추출 실패: {e}")
-            logger.info("")
-
-            task_data = store.get(task_key) or {}
-            task_data["status"] = TaskStatus.COMPLETED
-
-            formatted_text = format_analysis_text(
-                resume_analysis=analysis_result.get("resume_analysis"),
-                posting_analysis=analysis_result.get("posting_analysis"),
-                summary=chat_title,
-            )
-            formatted_text = formatted_text or "분석 결과가 없습니다."
-            if analysis_failed:
-                formatted_text += (
-                    "\n\n(상세 분석이 일시적으로 반영되지 않았습니다. "
-                    "이력서·채용공고 텍스트는 저장되었으니, 궁금한 점을 질문해 주세요.)"
-                )
-
-            # 오프닝 메시지 생성
-            logger.info("🤖 오프닝 메시지 생성 시작...")
-            ai_message = ""
-            try:
-                opening_prompt = get_opening_prompt(formatted_text)
-                async for chunk in rag.llm.generate_response(
-                    user_message=opening_prompt,
-                    context=None,
-                    history=[],
-                    system_prompt="당신은 도움을 주는 친절한 취업 어시스턴트입니다.",
-                ):
-                    ai_message += chunk
-                logger.info("✅ 오프닝 메시지 생성 완료")
-            except Exception as e:
-                logger.error(f"❌ 오프닝 메시지 생성 실패: {e}")
-                ai_message = f"안녕하세요! 지원하신 {chat_title or '직무'}에 대한 분석이 완료되었습니다. 결과를 확인하시고 궁금한 점이 있다면 언제든 물어봐주세요!"
-
-            task_data["result"] = TextExtractResult(
-                success=True,
-                summary=chat_title or None,
-                resume_ocr=resume_result.extracted_text,
-                job_posting_ocr=job_posting_result.extracted_text,
-                resume_analysis=analysis_result.get("resume_analysis"),
-                posting_analysis=analysis_result.get("posting_analysis"),
-                formatted_text=formatted_text,
-                ai_message=ai_message,
-            ).model_dump()
-            store.save(task_key, task_data)
-
-            logger.info("")
-            logger.info("✅ 텍스트 추출 + 분석 완료!")
-            logger.info(f"   → 이력서 OCR: {len(resume_result.extracted_text)}자")
-            logger.info(f"   → 채용공고 OCR: {len(job_posting_result.extracted_text)}자")
-
-        except Exception as e:
-            logger.error(f"텍스트 추출 오류: {e}", exc_info=True)
-            task_data = store.get(task_key) or {}
-            task_data["status"] = TaskStatus.FAILED
-            task_data["error"] = {"code": ErrorCode.PROCESSING_ERROR, "message": str(e)}
-            store.save(task_key, task_data)
-
-    asyncio.create_task(process_text_extract(task_storage))
+        )
+        logger.warning(
+            "[TextExtract] Celery 불가 → asyncio fallback: %s (Celery Worker 실행 권장)",
+            safe_task_key,
+        )
 
     return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)

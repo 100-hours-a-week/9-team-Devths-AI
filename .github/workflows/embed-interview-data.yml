@@ -1,0 +1,108 @@
+# 면접 데이터셋을 운영/스테이징 Chroma에 임베딩 (CodeDeploy 트리거 방식)
+# 전제: AWS CodeDeploy가 EC2 내 `deploy/docker_deploy.sh`를 실행하며, 
+#       docker_deploy.sh 내부에서 `docker run --rm ... auto_embed_data.py`를 수행함.
+# Secrets: AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, AWS_S3_BUCKET, CODEDEPLOY_APP_NAME, CODEDEPLOY_GROUP_NAME_V2_DEV/STAGING
+
+name: Embed Interview Data to Chroma
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset_file:
+        description: "데이터 파일 (data/interview_dataset_valid.json 또는 train)"
+        required: false
+        default: "data/interview_dataset_valid.json"
+        type: string
+      environment:
+        type: choice
+        description: Target Environment
+        options: 
+        - dev
+        - stg
+
+jobs:
+  trigger-embedding:
+    name: Trigger embedding via CodeDeploy
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Timestamp
+        id: timestamp
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "value=$(date +'%Y%m%d_%H%M%S')-embed-$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Package Deployment Scripts
+        id: package
+        run: |
+          echo "📦 Creating embedding trigger package..."
+          ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
+          mkdir -p deploy-package
+
+          # Copy deployment scripts, appspec, and compose file
+          cp -r deploy/ deploy-package/
+          cp appspec.yml deploy-package/
+          cp docker-compose.cicd.yml deploy-package/
+          cp -r data/ deploy-package/ 2>/dev/null || true  # 데이터 파일 마운트용
+
+          # Create .deploy-env file with EMBEDDING trigger flag
+          echo "export DEPLOY_BRANCH=\"${{ github.ref_name }}\"" > deploy-package/.deploy-env
+          echo "export DEPLOY_TIMESTAMP=\"${{ steps.timestamp.outputs.value }}\"" >> deploy-package/.deploy-env
+          echo "export TRIGGER_DATA_EMBEDDING=true" >> deploy-package/.deploy-env
+          echo "export INTERVIEW_DATASET_FILE=\"${{ inputs.dataset_file }}\"" >> deploy-package/.deploy-env
+
+          # Zip the package
+          cd deploy-package
+          zip -r ../$ARTIFACT_NAME .
+          cd ..
+
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload to S3
+        id: upload
+        run: |
+          echo "☁️ Uploading to S3..."
+          ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
+          S3_KEY="AI/embedding_trigger/$ARTIFACT_NAME"
+          aws s3 cp $ARTIFACT_NAME s3://${{ secrets.AWS_S3_BUCKET }}/$S3_KEY
+          echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+
+      - name: Trigger CodeDeploy
+        id: codedeploy
+        run: |
+          echo "🚀 Triggering CodeDeploy..."
+          S3_KEY="${{ steps.upload.outputs.s3_key }}"
+          
+          # Determine Deployment Group based on input
+          if [[ "${{ inputs.environment }}" == "stg" ]]; then
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_STAGING }}"
+          else
+            DEPLOY_GROUP="${{ secrets.CODEDEPLOY_GROUP_NAME_V2_DEV }}"
+          fi
+          
+          DEPLOYMENT_ID=$(aws deploy create-deployment \
+            --application-name ${{ secrets.CODEDEPLOY_APP_NAME }} \
+            --deployment-group-name $DEPLOY_GROUP \
+            --s3-location bucket=${{ secrets.AWS_S3_BUCKET }},key=$S3_KEY,bundleType=zip \
+            --description "Manual Embed Trigger - ${{ inputs.dataset_file }}" \
+            --query 'deploymentId' \
+            --output text)
+
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "✅ Deployment started: $DEPLOYMENT_ID"
+          
+          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
+            echo "✅ Embedding completed successfully via CodeDeploy!"
+          else
+            echo "❌ CodeDeploy FAILED."
+            exit 1
+          fi

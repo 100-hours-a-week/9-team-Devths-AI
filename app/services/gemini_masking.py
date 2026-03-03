@@ -1,7 +1,7 @@
 """
-Gemini 3 Flash Preview를 사용한 얼굴 PII 마스킹 서비스
+Gemini Flash를 사용한 얼굴 PII 마스킹 서비스
 
-Gemini 3 Flash Preview의 bounding box detection을 사용하여 얼굴을 감지하고 원형으로 마스킹합니다.
+Gemini Flash의 bounding box detection을 사용하여 얼굴을 감지하고 원형으로 마스킹합니다.
 실패 시 OpenCV Haar Cascade를 fallback으로 사용합니다.
 """
 
@@ -17,6 +17,10 @@ import google.genai as genai
 import httpx
 import pdf2image
 from PIL import Image, ImageDraw
+
+from app.config.settings import get_settings
+from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.url_validator import validate_url_or_raise
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +73,13 @@ class GeminiPIIMaskingService:
 
         Returns:
             파일 바이트 데이터
+
+        Raises:
+            ValueError: URL이 유효하지 않거나 SSRF 공격 시도인 경우
         """
+        # SSRF 방어: URL 검증
+        validate_url_or_raise(file_url)
+
         # data: URL 처리
         if file_url.startswith("data:"):
             # data:image/png;base64,... 형식
@@ -77,10 +87,12 @@ class GeminiPIIMaskingService:
                 header, encoded = file_url.split(",", 1)
                 return base64.b64decode(encoded)
             except Exception as e:
-                logger.error(f"Failed to decode data URL: {e}")
+                logger.error("Failed to decode data URL: %s", type(e).__name__)
                 raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL 처리
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading file from: %s...", safe_url)
         async with httpx.AsyncClient() as client:
             response = await client.get(file_url, timeout=30.0)
             response.raise_for_status()
@@ -247,7 +259,7 @@ If no faces: {"faces": []}"""
 
             response = await asyncio.to_thread(
                 client.models.generate_content,
-                model="gemini-3-flash-preview",
+                model=get_settings().gemini_model,
                 contents=contents,
                 config=generation_config,
             )
@@ -672,7 +684,8 @@ If no faces: {"faces": []}"""
             (마스킹된 이미지 바이트, 썸네일 바이트, PII 감지 정보)
         """
         # 1. 이미지 다운로드
-        logger.info(f"Downloading image from {file_url}")
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading image from %s...", safe_url)
         image_bytes = await self.download_file(file_url)
         image = Image.open(io.BytesIO(image_bytes))
 
@@ -715,7 +728,8 @@ If no faces: {"faces": []}"""
             (마스킹된 PDF 바이트, 썸네일 바이트, 전체 페이지의 PII 감지 정보)
         """
         # 1. PDF 다운로드
-        logger.info(f"Downloading PDF from {file_url}")
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading PDF from %s...", safe_url)
         pdf_bytes = await self.download_file(file_url)
 
         # 2. PDF를 이미지로 변환

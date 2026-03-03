@@ -19,22 +19,55 @@ logger = logging.getLogger(__name__)
 _llm_service = None
 _vllm_service = None
 _vectordb_service = None
+_langchain_gateway = None
+_rag_chain = None
 _rag_service = None
 
 
 def get_services():
     """Get or initialize AI services (설정은 config/settings 사용)"""
-    global _llm_service, _vllm_service, _vectordb_service, _rag_service
+    global \
+        _llm_service, \
+        _vllm_service, \
+        _vectordb_service, \
+        _langchain_gateway, \
+        _rag_chain, \
+        _rag_service
 
     if _llm_service is None:
         settings = get_settings()
-        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
+        raw_key = (
+            settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        )
+        api_key = (raw_key.strip() if isinstance(raw_key, str) and raw_key else raw_key) or None
+        if api_key == "":
+            api_key = None
         _llm_service = LLMService(api_key=api_key)
         _vectordb_service = VectorDBService(
             api_key=api_key,
             chroma_server_host=settings.chroma_server_host,
             chroma_server_port=settings.chroma_server_port,
         )
+
+        # LangChain LCEL Gateway (면접/QnA 체인용, API 키 분산·폴백 지원)
+        try:
+            raw_keys = settings.all_google_api_keys or ([api_key] if api_key else [])
+            keys = [k.strip() for k in raw_keys if k and isinstance(k, str) and k.strip()]
+            if keys:
+                from app.infrastructure.llm.langchain_wrapper import LangChainLLMGateway
+
+                _langchain_gateway = LangChainLLMGateway(
+                    google_api_keys=keys if len(keys) > 1 else None,
+                    google_api_key=keys[0] if len(keys) == 1 else None,
+                    model_name=settings.gemini_model,
+                    embedding_model=settings.gemini_embedding_model,
+                )
+                logger.info("✅ LangChain LCEL Gateway initialized")
+            else:
+                _langchain_gateway = None
+        except Exception as e:
+            logger.warning(f"LangChain Gateway initialization failed: {e}")
+            _langchain_gateway = None
 
         # Initialize vLLM service (GCP GPU server)
         gcp_vllm_url = settings.gcp_vllm_base_url or os.getenv("GCP_VLLM_BASE_URL")
@@ -53,7 +86,42 @@ def get_services():
             logger.warning(f"vLLM service initialization failed: {e}")
             _vllm_service = None
 
-        _rag_service = RAGService(_llm_service, _vectordb_service, _vllm_service)
+        _rag_chain = None
+        if _langchain_gateway is not None:
+            try:
+                from langchain_chroma import Chroma
+
+                from app.domain.chat.chains import COLLECTION_NAME_MAP, RAGChain
+
+                chroma_client = _vectordb_service.chroma_client
+                embedding_function = _langchain_gateway.embeddings
+                vectorstores = {}
+                for collection_type, collection_name in COLLECTION_NAME_MAP.items():
+                    vectorstores[collection_type] = Chroma(
+                        client=chroma_client,
+                        collection_name=collection_name,
+                        embedding_function=embedding_function,
+                    )
+                _rag_chain = RAGChain(
+                    llm_gateway=_langchain_gateway,
+                    vectorstores=vectorstores,
+                    max_context_length=settings.rag_max_context_length,
+                    retrieval_k=settings.rag_retrieval_k,
+                    fetch_k=settings.rag_fetch_k,
+                    lambda_mult=settings.rag_lambda_mult,
+                )
+                logger.info("RAGChain (MMR) initialized for retrieve_context")
+            except Exception as e:
+                logger.warning("RAGChain initialization failed, using VectorDB fallback: %s", e)
+                _rag_chain = None
+
+        _rag_service = RAGService(
+            _llm_service,
+            _vectordb_service,
+            _vllm_service,
+            langchain_gateway=_langchain_gateway,
+            rag_chain=_rag_chain,
+        )
 
     return _rag_service
 

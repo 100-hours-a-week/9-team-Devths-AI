@@ -5,7 +5,7 @@
 2단계: 토론(심층 분석) 요청/응답
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.chat import LLMModel
 
@@ -44,7 +44,18 @@ class AnalyzeInterviewRequest(BaseModel):
 
     프론트엔드에서 면접 종료 버튼을 누르면
     채팅에서 수집된 Q&A 데이터를 context로 전달하여 평가 리포트를 생성합니다.
+
+    백엔드가 {"name": "...", "value": {실제 데이터}} 형태로 보낼 수 있어서
+    model_validator로 자동 언래핑합니다.
     """
+
+    @model_validator(mode="before")
+    @classmethod
+    def unwrap_value(cls, data):
+        """백엔드 래핑 형식 자동 언래핑: {"name":..., "value":{...}} → {...}"""
+        if isinstance(data, dict) and "value" in data and isinstance(data["value"], dict):
+            return data["value"]
+        return data
 
     model: LLMModel = Field(
         default=LLMModel.GEMINI, description="사용할 LLM 모델 (gemini 또는 vllm)"

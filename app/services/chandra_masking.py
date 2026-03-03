@@ -17,6 +17,9 @@ import httpx
 import pdf2image
 from PIL import Image, ImageDraw
 
+from app.utils.log_sanitizer import sanitize_log_input
+from app.utils.url_validator import validate_url_or_raise
+
 logger = logging.getLogger(__name__)
 
 # Chandra 모델 관련 import
@@ -88,17 +91,25 @@ class ChandraPIIMaskingService:
 
         Returns:
             파일 바이트 데이터
+
+        Raises:
+            ValueError: URL이 유효하지 않거나 SSRF 공격 시도인 경우
         """
+        # SSRF 방어: URL 검증
+        validate_url_or_raise(file_url)
+
         # data: URL 처리
         if file_url.startswith("data:"):
             try:
                 header, encoded = file_url.split(",", 1)
                 return base64.b64decode(encoded)
             except Exception as e:
-                logger.error(f"Failed to decode data URL: {e}")
+                logger.error("Failed to decode data URL: %s", type(e).__name__)
                 raise ValueError("Invalid data URL format") from e
 
         # HTTP(S) URL 처리
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading file from: %s...", safe_url)
         async with httpx.AsyncClient() as client:
             response = await client.get(file_url, timeout=30.0)
             response.raise_for_status()
@@ -327,7 +338,8 @@ class ChandraPIIMaskingService:
             (마스킹된 이미지 바이트, 썸네일 바이트, PII 감지 정보)
         """
         # 1. 이미지 다운로드
-        logger.info(f"Downloading image from {file_url}")
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading image from %s...", safe_url)
         image_bytes = await self.download_file(file_url)
         image = Image.open(io.BytesIO(image_bytes))
 
@@ -370,7 +382,8 @@ class ChandraPIIMaskingService:
             (마스킹된 PDF 바이트, 썸네일 바이트, 전체 페이지의 PII 감지 정보)
         """
         # 1. PDF 다운로드
-        logger.info(f"Downloading PDF from {file_url}")
+        safe_url = sanitize_log_input(file_url[:100])
+        logger.info("Downloading PDF from %s...", safe_url)
         pdf_bytes = await self.download_file(file_url)
 
         # 2. PDF를 이미지로 변환

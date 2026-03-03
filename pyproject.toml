@@ -15,6 +15,7 @@ python = "~3.10.19"
 # FastAPI and server
 fastapi = "^0.109.0"
 uvicorn = {extras = ["standard"], version = "^0.27.0"}
+gunicorn = ">=21.2.0,<22.0.0"  # ADR-102: Docker Compose 환경 멀티 프로세스 (Compose replicas 대체)
 
 # Data validation
 pydantic = {version = "^2.12.0", extras = ["email"]}
@@ -48,14 +49,19 @@ openai = "^2.15.0"
 # RAG and VectorDB (서빙에 필수)
 chromadb = "^0.4.24"
 
-# CloudWatch Monitoring
-boto3 = "^1.34.0"
+
 
 # Pydantic Settings (설정 관리)
 pydantic-settings = "^2.1.0"
 
 # Redis (세션/태스크 저장소)
 redis = "^5.0.0"
+
+# Celery (ADR-094: 트렌드 크롤링 스케줄러)
+celery = {extras = ["redis"], version = "^5.3.0"}
+
+# YAML (프롬프트 템플릿 로드)
+pyyaml = "^6.0.0"
 
 # ============================================
 # LangChain & LangGraph (LLM 오케스트레이션)
@@ -65,12 +71,19 @@ langchain-google-genai = "^2.0.0"
 langchain-openai = "^0.3.0"
 langchain-community = "^0.3.0"
 langchain-chroma = "^0.2.0"
+langchain-tavily = "^0.1.0"
+rank-bm25 = "^0.2.2"
+flashrank = "^0.2.0"  # ADR-104: FlashRank 리랭커 (ONNX 기반, CPU 최적)
+langchain-experimental = "^0.3.0"  # ADR-106: SemanticChunker (임베딩 기반 의미 분할)
+scikit-learn = "^1.3.0"  # ADR-106: RAPTOR 클러스터링 (KMeans)
+beautifulsoup4 = "^4.12.0"
 langgraph = "^0.2.0"
 
 # ============================================
 # ML Dependencies (선택적 - 모델 추론/학습용)
 # poetry install --with ml 로 설치
 # ============================================
+prometheus-client = "^0.24.1"
 [tool.poetry.group.ml]
 optional = true
 
@@ -96,6 +109,8 @@ datasets = "^2.14.0"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.0"
+pytest = "^9.0.2"
+pytest-asyncio = "^1.3.0"
 
 [tool.poetry.scripts]
 
@@ -134,3 +149,7 @@ known-first-party = ["app"]
 
 [tool.ruff.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

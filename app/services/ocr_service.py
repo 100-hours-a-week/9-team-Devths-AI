@@ -27,6 +27,14 @@ from app.utils.langfuse_client import create_generation, trace_llm_call
 
 logger = logging.getLogger(__name__)
 
+# pdfplumber: 텍스트 레이어가 있는 디지털 PDF 직접 추출 (ADR-063)
+try:
+    import pdfplumber
+
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+
 # CLOVA OCR 설정 (환경변수)
 CLOVA_OCR_API_URL = os.getenv("CLOVA_OCR_API_URL", "").strip()
 CLOVA_OCR_SECRET_KEY = os.getenv("CLOVA_OCR_SECRET_KEY", "").strip()
@@ -83,20 +91,50 @@ class OCRService:
         fallback_enabled: bool = True,
     ) -> dict[str, Any]:
         """
-        OCR 텍스트 추출 (Fallback 전략 적용)
+        텍스트 추출 (ADR-063: pdfplumber + OCR 병행)
 
-        1. CLOVA OCR 시도 (설정 시)
-        2. 품질 검증 (텍스트 길이, 한글 비율)
-        3. 실패 또는 품질 낮음 → Gemini Fallback
+        PDF 처리 우선순위:
+        1. pdfplumber로 텍스트 레이어 직접 추출 (디지털 PDF)
+        2. 품질 부족 (스캔 PDF) → CLOVA OCR 시도
+        3. CLOVA 실패/품질 부족 → Gemini Fallback
+
+        이미지 처리:
+        1. CLOVA OCR 시도
+        2. 실패/품질 부족 → Gemini Fallback
 
         Returns:
             {
                 "extracted_text": str,
                 "pages": [{"page": int, "text": str}, ...],
-                "ocr_engine": "clova" | "gemini",
+                "ocr_engine": "pdfplumber" | "clova" | "gemini",
                 "fallback_reason": str | None
             }
         """
+        # ── Phase 3: PDF + pdfplumber 우선 시도 (ADR-063) ──
+        from app.config.settings import get_settings
+
+        settings = get_settings()
+        is_pdf = file_type == "pdf" or "pdf" in file_type.lower()
+        use_pdfplumber = settings.pdf_extract_priority == "pdfplumber"
+        if is_pdf and PDFPLUMBER_AVAILABLE and use_pdfplumber:
+            try:
+                file_bytes = await self._download_file(file_url)
+                plumber_result = self._try_pdfplumber(file_bytes)
+                should_fb, plumber_reason = self._should_fallback(plumber_result)
+                if not should_fb:
+                    plumber_result["ocr_engine"] = "pdfplumber"
+                    plumber_result["fallback_reason"] = None
+                    logger.info(
+                        "[pdfplumber] 텍스트 추출 성공: %d자, %d페이지",
+                        len(plumber_result["extracted_text"]),
+                        len(plumber_result["pages"]),
+                    )
+                    return plumber_result
+                logger.info("[pdfplumber] 품질 부족 (%s) → OCR 폴백", plumber_reason)
+            except Exception as e:
+                logger.warning("[pdfplumber] 실패: %s → OCR 폴백", e)
+
+        # ── 기존 OCR 경로: CLOVA → Gemini Fallback ──
         reason = "CLOVA 미설정"
         result = None
 
@@ -292,6 +330,26 @@ class OCRService:
                 f"한글 비율 낮음 ({korean_chars}/{len(text)} = {korean_chars/len(text):.1%})",
             )
         return False, None
+
+    def _try_pdfplumber(self, pdf_bytes: bytes) -> dict[str, Any]:
+        """pdfplumber로 PDF 텍스트 직접 추출 (디지털 PDF용, ADR-063).
+
+        텍스트 레이어가 있는 PDF에서 OCR 없이 텍스트를 추출한다.
+        스캔 PDF는 텍스트가 거의 없으므로 _should_fallback()에서 걸러진다.
+        """
+        pages: list[dict[str, Any]] = []
+        full_text = ""
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            for page_num, page in enumerate(pdf.pages, start=1):
+                text = page.extract_text() or ""
+                pages.append({"page": page_num, "text": text})
+                if text:
+                    full_text += f"\n\n[Page {page_num}]\n{text}"
+        return {
+            "success": True,
+            "extracted_text": full_text.strip(),
+            "pages": pages,
+        }
 
     async def _download_file(self, file_url: str) -> bytes:
         """파일 다운로드 (URL 또는 S3 키)"""

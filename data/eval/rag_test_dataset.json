@@ -1,0 +1,162 @@
+[
+  {
+    "id": "tc_001",
+    "category": "resume_qa",
+    "user_message": "이 이력서에서 가장 두드러지는 기술적 강점은 무엇인가요?",
+    "context_type": "resume",
+    "expected_keywords": ["강점", "기술", "경험", "역량"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_002",
+    "category": "resume_qa",
+    "user_message": "지원자의 주요 프로젝트 경험을 요약해 주세요.",
+    "context_type": "resume",
+    "expected_keywords": ["프로젝트", "경험", "개발", "구현"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_003",
+    "category": "resume_qa",
+    "user_message": "이 이력서를 가진 지원자가 백엔드 개발 포지션에 적합한지 평가해 주세요.",
+    "context_type": "resume",
+    "expected_keywords": ["백엔드", "적합", "스킬", "경험"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_004",
+    "category": "resume_qa",
+    "user_message": "지원자의 기술 스택 중 부족한 부분이 있다면 무엇인가요?",
+    "context_type": "resume",
+    "expected_keywords": ["부족", "보완", "역량", "기술"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_005",
+    "category": "resume_qa",
+    "user_message": "이 이력서에서 지원자의 커리어 성장 방향을 분석해 주세요.",
+    "context_type": "resume",
+    "expected_keywords": ["성장", "커리어", "방향", "경력"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_006",
+    "category": "job_posting_qa",
+    "user_message": "이 채용공고에서 요구하는 핵심 역량은 무엇인가요?",
+    "context_type": "job_posting",
+    "expected_keywords": ["역량", "요구사항", "필수", "우대"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_007",
+    "category": "job_posting_qa",
+    "user_message": "이 포지션에 지원하기 위해 어떤 기술을 준비해야 하나요?",
+    "context_type": "job_posting",
+    "expected_keywords": ["기술", "준비", "스택", "역량"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_008",
+    "category": "job_posting_qa",
+    "user_message": "이 회사의 기술 스택과 개발 환경은 어떠한가요?",
+    "context_type": "job_posting",
+    "expected_keywords": ["기술 스택", "개발 환경", "도구", "프레임워크"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_009",
+    "category": "job_posting_qa",
+    "user_message": "이 채용공고의 연봉 및 복지 조건을 요약해 주세요.",
+    "context_type": "job_posting",
+    "expected_keywords": ["연봉", "복지", "혜택", "조건"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_010",
+    "category": "job_posting_qa",
+    "user_message": "이 포지션에서 주로 담당하게 될 업무는 무엇인가요?",
+    "context_type": "job_posting",
+    "expected_keywords": ["업무", "담당", "역할", "책임"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_011",
+    "category": "trend_qa",
+    "user_message": "최근 백엔드 개발 분야에서 주목받는 기술 트렌드는 무엇인가요?",
+    "context_type": "trend_data",
+    "expected_keywords": ["트렌드", "기술", "백엔드", "최신"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_012",
+    "category": "trend_qa",
+    "user_message": "2026년 AI/ML 엔지니어 채용 시장 동향을 알려주세요.",
+    "context_type": "trend_data",
+    "expected_keywords": ["AI", "ML", "채용", "2026", "동향"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_013",
+    "category": "trend_qa",
+    "user_message": "요즘 개발자 채용에서 가장 많이 요구하는 기술은 무엇인가요?",
+    "context_type": "trend_data",
+    "expected_keywords": ["채용", "요구", "기술", "개발자"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_014",
+    "category": "trend_qa",
+    "user_message": "클라우드 엔지니어로 취업하기 위해 어떤 자격증이 유리한가요?",
+    "context_type": "trend_data",
+    "expected_keywords": ["클라우드", "자격증", "AWS", "취업"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_015",
+    "category": "trend_qa",
+    "user_message": "스타트업과 대기업 중 어느 쪽에 지원하는 것이 커리어에 유리한가요?",
+    "context_type": "trend_data",
+    "expected_keywords": ["스타트업", "대기업", "커리어", "유리"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_016",
+    "category": "general_chat",
+    "user_message": "면접에서 자주 나오는 질문 유형을 알려주세요.",
+    "context_type": null,
+    "expected_keywords": ["면접", "질문", "유형", "준비"],
+    "reference_answer": "면접에서는 자기소개, 지원 동기, 강점/약점, 기술 역량 확인 질문, 상황 대처 질문(STAR 기법) 등이 자주 나옵니다. 직무 관련 기술 질문과 문화 적합성 질문도 흔합니다."
+  },
+  {
+    "id": "tc_017",
+    "category": "general_chat",
+    "user_message": "포트폴리오를 작성할 때 가장 중요한 것은 무엇인가요?",
+    "context_type": null,
+    "expected_keywords": ["포트폴리오", "중요", "프로젝트", "성과"],
+    "reference_answer": "포트폴리오에서 가장 중요한 것은 실제 문제를 해결한 경험과 그 성과를 구체적인 수치로 제시하는 것입니다. 기술 스택, 본인의 역할, 배운 점을 명확히 기술하고, 코드 품질과 가독성도 중요합니다."
+  },
+  {
+    "id": "tc_018",
+    "category": "general_chat",
+    "user_message": "신입 개발자가 첫 취업을 위해 준비해야 할 것들을 알려주세요.",
+    "context_type": null,
+    "expected_keywords": ["신입", "취업", "준비", "개발자"],
+    "reference_answer": "신입 개발자는 기본 알고리즘과 자료구조, 프로젝트 경험(포트폴리오), CS 지식(네트워크, OS, DB), 기술 스택 숙련도를 준비해야 합니다. 코딩 테스트 연습과 이력서·자기소개서 작성도 필수입니다."
+  },
+  {
+    "id": "tc_019",
+    "category": "general_chat",
+    "user_message": "이직할 때 연봉 협상을 어떻게 하면 좋을까요?",
+    "context_type": null,
+    "expected_keywords": ["연봉", "협상", "이직", "전략"],
+    "reference_answer": null
+  },
+  {
+    "id": "tc_020",
+    "category": "general_chat",
+    "user_message": "개발자 기술 면접에서 알고리즘 문제를 잘 풀기 위한 팁은?",
+    "context_type": null,
+    "expected_keywords": ["알고리즘", "기술 면접", "팁", "코딩"],
+    "reference_answer": "알고리즘 문제에서는 문제를 먼저 이해하고 예외 케이스를 파악한 후, 풀이 방법을 설명하고 코딩을 시작하세요. 시간복잡도와 공간복잡도를 함께 말하고, 테스트 케이스로 검증하는 습관을 들이세요."
+  }
+]

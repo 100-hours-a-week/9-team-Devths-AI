@@ -16,6 +16,8 @@ from google.genai import types
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from app.config.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,13 +51,13 @@ class CalendarParsingService:
             api_key: Google API key (uses GOOGLE_API_KEY env var if not provided)
         """
         # Configure Gemini API
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
         # Initialize Gemini Client
         self.client = genai.Client(api_key=api_key)
-        self.model_name = "gemini-3-flash-preview"
+        self.model_name = get_settings().gemini_model
 
         logger.info(f"Calendar Parsing Service initialized with model: {self.model_name}")
 

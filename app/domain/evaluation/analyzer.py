@@ -13,6 +13,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from app.config.settings import get_settings
 from app.prompts.evaluation import create_analyze_prompt
 
 from .entities import InterviewAnalysis, QuestionAnalysis
@@ -32,7 +33,7 @@ class InterviewAnalyzer:
     def __init__(
         self,
         api_key: str | None = None,
-        model_name: str = "gemini-3-pro-preview",
+        model_name: str | None = None,
         thinking_level: str = "HIGH",
     ):
         """Initialize analyzer.
@@ -42,12 +43,12 @@ class InterviewAnalyzer:
             model_name: Gemini model for evaluation.
             thinking_level: Thinking depth (NONE, LOW, MEDIUM, HIGH).
         """
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY가 필요합니다.")
 
         self.client = genai.Client(api_key=api_key)
-        self.model_name = model_name
+        self.model_name = model_name or get_settings().eval_gemini_model
         self.thinking_level = thinking_level
 
         logger.info(
