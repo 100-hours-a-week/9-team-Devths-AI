@@ -16,12 +16,13 @@ from app.config.dependencies import get_legacy_task_storage, get_session_store
 from app.config.settings import get_settings
 from app.prompts import (
     create_tech_followup_prompt,
-    create_tech_interview_init_prompt,
     format_conversation_history,
+    format_followup_question_label,
+    format_main_question_label,
     get_extract_title_prompt,
     get_opening_prompt,
-    # 기술 면접 5단계 프롬프트
     get_system_tech_interview,
+    load_prompt_yaml,
 )
 from app.schemas.calendar import CalendarParseRequest, CalendarParseResponse
 from app.schemas.chat import (
@@ -38,7 +39,6 @@ from app.schemas.text_extract import (
     TextExtractRequest,
     TextExtractResult,
 )
-from app.services.cloudwatch_service import CloudWatchService
 from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.vectordb_service import VectorDBService
@@ -75,7 +75,12 @@ def get_services():
 
     if llm_service is None:
         settings = get_settings()
-        api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY")
+        raw_key = (
+            settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        )
+        api_key = (raw_key.strip() if isinstance(raw_key, str) and raw_key else raw_key) or None
+        if api_key == "":
+            api_key = None
         llm_service = LLMService(api_key=api_key)
         vectordb_service = VectorDBService(
             api_key=api_key,
@@ -209,14 +214,6 @@ async def text_extract(
     """텍스트 추출 + 임베딩 저장 (통합) - 이력서 + 채용공고"""
     task_id = request.task_id  # 백엔드에서 전달받은 task_id 사용
 
-    # 모니터링 메트릭 전송
-    try:
-        cw = CloudWatchService.get_instance()
-        # fire-and-forget (await 안함, 배경 실행)
-        asyncio.create_task(cw.put_metric("AI_Job_Count", 1, "Count", {"Type": "text_extract"}))
-    except Exception:
-        pass
-
     # 비동기 작업 시작 (DI: task_storage)
     task_key = str(task_id)  # 파일 기반 저장소는 문자열 키 사용
     task_storage.save(
@@ -313,9 +310,11 @@ async def text_extract(
                     file_id=doc_input.file_id, extracted_text=extracted_text, pages=pages
                 )
 
-            # 이력서와 채용공고 각각 처리
-            resume_result = await extract_document(request.resume, "resume")
-            job_posting_result = await extract_document(request.job_posting, "job_posting")
+            # 이력서와 채용공고 병렬 처리
+            resume_result, job_posting_result = await asyncio.gather(
+                extract_document(request.resume, "resume"),
+                extract_document(request.job_posting, "job_posting"),
+            )
 
             # 분석 리포트 생성 (명세서 요구사항)
             logger.info("")
@@ -544,8 +543,8 @@ async def generate_chat_stream(
     # 모델 선택 (gemini 또는 vllm)
     model = request.model.value if hasattr(request.model, "value") else str(request.model)
 
-    # 메트릭 차원 정의
-    dims = {"Model": model, "Mode": str(mode)}
+    # 메트릭 차원 정의 (Removed)
+    # dims = {"Model": model, "Mode": str(mode)}
 
     logger.info("")
     logger.info(f"{'='*80}")
@@ -727,6 +726,7 @@ async def generate_chat_stream(
                         use_rag=True,
                         context_types=["resume", "job_posting"],
                         model="gemini",
+                        chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -865,6 +865,7 @@ async def generate_chat_stream(
                         use_rag=True,  # RAG 활성화
                         context_types=context_types,
                         model=model,
+                        chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -899,7 +900,7 @@ async def generate_chat_stream(
                 if session:
                     safe_info(
                         logger,
-                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%d/5",
+                        "📦 [면접] 캐시에서 세션 복원: %s, phase=%s, Q%s/5",
                         session_key,
                         session.phase,
                         session.current_question_id,
@@ -928,15 +929,13 @@ async def generate_chat_stream(
                 job_posting_ocr = request.context.job_posting_ocr if request.context else None
                 portfolio_text = request.context.portfolio_text if request.context else None
 
-                # 5개 질문 세트 생성 프롬프트
-                init_prompt = create_tech_interview_init_prompt(
+                init_prompts = load_prompt_yaml("interview", "tech_interview_init")
+                system_prompt = init_prompts["system"]
+                init_prompt = init_prompts["human"].format(
                     resume_text=resume_ocr or context or "정보 없음",
                     job_posting_text=job_posting_ocr or "정보 없음",
                     portfolio_text=portfolio_text or context or "정보 없음",
                 )
-
-                # 방안 2: 비스트리밍으로 JSON 생성 (빠름) → 질문을 스트리밍으로 출력 (타이핑 효과)
-                system_prompt = get_system_tech_interview()
 
                 if model_choice == "vllm" and rag.vllm:
                     # vLLM은 기존 스트리밍 방식 유지 (비스트리밍 미지원)
@@ -1004,11 +1003,11 @@ async def generate_chat_stream(
                         await session_store.set(session_key, new_session.model_dump())
                         safe_info(logger, "💾 [면접] 세션 저장: %s", session_key)
 
-                        # 첫 번째 질문 출력 (헤더: [기술면접 1/5]) - 타이핑 효과
+                        # 첫 번째 질문 출력 (헤더: 1.) - 타이핑 효과
                         first_q = new_session.questions[0] if new_session.questions else None
                         if first_q:
                             question_text = (
-                                f"[{interview_type_kr}면접 1/5]{newline}{first_q.question}"
+                                f"{format_main_question_label(1)}{newline}{first_q.question}"
                             )
                             # 방안 2: 질문을 한 글자씩 스트리밍 출력 (타이핑 효과)
                             for char in question_text:
@@ -1105,7 +1104,7 @@ async def generate_chat_stream(
                             if followup_data.get("should_continue", True) and followup_data.get(
                                 "followup"
                             ):
-                                # 꼬리질문 출력 (헤더: [기술면접 2-1/5] 형식)
+                                # 꼬리질문 출력 (헤더: 1-1, 1-2 형식)
                                 followup_q = followup_data["followup"]["question"]
                                 current_q.conversation.append(
                                     {
@@ -1115,8 +1114,9 @@ async def generate_chat_stream(
                                 )
                                 session.phase = "followup"
 
-                                # 꼬리질문 헤더: [기술면접 {질문번호}-{꼬리질문번호}/5] - 타이핑 효과
-                                followup_header = f"[{interview_type_kr}면접 {current_q_id}-{current_q.current_depth}/5]"
+                                followup_header = format_followup_question_label(
+                                    current_q_id, current_q.current_depth
+                                )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 # 한 글자씩 스트리밍 출력 (타이핑 효과)
                                 for char in followup_text:
@@ -1152,8 +1152,8 @@ async def generate_chat_stream(
                             session.current_question_id = next_q_id
                             session.phase = "questioning"
 
-                            # 다음 질문 출력 (헤더: [기술면접 2/5] 형식) - 타이핑 효과
-                            question_header = f"[{interview_type_kr}면접 {next_q_id}/5]"
+                            # 다음 질문 출력 (헤더: 2. 형식) - 타이핑 효과
+                            question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
                             # 한 글자씩 스트리밍 출력 (타이핑 효과)
                             for char in question_text:
@@ -1178,7 +1178,7 @@ async def generate_chat_stream(
                 await session_store.set(session_key, session.model_dump())
                 safe_info(
                     logger,
-                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%d/5",
+                    "💾 [면접] 세션 업데이트: %s, phase=%s, Q%s/5",
                     session_key,
                     session.phase,
                     session.current_question_id,
@@ -1291,13 +1291,9 @@ async def generate_chat_stream(
             {"success": False, "mode": "report", "error": str(e)}
             yield f"data: [DONE]{sse_end}"
 
-    # Latency 측정 종료 및 전송
-    try:
-        duration = (time.time() - start_time) * 1000
-        cw = CloudWatchService.get_instance()
-        asyncio.create_task(cw.put_metric("AI_Chat_Latency", duration, "Milliseconds", dims))
-    except Exception as e:
-        logger.error(f"Failed to record latency metric: {e}")
+    # Latency measurement (Log based analysis for PLG)
+    duration = (time.time() - start_time) * 1000
+    safe_info(logger, "⏱️ 채팅 처리 완료: %.2fms", duration)
 
 
 @router.post(

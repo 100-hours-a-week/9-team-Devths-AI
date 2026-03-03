@@ -64,6 +64,10 @@ class ChatContext(BaseModel):
 
     # 면접 모드
     interview_type: str | None = Field(None, description="면접 유형 (behavior/tech)")
+    interview_style: str | None = Field(
+        default="standard",
+        description="면접 스타일 (friendly/standard/challenging/practical) — ADR-098",
+    )
     question_count: int | None = Field(None, description="현재까지 생성된 질문 수")
     asked_questions: list[str] | None = Field(
         None, description="이미 했던 질문 목록 (반복 방지, 새 질문 생성 시 전달)"
@@ -126,6 +130,12 @@ class InterviewSession(BaseModel):
     full_conversation: list[dict] = Field(
         default=[],
         description="전체 대화 이력",
+    )
+
+    # ADR-066: 완벽히 답변된 질문 (유사 질문 중복 방지)
+    mastered_questions: list[dict] = Field(
+        default=[],
+        description="마스터한 질문 [{'question': str, 'embedding': list[float]}]",
     )
 
 

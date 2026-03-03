@@ -52,9 +52,9 @@ class ChromaVectorStore(BaseVectorStore):
             chroma_server_host: ChromaDB server host (v2 server mode). If set, use HttpClient.
             chroma_server_port: ChromaDB server port.
         """
-        api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        api_key = api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
+            raise ValueError("GOOGLE_API_KEY 또는 GEMINI_API_KEY 환경 변수가 필요합니다.")
 
         # Initialize Gemini Client for embeddings
         self.genai_client = genai.Client(api_key=api_key)
@@ -70,11 +70,11 @@ class ChromaVectorStore(BaseVectorStore):
                 f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
             )
         else:
-            self.chroma_client = chromadb.Client(
-                Settings(
-                    persist_directory=persist_directory,
-                    anonymized_telemetry=False,
-                )
+            persist_directory = os.path.expanduser(persist_directory)
+            os.makedirs(persist_directory, exist_ok=True)
+            self.chroma_client = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=Settings(anonymized_telemetry=False),
             )
             logger.info(f"ChromaVectorStore initialized at {persist_directory}")
 
@@ -151,6 +151,29 @@ class ChromaVectorStore(BaseVectorStore):
             logger.error(f"Error creating embedding: {e}")
             raise
 
+    async def _create_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Create embeddings for multiple texts in one batch API call.
+
+        Args:
+            texts: List of texts to embed.
+
+        Returns:
+            List of embedding vectors (same order as texts).
+        """
+        if not texts:
+            return []
+        try:
+            result = self.genai_client.models.embed_content(
+                model=self._embedding_model,
+                contents=texts,
+            )
+            if hasattr(result, "embeddings") and result.embeddings:
+                return [e.values for e in result.embeddings]
+            raise ValueError(f"Unexpected embedding result format: {type(result)}")
+        except Exception as e:
+            logger.error(f"Error creating batch embeddings: {e}")
+            raise
+
     async def add_document(
         self,
         document_id: str,
@@ -213,24 +236,18 @@ class ChromaVectorStore(BaseVectorStore):
         try:
             collection = self._get_collection(collection_type)
 
-            ids = []
-            embeddings = []
-            texts = []
+            ids = [doc.id for doc in documents]
+            texts = [doc.text for doc in documents]
             metadatas = []
-
             for doc in documents:
-                embedding = await self._create_embedding(doc.text)
-
-                ids.append(doc.id)
-                embeddings.append(embedding)
-                texts.append(doc.text)
-
-                # Prepare metadata
                 doc_metadata = doc.metadata.copy()
                 doc_metadata["document_id"] = doc.id
                 doc_metadata["collection_type"] = collection_type
                 doc_metadata = {k: v for k, v in doc_metadata.items() if v is not None}
                 metadatas.append(doc_metadata)
+
+            # Batch embed all texts in one API call
+            embeddings = await self._create_embeddings(texts)
 
             # Add to collection
             collection.add(

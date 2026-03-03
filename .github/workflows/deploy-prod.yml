@@ -3,36 +3,30 @@ name: Devths-AI 운영 배포
 on:
   workflow_dispatch:
     inputs:
-      artifact_key:
-        description: 'S3 아티팩트 키 (예: AI/main/20250127_123456-abc1234.zip)'
+      deployment_comment:
+        description: '배포 메모 (변경 내용, 이슈 번호 등)'
         required: true
         type: string
-      deployment_comment:
-        description: '배포 메모'
-        required: false
-        type: string
-        default: 'Manual deployment from GitHub Actions'
+        default: 'Manual production deployment'
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  S3_BUCKET: ${{ secrets.AWS_S3_BUCKET_PROD }}
   CODEDEPLOY_APP_NAME: ${{ secrets.CODEDEPLOY_APP_NAME }}
-  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ secrets.CODEDEPLOY_GROUP_NAME_PROD }}
+  CODEDEPLOY_DEPLOYMENT_GROUP: ${{ secrets.CODEDEPLOY_GROUP_NAME_V2_PROD }}
 
 jobs:
-  # 승인 요청 알림 (즉시 실행)
+  # ========================================================
+  # 승인 전: 배포 요청 알림
+  # ========================================================
   notify-approval-request:
-    name: Notify Approval Request
+    name: 배포 승인 요청 알림
     runs-on: ubuntu-22.04
     if: github.ref == 'refs/heads/main'
     steps:
       - name: 브랜치 검증
         run: |
           if [ "${{ github.ref_name }}" != "main" ]; then
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ 운영 배포는 main 브랜치에서만 실행 가능합니다."
-            echo "현재 브랜치: ${{ github.ref_name }}"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             exit 1
           fi
           echo "✅ 브랜치 검증 완료: main"
@@ -46,28 +40,22 @@ jobs:
           title: '🔔 운영 배포 승인 요청'
           description: |
             **배포 요청자**: ${{ github.actor }}
-            **요청 시각**: ${{ github.event.created_at }}
-
-            **📦 아티팩트**: `${{ inputs.artifact_key }}`
+            **브랜치**: `main` @ `${{ github.sha }}`
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
             **🌍 환경**: 🚀 운영(PROD)
 
             ⏳ **2단계 교차 승인 대기 중...**
 
-            **승인 프로세스**:
-            1️⃣ **1차 승인** (DevOps/TechLead) → 2️⃣ **2차 승인** (TeamLead) → 🚀 **배포 실행**
+            **승인 프로세스**: 1️⃣ DevOps/TechLead → 2️⃣ TeamLead → 🚀 배포 실행
 
-            **승인 방법**:
-            1. [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})로 이동
-            2. **Review deployments** 버튼 클릭
-            3. 본인의 승인 단계 선택 후 **Approve and deploy** 클릭
-
-            **⚠️ 주의**: 2명 모두 승인해야 배포가 시작됩니다.
+            **승인 방법**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) → **Review deployments** 클릭
           color: 16776960
           username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
+  # ========================================================
   # 1차 승인
+  # ========================================================
   first-approval:
     name: 1차 승인 (DevOps/TechLead)
     runs-on: ubuntu-22.04
@@ -76,13 +64,9 @@ jobs:
       name: production-approval-1
     steps:
       - name: 1차 승인 완료
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ 1차 승인 완료"
-          echo "승인자: ${{ github.actor }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        run: echo "✅ 1차 승인 완료 by ${{ github.actor }}"
 
-      - name: Discord 1차 승인 완료 알림
+      - name: Discord 1차 승인 알림
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
@@ -91,20 +75,16 @@ jobs:
           title: '✅ 1차 승인 완료 (DevOps/TechLead)'
           description: |
             **1차 승인자**: ${{ github.actor }}
-            **승인 시각**: ${{ github.event.head_commit.timestamp }}
-
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
-            **🌍 환경**: 🚀 운영(PROD)
-
             ⏳ **2차 승인 대기 중...**
-
-            **다음 단계**: TeamLead의 2차 승인이 필요합니다.
-            **승인 방법**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})에서 **Review deployments** 버튼 클릭
+            **승인 방법**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           color: 65280
           username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
+  # ========================================================
   # 2차 승인
+  # ========================================================
   second-approval:
     name: 2차 승인 (TeamLead)
     runs-on: ubuntu-22.04
@@ -113,38 +93,67 @@ jobs:
       name: production-approval-2
     steps:
       - name: 2차 승인 완료
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ 2차 승인 완료 - 배포 시작 가능"
-          echo "승인자: ${{ github.actor }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        run: echo "✅ 2차 승인 완료 by ${{ github.actor }} — 빌드 시작"
 
-      - name: Discord 2차 승인 완료 알림
+      - name: Discord 2차 승인 알림
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_PROD_URL }}
           status: 'success'
-          title: '✅ 2차 승인 완료 (TeamLead) - 배포 시작'
+          title: '✅ 2차 승인 완료 (TeamLead) — 빌드 시작'
           content: '@everyone'
           description: |
             **2차 승인자**: ${{ github.actor }}
-            **승인 시각**: ${{ github.event.head_commit.timestamp }}
-
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
-            **🌍 환경**: 🚀 운영(PROD)
-
-            🚀 **모든 승인 완료! 배포가 1분 후, 자동으로 시작됩니다.**
-
-            **진행 상황**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})에서 확인 가능
+            🚀 **모든 승인 완료! ECR 빌드 및 운영 배포가 시작됩니다.**
+            **진행 상황**: [워크플로우 페이지](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           color: 3066993
           username: GitHub AI Approval Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
 
-  # 운영 배포 (2차 승인 후 자동 실행)
+  # ========================================================
+  # ECR 이미지 빌드 및 푸시 (2차 승인 후 실행)
+  # ========================================================
+  build-and-push:
+    name: Build & Push to ECR (prod)
+    needs: [second-approval]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/devths/ai-prod:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/devths/ai-prod:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ========================================================
+  # 운영 배포 (빌드 완료 후 CodeDeploy 트리거)
+  # ========================================================
   deploy-production:
     name: Production Deployment
     runs-on: ubuntu-22.04
-    needs: [second-approval]
+    needs: [second-approval, build-and-push]
     environment:
       name: production
       url: https://www.devths.com
@@ -154,51 +163,69 @@ jobs:
       deployment_error: ${{ steps.deploy.outputs.deployment_error }}
 
     steps:
-      - name: 배포 정보 확인
-        run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "🚀 Production Deployment Information"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📦 Artifact: ${{ inputs.artifact_key }}"
-          echo "🪣 S3 Bucket: ${{ env.S3_BUCKET }}"
-          echo "🎯 Deployment Group: ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }}"
-          echo "💬 Comment: ${{ inputs.deployment_comment }}"
-          echo "👤 Triggered by: ${{ github.actor }}"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: AWS 자격 증명 설정
+      - name: Generate Timestamp
+        id: timestamp
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "value=$(date +'%Y%m%d_%H%M%S')-$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Package Deployment Scripts
+        id: package
+        run: |
+          echo "📦 Creating deployment package for PROD..."
+          ARTIFACT_NAME="${{ steps.timestamp.outputs.value }}.zip"
+          mkdir -p deploy-package
+
+          # 배포 스크립트, appspec, CI/CD 전용 Compose 파일 포함
+          cp -r deploy/ deploy-package/
+          cp appspec.yml deploy-package/
+          cp docker-compose.cicd.yml deploy-package/  # EC2에 복사될 Compose 파일
+          cp -r data/ deploy-package/ 2>/dev/null || true # 데이터 디렉터리 (EC2 볼륨 마운트 용도)
+
+          # .deploy-env: 환경 식별 정보
+          echo "export DEPLOY_BRANCH=\"main\"" > deploy-package/.deploy-env
+          echo "export DEPLOY_TIMESTAMP=\"${{ steps.timestamp.outputs.value }}\"" >> deploy-package/.deploy-env
+          echo "export DEPLOY_SHA=\"${{ github.sha }}\"" >> deploy-package/.deploy-env
+          echo "export CODEDEPLOY_DEPLOYMENT_GROUP=\"${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }}\"" >> deploy-package/.deploy-env
+
+          # Zip
+          cd deploy-package
+          zip -r ../$ARTIFACT_NAME .
+          cd ..
+
+          echo "artifact_name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "✅ Package created: $ARTIFACT_NAME"
+
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: S3 아티팩트 존재 확인
+      - name: Upload to S3
+        id: upload
         run: |
-          echo "🔍 Checking if artifact exists in S3..."
-          if aws s3 ls "s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}" > /dev/null 2>&1; then
-            echo "✅ Artifact found: s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}"
-
-            # 파일 크기 확인
-            SIZE=$(aws s3 ls "s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}" | awk '{print $3}')
-            SIZE_MB=$(echo "scale=2; $SIZE/1024/1024" | bc)
-            echo "📊 Artifact size: ${SIZE_MB}MB"
-          else
-            echo "❌ Artifact not found: s3://${{ env.S3_BUCKET }}/${{ inputs.artifact_key }}"
-            echo "💡 Please check the artifact key and try again."
-            exit 1
-          fi
+          ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
+          S3_KEY="AI/main/$ARTIFACT_NAME"
+          aws s3 cp $ARTIFACT_NAME s3://${{ secrets.AWS_S3_BUCKET_PROD }}/$S3_KEY
+          echo "s3_key=$S3_KEY" >> $GITHUB_OUTPUT
+          echo "✅ Uploaded to s3://${{ secrets.AWS_S3_BUCKET_PROD }}/$S3_KEY"
 
       - name: CodeDeploy 배포 시작
         id: deploy
         run: |
           echo "🚀 Starting deployment to Production..."
+          S3_KEY="${{ steps.upload.outputs.s3_key }}"
 
           DEPLOYMENT_ID=$(aws deploy create-deployment \
             --application-name ${{ env.CODEDEPLOY_APP_NAME }} \
             --deployment-group-name ${{ env.CODEDEPLOY_DEPLOYMENT_GROUP }} \
-            --s3-location bucket=${{ env.S3_BUCKET }},key=${{ inputs.artifact_key }},bundleType=zip \
-            --description "${{ inputs.deployment_comment }} (by ${{ github.actor }})" \
+            --s3-location bucket=${{ secrets.AWS_S3_BUCKET_PROD }},key=$S3_KEY,bundleType=zip \
+            --description "${{ inputs.deployment_comment }} (by ${{ github.actor }}, sha: ${{ github.sha }})" \
             --query 'deploymentId' \
             --output text)
 
@@ -206,27 +233,21 @@ jobs:
           echo "✅ Deployment started: $DEPLOYMENT_ID"
           echo "🔗 AWS Console: https://${{ env.AWS_REGION }}.console.aws.amazon.com/codesuite/codedeploy/deployments/$DEPLOYMENT_ID"
 
-          # 배포 상태 모니터링
-          echo ""
-          echo "⏳ Monitoring deployment progress..."
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
           if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
             echo "deployment_status=Success" >> $GITHUB_OUTPUT
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "✅ Deployment completed successfully!"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           else
-            ERROR_MSG=$(aws deploy get-deployment --deployment-id $DEPLOYMENT_ID --query 'deploymentInfo.errorInformation.message' --output text 2>&1 || echo "Unknown error")
+            ERROR_MSG=$(aws deploy get-deployment --deployment-id $DEPLOYMENT_ID \
+              --query 'deploymentInfo.errorInformation.message' --output text 2>&1 || echo "Unknown error")
             echo "deployment_status=Failed" >> $GITHUB_OUTPUT
             echo "deployment_error=$ERROR_MSG" >> $GITHUB_OUTPUT
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ Deployment failed: $ERROR_MSG"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             exit 1
           fi
 
+  # ========================================================
   # Discord 알림
+  # ========================================================
   notify-discord:
     runs-on: ubuntu-22.04
     needs: [first-approval, second-approval, deploy-production]
@@ -244,9 +265,8 @@ jobs:
             **배포 타입**: 수동 배포 (Manual)
             **환경**: 🚀 운영(PROD)
             **트리거**: ${{ github.actor }}
+            **브랜치**: `main` @ `${{ github.sha }}`
 
-            **📦 아티팩트**: `${{ inputs.artifact_key }}`
-            **🪣 S3 Bucket**: `${{ secrets.AWS_S3_BUCKET_PROD }}`
             **🚀 배포 결과**: ${{ needs.deploy-production.outputs.deployment_status }}
             **🆔 Deployment ID**: `${{ needs.deploy-production.outputs.deployment_id }}`
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
@@ -272,16 +292,12 @@ jobs:
             **배포 타입**: 수동 배포 (Manual)
             **환경**: 🚀 운영(PROD)
             **취소자**: ${{ github.actor }}
-
-            **📦 아티팩트**: `${{ inputs.artifact_key }}`
             **💬 배포 메모**: ${{ inputs.deployment_comment }}
 
             **취소 단계**:
             - 1차 승인: ${{ needs.first-approval.result }}
             - 2차 승인: ${{ needs.second-approval.result }}
             - 배포 실행: ${{ needs.deploy-production.result }}
-
-            **사유**: 워크플로우가 승인 대기 중 또는 배포 중에 취소되었습니다.
 
             **🔗 링크**: [워크플로우 확인하기](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           color: 16776960

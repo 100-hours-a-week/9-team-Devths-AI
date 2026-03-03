@@ -2,29 +2,46 @@ import logging
 import os
 import sys
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_client import make_asgi_app
 
+import app.core.monitoring  # Register custom metrics
+from app.api.middleware.metrics import PrometheusMiddleware
 from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
-from app.middlewares.cloudwatch_middleware import CloudWatchMiddleware
-from app.services.cloudwatch_service import CloudWatchService
-
-# .env 파일 로드
-load_dotenv()
+from app.config.settings import get_settings
+from app.utils.chromadb_utils import apply_chromadb_query_fix
 
 # ============================================================================
 # 로깅 설정 (운영 서버 호환)
 # ============================================================================
 
 
-def setup_logging():
+class EndpointFilter(logging.Filter):
+    """특정 엔드포인트(/health, /metrics 등)의 접근 로그를 무시하는 필터"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # uvicorn.access 로그 레코드의 args 속성은 다음과 같은 튜플 형태입니다:
+        # (client_addr, method, path, http_version, status_code)
+        if record.args and len(record.args) >= 3:
+            path = record.args[2]
+            # 끝에 붙은 '/' 를 제거하여 매칭 (예: '/metrics/' -> '/metrics')
+            if path.rstrip("/") in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
+                return False
+        return True
+
+
+def setup_logging(settings):
     """운영 환경과 로컬 환경 모두에서 로그가 출력되도록 설정"""
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    # 환경에 따른 로그 레벨 설정
+    # SIM108: Use ternary operator
+    default_level = "DEBUG" if settings.environment == "development" else "INFO"
+
+    log_level = os.getenv("LOG_LEVEL", default_level).upper()
     log_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
 
@@ -47,6 +64,9 @@ def setup_logging():
         logger.handlers.clear()
         logger.addHandler(stdout_handler)
         logger.setLevel(logging.INFO)
+        # uvicorn.access 로그 중 무의미한 헬스체크 등은 필터링
+        if logger_name == "uvicorn.access":
+            logger.addFilter(EndpointFilter())
 
     # 앱 로거 설정
     app_logger = logging.getLogger("app")
@@ -55,13 +75,23 @@ def setup_logging():
     return root_logger
 
 
+settings = get_settings()
+
 # 로깅 초기화
-setup_logging()
+setup_logging(settings)
+
+# chromadb 0.4.x where_document={} 버그 패치.
+# lifespan/startup_event가 아닌 모듈 레벨에서 호출하는 이유:
+#   - 라우터 임포트 시점에 chromadb 클라이언트가 초기화될 수 있으므로
+#     FastAPI 앱 생성 이전에 패치를 적용해야 안전.
+apply_chromadb_query_fix()
 
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
 logger.info("🚀 AI Server logging initialized")
+logger.info(f"   Environment: {settings.environment}")
 logger.info(f"   Log level: {os.getenv('LOG_LEVEL', 'INFO')}")
+logger.info(f"   Debug mode: {settings.debug}")
 logger.info("=" * 60)
 
 
@@ -70,27 +100,31 @@ app = FastAPI(
     title="AI Server API",
     description="FastAPI 기반 AI Server API",
     version="1.0.0",
-    contact={
-        "name": "AI Server Support",
-        "email": "ai-support@example.com",
-    },
-    license_info={
-        "name": "MIT License",
-        "url": "https://opensource.org/licenses/MIT",
-    },
-    docs_url="/docs",  # Swagger UI
-    redoc_url="/redoc",  # ReDoc
-    openapi_url="/openapi.json",  # OpenAPI 스키마
+    docs_url="/docs"
+    if settings.environment == "development"
+    else None,  # Dev에서만 Docs 노출 권장 (선택사항)
+    redoc_url="/redoc" if settings.environment == "development" else None,
+    openapi_url="/openapi.json" if settings.environment == "development" else None,
 )
 
 # CORS 미들웨어 설정
+# allow_origins=["*"] + allow_credentials=True 조합은 CORS 명세 위반
+# (Starlette는 쿠키 없는 요청에서 * 와 credentials:true를 동시 반환 → 브라우저 차단)
+# → settings.allowed_origins 로 구체적 도메인 관리 (환경변수 ALLOWED_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 프로덕션에서는 특정 도메인만 허용
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus 모니터링 미들웨어 등록 (CORS 뒤에 붙여야 동작이 정확함)
+app.add_middleware(PrometheusMiddleware)
+
+# Prometheus Metrics 엔드포인트 마운트
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 # 422 에러 핸들러 (디버깅용 상세 로그)
@@ -121,22 +155,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(v2.router)  # v2: /ai/...
 app.include_router(v1_ai.router)  # v1: /ai/v1/...
 app.include_router(v1_masking.router)  # v1: /ai/v1/masking/...
-
-
-app.add_middleware(CloudWatchMiddleware)
-
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("🔧 Initializing CloudWatch Service...")
-    CloudWatchService.get_instance()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("🛑 Flushing CloudWatch metrics...")
-    cw_service = CloudWatchService.get_instance()
-    await cw_service.flush()
 
 
 @app.get("/", tags=["Root"])

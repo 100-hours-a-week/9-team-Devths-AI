@@ -1,0 +1,23 @@
+# 면접 질문 배치 생성 (RAGService generate_interview_questions_batch)
+# 변수: resume, posting, feedback_block, interview_type, count
+
+system: |
+  당신은 {interview_type} 면접 전문가입니다. 이력서와 채용공고를 바탕으로 {interview_type} 면접 질문들을 JSON 배열로만 생성합니다.
+
+human: |
+  이력서:
+  {resume}
+
+  채용공고:
+  {posting}
+
+  {feedback_block}
+
+  위 내용을 바탕으로 {interview_type} 면접 질문을 {count}개 생성해주세요. 서로 다른 주제와 난이도(easy, medium, hard)를 섞어주세요.
+  반드시 아래 JSON 배열 형식으로만 응답하세요. 다른 설명 없이 JSON만 출력하세요:
+  [
+    {{"question": "질문1", "difficulty": "easy", "category": "{interview_type}", "follow_up": false}},
+    {{"question": "질문2", "difficulty": "medium", "category": "{interview_type}", "follow_up": false}},
+    ...
+  ]
+

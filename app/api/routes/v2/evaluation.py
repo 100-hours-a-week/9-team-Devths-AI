@@ -1,15 +1,21 @@
 """
 면접 답변 평가 API 엔드포인트 (통합).
 
-POST /ai/evaluation/analyze - 면접 평가 리포트 생성 (SSE 스트리밍)
+POST /ai/evaluation/analyze   - 면접 평가 리포트 생성 (SSE 스트리밍)
   - retry=false: Gemini 단독 분석
   - retry=true:  Gemini×GPT-4o 토론 후 최종 리포트
+
+POST /ai/evaluation/llm-judge - ADR-091 LLM-as-Judge 단건 채점 (내부 평가용)
+
+ADR-102: asyncio.create_task() → Celery 태스크로 이관하여 504 타임아웃 해결.
+ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
 """
 
+import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.v2._helpers import get_services
@@ -23,6 +29,10 @@ from app.domain.evaluation.debate_graph import DebateService
 from app.schemas.evaluation import (
     AnalyzeInterviewRequest,
 )
+from app.schemas.judge import JudgeRequest, JudgeResponse
+from app.services.judge_service import JudgeService
+from app.utils.langfuse_client import trace_llm_call
+from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +49,47 @@ def _validate_qa_list(qa_list: list[dict]) -> str | None:
         if "question" not in qa or "answer" not in qa:
             return f"context[{i}]에 question, answer 필드가 필요합니다."
     return None
+
+
+def _trigger_ingest_interview_qa(request: AnalyzeInterviewRequest):
+    """면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장 (ADR-102).
+
+    asyncio.create_task() 대신 Celery 태스크로 이관하여 504 타임아웃 해결.
+    ADR-102 Fallback: Celery 브로커 연결 불가 시 asyncio.create_task()로 fallback.
+    실패해도 평가 응답에 영향을 주지 않습니다.
+    """
+    from app.tasks.celery_utils import is_celery_available
+
+    safe_session_id = sanitize_log_input(request.session_id)
+
+    if is_celery_available():
+        from app.tasks.evaluation_tasks import ingest_interview_qa_task
+
+        ingest_interview_qa_task.delay(
+            session_id=request.session_id,
+            user_id=request.user_id,
+            room_id=request.room_id,
+            context=request.context or [],
+        )
+        logger.info(
+            "[Evaluation] 면접 Q&A 적재 Celery 태스크 등록 완료: session=%s", safe_session_id
+        )
+    else:
+        # Fallback: asyncio.create_task로 실행 (Celery Worker 미실행 시)
+        from app.tasks.evaluation_tasks import _ingest_interview_qa_async
+
+        asyncio.create_task(
+            _ingest_interview_qa_async(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                room_id=request.room_id,
+                context=request.context or [],
+            )
+        )
+        logger.warning(
+            "[Evaluation] Celery 불가 → asyncio fallback: session=%s (Celery Worker 실행 권장)",
+            safe_session_id,
+        )
 
 
 # ============================================
@@ -139,6 +190,9 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
         logger.info("✅ 면접 평가 리포트 생성 완료 (응답 길이: %d자)", len(full_report))
+
+        # ADR-102: 면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장
+        _trigger_ingest_interview_qa(request)
 
     except ConnectionError as e:
         logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
@@ -276,6 +330,8 @@ async def _generate_debate_stream(
         debate_result = await debate_service.run_debate(
             qa_pairs=qa_pairs,
             gemini_analysis=gemini_dict,
+            session_id=request.session_id,
+            user_id=request.user_id,
         )
         logger.info("✅ [Debate] 2단계 완료: consensus=%s", debate_result.consensus_method)
 
@@ -447,3 +503,77 @@ async def analyze_interview(
         media_type="text/event-stream",
         headers=sse_headers,
     )
+
+
+# ============================================
+# ADR-091: LLM-as-Judge 단건 채점 (내부 평가용)
+# ============================================
+
+
+@router.post(
+    "/llm-judge",
+    response_model=JudgeResponse,
+    summary="LLM-as-Judge 단건 채점 (ADR-091)",
+    description="""
+    AI 파이프라인 응답 품질을 Gemini Judge로 채점합니다.
+
+    **내부 평가용 엔드포인트** — 4단계(langchain_only / rag / vllm / sagemaker) 품질 비교에 활용.
+    채점 결과는 Langfuse에 자동 기록됩니다.
+
+    채점 기준 (각 1~5점):
+    - **relevance**: 질문과의 관련성
+    - **accuracy**: 정보 정확성
+    - **fluency**: 자연스러운 표현
+    - **completeness**: 답변 완전성
+    """,
+    responses={
+        200: {"description": "채점 결과 반환"},
+        500: {"description": "Judge LLM 호출 실패"},
+    },
+)
+async def judge_single_response(request: JudgeRequest) -> JudgeResponse:
+    """단건 RAG 응답을 Gemini Judge LLM으로 채점 → Langfuse 기록."""
+    logger.info("LLM-as-Judge 요청: pipeline_stage=%s", sanitize_log_input(request.pipeline_stage))
+
+    try:
+        judge = JudgeService()
+    except ValueError as e:
+        # GOOGLE_API_KEY / GEMINI_API_KEY 미설정 — 서비스 자체가 사용 불가
+        logger.warning("JudgeService 초기화 실패 (API 키 미설정): %s", str(e))
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "JUDGE_UNAVAILABLE",
+                "message": "Judge LLM 서비스가 설정되지 않았습니다. GOOGLE_API_KEY 환경변수를 확인하세요.",
+            },
+        ) from e
+
+    try:
+        result = await judge.score(
+            question=request.question,
+            answer=request.answer,
+            pipeline_stage=request.pipeline_stage,
+            reference_answer=request.reference_answer,
+            user_id=request.user_id,
+        )
+
+        # Langfuse trace_id 추출 (기록용)
+        trace = trace_llm_call(
+            name=f"llm_judge_api_{request.pipeline_stage}",
+            user_id=request.user_id,
+        )
+        trace_id = trace["trace_id"] if trace else None
+
+        logger.info(
+            "LLM-as-Judge 완료: stage=%s overall=%.1f",
+            sanitize_log_input(request.pipeline_stage),
+            result.overall_score,
+        )
+        return JudgeResponse(result=result, langfuse_trace_id=trace_id)
+
+    except Exception as e:
+        logger.error("LLM-as-Judge 실패: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "JUDGE_ERROR", "message": f"Judge LLM 호출 실패: {str(e)}"},
+        ) from e

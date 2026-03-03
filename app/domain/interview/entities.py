@@ -201,3 +201,6 @@ class InterviewState(TypedDict):
 
     # Evaluation (for report generation)
     evaluation: dict[str, Any] | None
+
+    # 이전 면접에서 물어본 질문 목록 (중복 방지용)
+    previous_questions: list[str]

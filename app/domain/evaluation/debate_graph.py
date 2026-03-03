@@ -20,11 +20,13 @@ from google.genai import types as genai_types
 from langgraph.graph import END, StateGraph
 from openai import AsyncOpenAI
 
+from app.config.settings import get_settings
 from app.prompts.evaluation import (
     create_debate_rebuttal_prompt,
     create_gpt4o_analyze_prompt,
     create_synthesize_prompt,
 )
+from app.utils.langfuse_client import get_langfuse_callback_handler
 
 from .entities import DebateResult, DebateState, InterviewAnalysis
 
@@ -37,7 +39,7 @@ SCORE_DISAGREEMENT_THRESHOLD = 2
 def create_debate_graph(
     google_api_key: str,
     openai_api_key: str,
-    gemini_model: str = "gemini-3-pro-preview",
+    gemini_model: str | None = None,
     gpt_model: str = "gpt-4o",
     thinking_level: str = "HIGH",
 ) -> Any:
@@ -53,6 +55,8 @@ def create_debate_graph(
     Returns:
         Compiled LangGraph state machine
     """
+    gemini_model = gemini_model or get_settings().eval_gemini_model
+
     # 클라이언트 초기화
     gemini_client = genai.Client(api_key=google_api_key)
     openai_client = AsyncOpenAI(api_key=openai_api_key)
@@ -518,14 +522,14 @@ class DebateService:
         self,
         google_api_key: str,
         openai_api_key: str,
-        gemini_model: str = "gemini-3-pro-preview",
+        gemini_model: str | None = None,
         gpt_model: str = "gpt-4o",
         thinking_level: str = "HIGH",
     ):
         """Initialize debate service."""
         self._google_api_key = google_api_key
         self._openai_api_key = openai_api_key
-        self._gemini_model = gemini_model
+        self._gemini_model = gemini_model or get_settings().eval_gemini_model
         self._gpt_model = gpt_model
         self._thinking_level = thinking_level
         self._graph = create_debate_graph(
@@ -544,6 +548,8 @@ class DebateService:
         resume_text: str = "",
         job_posting_text: str = "",
         interview_type: str = "tech",
+        session_id: str | None = None,
+        user_id: str | None = None,
     ) -> DebateResult:
         """토론을 실행하고 결과를 반환합니다.
 
@@ -553,6 +559,8 @@ class DebateService:
             resume_text: 이력서 텍스트
             job_posting_text: 채용공고 텍스트
             interview_type: 면접 유형
+            session_id: 사용자 세션 ID (Langfuse 추적용, 선택)
+            user_id: 사용자 ID (Langfuse 추적용, 선택)
 
         Returns:
             DebateResult 토론 결과
@@ -574,7 +582,11 @@ class DebateService:
         }
 
         # LangGraph 실행
-        result = await self._graph.ainvoke(initial_state)
+        _lf_handler = get_langfuse_callback_handler(
+            session_id=session_id, user_id=user_id, trace_name="debate"
+        )
+        _cfg = {"callbacks": [_lf_handler]} if _lf_handler else {}
+        result = await self._graph.ainvoke(initial_state, _cfg)
 
         # 결과 변환
         final_data = result.get("final_analysis", gemini_analysis)
