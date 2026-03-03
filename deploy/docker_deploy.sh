@@ -120,7 +120,13 @@ if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "$SCRIPT_DIR/load_env_from_parameter_store.sh" ]; then
     log "🔍 SCRIPT_DIR: $SCRIPT_DIR"
-    source "$SCRIPT_DIR/load_env_from_parameter_store.sh" 2>&1 | tee -a "$LOG_FILE"
+    # 로그 파일이 존재하면 리다이렉트, 없으면 리다이렉트 없이 실행
+    # (bash는 >> 대상 파일이 없으면 source 자체를 실행하지 않으므로 분기 필수)
+    if [ -w "$LOG_FILE" ]; then
+        source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
+    else
+        source "$SCRIPT_DIR/load_env_from_parameter_store.sh"
+    fi
 else
     log "⚠️  load_env_from_parameter_store.sh not found at $SCRIPT_DIR. Skipping Parameter Store load."
 fi
