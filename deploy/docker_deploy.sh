@@ -15,10 +15,12 @@ AWS_REGION="ap-northeast-2" # Default region
 export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 
 # 로그 디렉토리 권한 문제 방지 (ubuntu 홈 디렉토리 하위에 생성)
-mkdir -p "$LOG_DIR"
+# 2>/dev/null || true: 권한 부족 등으로 실패해도 스크립트는 계속 진행
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+touch "$LOG_FILE" 2>/dev/null || true
 
 # 디스크 용량 누적 방지를 위해 매 배포 시 이전 배포 로그를 빈 파일로 덮어쓰기(초기화)합니다.
-> "$LOG_FILE"
+> "$LOG_FILE" 2>/dev/null || true
 
 # Logging helper
 log() {
