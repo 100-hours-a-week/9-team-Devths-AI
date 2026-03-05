@@ -18,8 +18,6 @@ import os
 import re
 from datetime import datetime
 
-import boto3
-
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -106,6 +104,8 @@ def _extract_collection_data(vectordb, collection_type: str) -> list[dict]:
 
 def _upload_to_s3(records: list[dict], collection_type: str, timestamp: str) -> str:
     """학습 데이터를 JSONL 형식으로 S3에 업로드."""
+    import boto3
+
     s3_client = boto3.client("s3", region_name=AWS_REGION)
 
     s3_key = f"{S3_TRAINING_DATA_PREFIX}{timestamp}/{collection_type}.jsonl"
@@ -213,6 +213,8 @@ def trigger_sagemaker_pipeline_task(self, s3_data_path: str = ""):
     logger.info("[SageMakerSync] SageMaker Pipeline 트리거: %s", SAGEMAKER_PIPELINE_NAME)
 
     try:
+        import boto3
+
         sm_client = boto3.client("sagemaker", region_name=AWS_REGION)
 
         params = []
