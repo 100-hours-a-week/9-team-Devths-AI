@@ -1,5 +1,5 @@
 """
-Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102.
+Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102, ADR-117.
 
 Celery Beat 스케줄러 설정 및 앱 초기화.
 Redis를 메시지 브로커 및 결과 저장소로 사용.
@@ -7,11 +7,15 @@ Redis를 메시지 브로커 및 결과 저장소로 사용.
 Beat 스케줄:
 - crawl-trend-weekly : Phase 1 (ADR-094) — URL 기반 WebBaseLoader 크롤링
 - search-trend-weekly: Phase 2 (ADR-101) — Tavily 검색 쿼리 기반 자동 발견 (TAVILY_API_KEY 필요)
+- sync-training-data-weekly: ADR-117 — VectorDB → S3 학습 데이터 동기화
 
 ADR-102 태스크:
 - text_extract_tasks : 이력서/채용공고 텍스트 추출 + 임베딩
 - masking_tasks      : PII 마스킹 처리
 - evaluation_tasks   : 면접 Q&A VectorDB 적재
+
+ADR-117 태스크:
+- sagemaker_sync_tasks: VectorDB → S3 동기화 + SageMaker Pipeline 트리거
 """
 
 from celery import Celery
@@ -39,6 +43,7 @@ celery_app = Celery(
         "app.tasks.text_extract_tasks",  # ADR-102
         "app.tasks.masking_tasks",  # ADR-102
         "app.tasks.evaluation_tasks",  # ADR-102
+        "app.tasks.sagemaker_sync_tasks",  # ADR-117
     ],
 )
 
@@ -59,6 +64,7 @@ celery_app.conf.update(
         "app.tasks.text_extract_tasks.*": {"queue": "text_extract"},
         "app.tasks.masking_tasks.*": {"queue": "masking"},
         "app.tasks.evaluation_tasks.*": {"queue": "evaluation"},
+        "app.tasks.sagemaker_sync_tasks.*": {"queue": "sagemaker_sync"},  # ADR-117
     },
     # 기본 큐 설정
     task_default_queue="celery",
@@ -87,5 +93,15 @@ celery_app.conf.beat_schedule = {
             day_of_week=TREND_CRAWL_CRON_DAY_OF_WEEK,
         ),
         "options": {"queue": "trend_crawl"},
+    },
+    # ADR-117: VectorDB → S3 학습 데이터 동기화 (트렌드 크롤링 1시간 후 실행)
+    "sync-training-data-weekly": {
+        "task": "app.tasks.sagemaker_sync_tasks.sync_training_data_task",
+        "schedule": crontab(
+            minute="0",
+            hour=str((int(TREND_CRAWL_CRON_HOUR) + 1) % 24),  # 크롤링 1시간 후 (23→0 wrap)
+            day_of_week=TREND_CRAWL_CRON_DAY_OF_WEEK,
+        ),
+        "options": {"queue": "sagemaker_sync"},
     },
 }
