@@ -26,6 +26,7 @@ from app.config.dependencies import (
 )
 from app.domain.evaluation.analyzer import InterviewAnalyzer
 from app.domain.evaluation.debate_graph import DebateService
+from app.prompts.evaluation import load_prompt
 from app.schemas.evaluation import (
     AnalyzeInterviewRequest,
 )
@@ -35,6 +36,10 @@ from app.utils.langfuse_client import trace_llm_call
 from app.utils.log_sanitizer import sanitize_log_input
 
 logger = logging.getLogger(__name__)
+
+# 평가 리포트 생성 프롬프트 템플릿 (한번만 로드)
+_REPORT_PROMPT_TEMPLATE = load_prompt("report")
+_REPORT_SYSTEM_PROMPT = "당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다."
 
 router = APIRouter(prefix="/evaluation")
 
@@ -150,18 +155,7 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
         a = qa.get("answer", "")
         qa_text += f"질문 {i}: {q}\n답변 {i}: {a}\n\n"
 
-    report_prompt = f"""
-다음은 면접 Q&A 기록입니다:
-
-{qa_text}
-
-위 면접 내용을 바탕으로 상세한 평가 리포트를 작성해주세요.
-다음 항목을 포함해주세요:
-1. 각 답변에 대한 개별 평가 (잘한 점, 개선점)
-2. 전체적인 강점 패턴
-3. 전체적인 약점 패턴
-4. 향후 학습 가이드
-"""
+    report_prompt = _REPORT_PROMPT_TEMPLATE.format(qa_text=qa_text)
 
     full_report = ""
     model_choice = request.model.value if hasattr(request.model, "value") else str(request.model)
@@ -173,7 +167,7 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 user_message=report_prompt,
                 context=None,
                 history=[],
-                system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
+                system_prompt=_REPORT_SYSTEM_PROMPT,
             ):
                 full_report += chunk
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -183,7 +177,7 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 user_message=report_prompt,
                 context=None,
                 history=[],
-                system_prompt="당신은 면접 평가 전문가입니다. 상세하고 건설적인 피드백을 제공합니다.",
+                system_prompt=_REPORT_SYSTEM_PROMPT,
                 user_id=request.user_id,
             ):
                 full_report += chunk
