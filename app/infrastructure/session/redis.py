@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
 from app.utils.log_sanitizer import sanitize_log_input
 
@@ -89,6 +90,8 @@ class RedisSessionStore(BaseSessionStore):
             self._fallback.update(valid)
             if valid:
                 logger.info("📂 파일 폴백에서 세션 %d개 복원 (재시작 후 복구)", len(valid))
+        except FileLockTimeout:
+            logger.warning("파일 폴백 로드 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 로드 실패 (무시): %s", e)
 
@@ -111,6 +114,8 @@ class RedisSessionStore(BaseSessionStore):
                 raw[key] = {"data": value, "ts": now}
                 with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
                     json.dump(raw, f, ensure_ascii=False)
+        except FileLockTimeout:
+            logger.warning("파일 폴백 저장 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 저장 실패 (무시): %s", e)
 
@@ -127,6 +132,8 @@ class RedisSessionStore(BaseSessionStore):
                     del raw[key]
                     with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
                         json.dump(raw, f, ensure_ascii=False)
+        except FileLockTimeout:
+            logger.warning("파일 폴백 삭제 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 삭제 실패 (무시): %s", e)
 

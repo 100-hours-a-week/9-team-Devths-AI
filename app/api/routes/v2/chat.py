@@ -51,8 +51,7 @@ from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 logger = logging.getLogger(__name__)
 
 # ── 면접 파라미터 상수 ───────────────────────────────────────
-TOTAL_INTERVIEW_QUESTIONS = 5      # 면접 총 질문 수
-MAX_FOLLOWUP_DEPTH = 3             # 꼬리질문 최대 깊이
+# 참고: total_questions(5), max_depth(3) 기본값은 schemas/chat.py Field default가 관리
 PERSONALITY_VECTORDB_SELECT = 4    # 인성 면접 VectorDB에서 선택할 질문 수
 
 # 인성 면접 질문 선택 관련 상수
@@ -913,7 +912,20 @@ async def generate_chat_stream(
 
                     try:
                         followup_data = extract_json_from_llm_response(full_response)
-                        if followup_data is not None:
+                        if followup_data is None:
+                            # JSON 파싱 실패 — 사용자에게 에러 알림 후 현재 질문 완료 처리
+                            logger.error(
+                                "꼬리질문 JSON 파싱 실패 (LLM 응답 앞 200자): %s",
+                                full_response[:200],
+                            )
+                            yield sse_error_event(
+                                code="PARSE_FAILED",
+                                status=500,
+                                message="꼬리질문 JSON 파싱 실패",
+                                fallback="꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
+                            )
+                            current_q.is_completed = True
+                        else:
 
                             safe_info(
                                 logger,
@@ -969,12 +981,12 @@ async def generate_chat_stream(
                                         )
                                     except Exception as e:
                                         logger.debug("ADR-066: 마스터 임베딩 실패: %s", e)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"꼬리질문 파싱 실패: {e}")
+                    except Exception as e:
+                        logger.error("꼬리질문 처리 중 예외 발생: %s", type(e).__name__)
                         yield sse_error_event(
                             code="PARSE_FAILED",
                             status=500,
-                            message=f"꼬리질문 JSON 파싱 실패: {e}",
+                            message=f"꼬리질문 처리 실패: {type(e).__name__}",
                             fallback="꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
                         )
                         current_q.is_completed = True

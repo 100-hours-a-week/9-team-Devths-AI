@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import AsyncGenerator
 
 from fastapi import Header, HTTPException, status
 
@@ -229,7 +230,7 @@ def extract_json_from_llm_response(text: str) -> dict | None:
     return None
 
 
-async def stream_text_chars(text: str, sse_end: str):
+async def stream_text_chars(text: str, sse_end: str) -> AsyncGenerator[str, None]:
     """텍스트를 한 글자씩 SSE 청크로 스트리밍하는 비동기 제너레이터."""
     for char in text:
         yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
