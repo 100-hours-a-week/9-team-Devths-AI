@@ -9,9 +9,11 @@ import asyncio
 import json
 import logging
 import os
-import threading
 import time
 from typing import Any
+
+from filelock import FileLock
+from filelock import Timeout as FileLockTimeout
 
 from app.utils.log_sanitizer import sanitize_log_input
 
@@ -22,6 +24,8 @@ logger = logging.getLogger(__name__)
 # 서버 재시작에도 세션을 보존하기 위한 파일 기반 폴백 경로
 _PERSIST_FILE = os.path.join(os.environ.get("TMPDIR", "/tmp"), "devths_interview_sessions.json")
 _PERSIST_TTL = 7200  # 2시간 (초) — 파일 폴백 세션 만료 시간
+# 멀티워커(Gunicorn -w 4) 프로세스 간 파일 동시 접근 방지 — threading.Lock()은 프로세스 내부만 보호
+_FILE_LOCK = FileLock(f"{_PERSIST_FILE}.lock", timeout=2)
 
 
 class RedisSessionStore(BaseSessionStore):
@@ -66,7 +70,6 @@ class RedisSessionStore(BaseSessionStore):
         # 1단계: in-memory 폴백 (빠른 접근, 재시작 시 초기화)
         self._fallback: dict[str, Any] = {}
         # 2단계: 파일 기반 폴백 (재시작 후에도 복원)
-        self._file_lock = threading.Lock()
         self._load_file_fallback()
 
         logger.info(f"RedisSessionStore initialized with URL: {redis_url}")
@@ -76,7 +79,7 @@ class RedisSessionStore(BaseSessionStore):
         try:
             if not os.path.exists(_PERSIST_FILE):
                 return
-            with self._file_lock, open(_PERSIST_FILE, encoding="utf-8") as f:
+            with _FILE_LOCK, open(_PERSIST_FILE, encoding="utf-8") as f:
                 raw: dict[str, Any] = json.load(f)
             now = time.time()
             valid = {
@@ -87,13 +90,15 @@ class RedisSessionStore(BaseSessionStore):
             self._fallback.update(valid)
             if valid:
                 logger.info("📂 파일 폴백에서 세션 %d개 복원 (재시작 후 복구)", len(valid))
+        except FileLockTimeout:
+            logger.warning("파일 폴백 로드 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 로드 실패 (무시): %s", e)
 
     def _save_file_fallback(self, key: str, value: dict[str, Any]) -> None:
         """세션을 파일에 저장 (서버 재시작 대비). 만료 항목 동시 정리."""
         try:
-            with self._file_lock:
+            with _FILE_LOCK:
                 try:
                     with open(_PERSIST_FILE, encoding="utf-8") as f:
                         raw: dict[str, Any] = json.load(f)
@@ -109,13 +114,15 @@ class RedisSessionStore(BaseSessionStore):
                 raw[key] = {"data": value, "ts": now}
                 with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
                     json.dump(raw, f, ensure_ascii=False)
+        except FileLockTimeout:
+            logger.warning("파일 폴백 저장 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 저장 실패 (무시): %s", e)
 
     def _delete_file_fallback(self, key: str) -> None:
         """파일 폴백에서 세션 삭제."""
         try:
-            with self._file_lock:
+            with _FILE_LOCK:
                 try:
                     with open(_PERSIST_FILE, encoding="utf-8") as f:
                         raw: dict[str, Any] = json.load(f)
@@ -125,6 +132,8 @@ class RedisSessionStore(BaseSessionStore):
                     del raw[key]
                     with open(_PERSIST_FILE, "w", encoding="utf-8") as f:
                         json.dump(raw, f, ensure_ascii=False)
+        except FileLockTimeout:
+            logger.warning("파일 폴백 삭제 실패: 락 획득 타임아웃 (워커 경합 가능성)")
         except Exception as e:
             logger.warning("파일 폴백 삭제 실패 (무시): %s", e)
 

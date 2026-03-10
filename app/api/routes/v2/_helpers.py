@@ -2,8 +2,12 @@
 v2 라우트 공유 헬퍼 함수 및 서비스 초기화
 """
 
+import asyncio
+import json
 import logging
 import os
+import re
+from collections.abc import AsyncGenerator
 
 from fastapi import Header, HTTPException, status
 
@@ -202,3 +206,32 @@ async def verify_api_key(x_api_key: str | None = Header(None)):
     if x_api_key != "your-api-key-here":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     return x_api_key
+
+
+# ── SSE 스트리밍 상수 ──────────────────────────────────────────
+SSE_CHAR_DELAY = 0.015  # 글자당 딜레이(초) — SSE 타이핑 효과
+
+
+def extract_json_from_llm_response(text: str) -> dict | None:
+    """LLM 응답 텍스트에서 JSON 객체를 추출한다.
+
+    마크다운 코드 펜스(```json ... ```)를 제거한 뒤 첫 번째 {...} 블록을 파싱.
+    파싱 실패 시 None 반환.
+    """
+    clean = re.sub(r"```json\s*", "", text)
+    clean = re.sub(r"```\s*$", "", clean).strip()
+    s = clean.find("{")
+    e = clean.rfind("}") + 1
+    if s != -1 and e > s:
+        try:
+            return json.loads(clean[s:e])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+async def stream_text_chars(text: str, sse_end: str) -> AsyncGenerator[str, None]:
+    """텍스트를 한 글자씩 SSE 청크로 스트리밍하는 비동기 제너레이터."""
+    for char in text:
+        yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
+        await asyncio.sleep(SSE_CHAR_DELAY)

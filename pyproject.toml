@@ -56,6 +56,8 @@ pydantic-settings = "^2.1.0"
 
 # Redis (세션/태스크 저장소)
 redis = "^5.0.0"
+# 멀티프로세스(Gunicorn 워커) 간 파일 기반 세션 폴백 동시 접근 보호
+filelock = "^3.0"
 
 # Celery (ADR-094: 트렌드 크롤링 스케줄러)
 celery = {extras = ["redis"], version = "^5.3.0"}
