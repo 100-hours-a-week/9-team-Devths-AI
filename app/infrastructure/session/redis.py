@@ -44,6 +44,7 @@ class RedisSessionStore(BaseSessionStore):
         key_prefix: str = "session:",
         socket_timeout: float = 5.0,
         socket_connect_timeout: float = 5.0,
+        retry_on_timeout: bool = True,
     ):
         """Initialize Redis session store.
 
@@ -53,6 +54,7 @@ class RedisSessionStore(BaseSessionStore):
             key_prefix: Prefix for all session keys.
             socket_timeout: Socket timeout in seconds.
             socket_connect_timeout: Connection timeout in seconds.
+            retry_on_timeout: 타임아웃 시 자동 1회 재시도 여부 (ADR-126: ElastiCache 페일오버 대응).
         """
         try:
             import redis.asyncio as redis
@@ -64,7 +66,7 @@ class RedisSessionStore(BaseSessionStore):
             decode_responses=True,
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
-            retry_on_timeout=True,  # ADR-126: 페일오버 중 순간적 TimeoutError → 1회 자동 재시도
+            retry_on_timeout=retry_on_timeout,  # ADR-126: 환경변수 REDIS_RETRY_ON_TIMEOUT으로 제어
         )
         self._default_ttl = default_ttl
         self._key_prefix = key_prefix

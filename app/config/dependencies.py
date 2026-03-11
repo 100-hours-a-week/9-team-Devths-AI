@@ -147,6 +147,7 @@ def get_session_store(
             default_ttl=settings.redis_session_ttl,
             socket_timeout=settings.redis_socket_timeout,
             socket_connect_timeout=settings.redis_connect_timeout,
+            retry_on_timeout=settings.redis_retry_on_timeout,
         )
     else:
         from app.infrastructure.session.memory import InMemorySessionStore
