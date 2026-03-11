@@ -64,6 +64,7 @@ class RedisSessionStore(BaseSessionStore):
             decode_responses=True,
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
+            retry_on_timeout=True,  # ADR-126: 페일오버 중 순간적 TimeoutError → 1회 자동 재시도
         )
         self._default_ttl = default_ttl
         self._key_prefix = key_prefix
