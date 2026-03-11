@@ -347,6 +347,10 @@ class Settings(BaseSettings):
         default=2.0,
         description="Redis 연결 타임아웃 (초)",
     )
+    redis_retry_on_timeout: bool = Field(
+        default=True,
+        description="Redis 타임아웃 시 자동 1회 재시도 여부 — ADR-126: ElastiCache 페일오버 중 순간적 TimeoutError 복구",
+    )
 
     # ============================================
     # Task Queue Configuration

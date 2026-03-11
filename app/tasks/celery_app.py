@@ -1,5 +1,5 @@
 """
-Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102, ADR-117.
+Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102, ADR-117, ADR-126.
 
 Celery Beat 스케줄러 설정 및 앱 초기화.
 Redis를 메시지 브로커 및 결과 저장소로 사용.
@@ -58,6 +58,16 @@ celery_app.conf.update(
     task_time_limit=3600,  # 1시간 타임아웃
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    # ADR-126: ElastiCache Replication Group 페일오버 대응
+    # Primary 장애 → Replica 승격(60~120초) 동안 워커가 크래시 없이 대기 후 자동 복구
+    broker_connection_retry_on_startup=True,   # 스타트업 시 브로커 미준비 → 무한 재시도
+    broker_connection_retry=True,              # 운영 중 브로커 연결 끊김 → 자동 재연결
+    broker_connection_max_retries=None,        # 재시도 횟수 제한 없음 (페일오버 대기)
+    broker_transport_options={
+        "socket_timeout": 10,          # 브로커 소켓 타임아웃 (기본 None → 명시적 설정)
+        "socket_connect_timeout": 5,   # 브로커 연결 타임아웃
+        "visibility_timeout": 7200,    # 태스크 재큐 기준 (task_time_limit 2× 여유)
+    },
     # ADR-102: 태스크 라우팅 설정
     task_routes={
         "app.tasks.trend_tasks.*": {"queue": "trend_crawl"},
