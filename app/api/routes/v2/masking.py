@@ -17,7 +17,13 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config.dependencies import get_legacy_task_storage
-from app.schemas.common import AsyncTaskResponse, ErrorCode, TaskStatus, TaskStatusResponse
+from app.schemas.common import (
+    AsyncTaskResponse,
+    ErrorCode,
+    PollingHint,
+    TaskStatus,
+    TaskStatusResponse,
+)
 from app.schemas.masking import MaskingDraftRequest
 from app.services.chandra_masking import get_chandra_masking_service
 from app.services.gemini_masking import get_gemini_masking_service
@@ -123,7 +129,8 @@ async def masking_draft(
     return AsyncTaskResponse(
         task_id=task_id,
         status=TaskStatus.PROCESSING,
-        message="마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
+        message=f"마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
+        polling=PollingHint(interval_ms=2000, max_attempts=150),  # 최대 5분(150 × 2초)
     )
 
 
