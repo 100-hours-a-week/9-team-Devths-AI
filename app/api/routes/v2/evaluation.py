@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.v2._helpers import get_services
@@ -102,7 +102,7 @@ def _trigger_ingest_interview_qa(request: AnalyzeInterviewRequest):
 # ============================================
 
 
-async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
+async def _generate_analyze_stream(request: AnalyzeInterviewRequest, http_request: Request):
     """면접 평가 리포트 SSE 스트리밍 생성 (Gemini 단독)."""
     sse_end = "\n\n"
     qa_list = request.context or []
@@ -169,6 +169,9 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 history=[],
                 system_prompt=_REPORT_SYSTEM_PROMPT,
             ):
+                if await http_request.is_disconnected():
+                    logger.info("[Evaluation] 클라이언트 연결 해제 — 스트림 종료")
+                    return
                 full_report += chunk
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
         else:
@@ -180,6 +183,9 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
                 system_prompt=_REPORT_SYSTEM_PROMPT,
                 user_id=request.user_id,
             ):
+                if await http_request.is_disconnected():
+                    logger.info("[Evaluation] 클라이언트 연결 해제 — 스트림 종료")
+                    return
                 full_report += chunk
                 yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
@@ -188,6 +194,9 @@ async def _generate_analyze_stream(request: AnalyzeInterviewRequest):
         # ADR-102: 면접 Q&A 데이터를 Celery 태스크로 VectorDB에 저장
         _trigger_ingest_interview_qa(request)
 
+    except asyncio.CancelledError:
+        logger.info("[Evaluation] 스트림 취소됨 (클라이언트 연결 해제)")
+        return
     except ConnectionError as e:
         logger.error("LLM 서비스 연결 실패: %s", str(e), exc_info=True)
         fallback_msg = "AI 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해주세요."
@@ -253,6 +262,7 @@ async def _generate_debate_stream(
     request: AnalyzeInterviewRequest,
     analyzer: InterviewAnalyzer,
     debate_service: DebateService,
+    http_request: Request,
 ):
     """Gemini×GPT-4o 토론 후 최종 리포트 SSE 스트리밍 생성."""
     sse_end = "\n\n"
@@ -295,6 +305,9 @@ async def _generate_debate_stream(
 
     # ── 1단계: Gemini 구조화 분석 ──
     try:
+        if await http_request.is_disconnected():
+            logger.info("[Debate] 클라이언트 연결 해제 — 스트림 종료")
+            return
         progress = "🔍 Gemini 분석 중...\n"
         yield f"data: {json.dumps({'chunk': progress}, ensure_ascii=False)}{sse_end}"
 
@@ -303,6 +316,9 @@ async def _generate_debate_stream(
         gemini_dict = gemini_result.to_dict()
         logger.info("✅ [Debate] 1단계 완료: overall_score=%d", gemini_result.overall_score)
 
+    except asyncio.CancelledError:
+        logger.info("[Debate] 스트림 취소됨 (클라이언트 연결 해제)")
+        return
     except Exception as e:
         logger.error("Gemini 분석 실패: %s", str(e), exc_info=True)
         fallback_msg = "Gemini 분석 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
@@ -317,6 +333,9 @@ async def _generate_debate_stream(
 
     # ── 2단계: Gemini×GPT-4o 토론 ──
     try:
+        if await http_request.is_disconnected():
+            logger.info("[Debate] 클라이언트 연결 해제 — 스트림 종료")
+            return
         progress = "🤖 GPT-4o 심층 분석 및 토론 중...\n"
         yield f"data: {json.dumps({'chunk': progress}, ensure_ascii=False)}{sse_end}"
 
@@ -339,6 +358,9 @@ async def _generate_debate_stream(
 
         logger.info("✅ [Debate] 최종 리포트 스트리밍 완료")
 
+    except asyncio.CancelledError:
+        logger.info("[Debate] 스트림 취소됨 (클라이언트 연결 해제)")
+        return
     except Exception as e:
         logger.error("Debate 토론 실패: %s", str(e), exc_info=True)
 
@@ -462,6 +484,7 @@ async def _generate_debate_stream(
 )
 async def analyze_interview(
     request: AnalyzeInterviewRequest,
+    http_request: Request,
     analyzer: InterviewAnalyzer = Depends(get_evaluation_analyzer),
     debate_service: DebateService | None = Depends(get_debate_service),
 ):
@@ -480,20 +503,20 @@ async def analyze_interview(
         if not debate_service:
             logger.warning("Debate service unavailable, falling back to Gemini-only")
             return StreamingResponse(
-                _generate_analyze_stream(request),
+                _generate_analyze_stream(request, http_request),
                 media_type="text/event-stream",
                 headers=sse_headers,
             )
 
         return StreamingResponse(
-            _generate_debate_stream(request, analyzer, debate_service),
+            _generate_debate_stream(request, analyzer, debate_service, http_request),
             media_type="text/event-stream",
             headers=sse_headers,
         )
 
     # retry=false → Gemini 단독 분석
     return StreamingResponse(
-        _generate_analyze_stream(request),
+        _generate_analyze_stream(request, http_request),
         media_type="text/event-stream",
         headers=sse_headers,
     )

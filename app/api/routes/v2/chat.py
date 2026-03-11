@@ -11,7 +11,7 @@ import random
 import time
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.routes.v2._helpers import (
@@ -65,6 +65,7 @@ router = APIRouter()
 async def generate_chat_stream(
     request: ChatRequest,
     session_store,
+    http_request: Request,
 ):
     """채팅 응답 스트리밍 생성 (session_store: DI from get_session_store)"""
 
@@ -278,6 +279,9 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt="당신은 채용 전문가입니다. 마크다운 문법(#, ##, **, ```)을 절대 사용하지 말고 일반 텍스트로만 응답하세요.",
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -303,6 +307,9 @@ async def generate_chat_stream(
                         model="gemini",
                         chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
+                        if await http_request.is_disconnected():
+                            logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                            return
                         record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -350,6 +357,9 @@ async def generate_chat_stream(
                             system_prompt="당신은 전문 면접관입니다. 지원자의 답변을 평가하고 구체적인 피드백을 제공합니다. 마크다운 문법을 사용하지 마세요.",
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -381,6 +391,9 @@ async def generate_chat_stream(
                             model=model,
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -411,12 +424,18 @@ async def generate_chat_stream(
                         model=model,
                         chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
+                        if await http_request.is_disconnected():
+                            logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                            return
                         record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                     logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
+        except asyncio.CancelledError:
+            logger.info("[Chat][NORMAL] 스트림 취소됨 (클라이언트 연결 해제)")
+            return
         except Exception as e:
             logger.error("채팅 처리 오류: %s", str(e), exc_info=True)
             yield sse_error_event(
@@ -436,6 +455,9 @@ async def generate_chat_stream(
         try:
             # SSE 스트림 즉시 오픈: Redis/RAG 등 첫 await 전에 keepalive를 전송해
             # 프록시(Nginx) 및 메인 백엔드의 첫 청크 대기 타임아웃을 방지한다.
+            if await http_request.is_disconnected():
+                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                return
             yield ": keepalive\n\n"
 
             interview_type = request.context.interview_type or "tech"
@@ -804,6 +826,9 @@ async def generate_chat_stream(
                             f"{format_main_question_label(1)}{newline}{first_q.question}"
                         )
                         async for chunk in stream_text_chars(question_text, sse_end):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             yield chunk
 
                         session_meta = {
@@ -882,6 +907,9 @@ async def generate_chat_stream(
                         current_q.current_depth,
                         current_q.max_depth,
                     )
+                    if await http_request.is_disconnected():
+                        logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                        return
                     yield ": keepalive\n\n"
 
                     if model_choice == "vllm" and rag.vllm:
@@ -891,6 +919,9 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt=system_prompt,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield ": k\n\n"
@@ -902,6 +933,9 @@ async def generate_chat_stream(
                             system_prompt=system_prompt,
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield ": k\n\n"
@@ -951,6 +985,9 @@ async def generate_chat_stream(
                                 )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 async for chunk in stream_text_chars(followup_text, sse_end):
+                                    if await http_request.is_disconnected():
+                                        logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                        return
                                     yield chunk
                             else:
                                 safe_info(
@@ -1005,6 +1042,9 @@ async def generate_chat_stream(
                             question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
                             async for chunk in stream_text_chars(question_text, sse_end):
+                                if await http_request.is_disconnected():
+                                    logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                    return
                                 yield chunk
 
                             next_q.conversation.append(
@@ -1017,6 +1057,9 @@ async def generate_chat_stream(
                         session.phase = "completed"
                         complete_msg = f"{newline}{newline}면접 결과 리포트를 생성 중입니다. 잠시만 기다려 주세요."
                         async for chunk in stream_text_chars(complete_msg, sse_end):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             yield chunk
 
                 await session_store.set(session_key, session.model_dump())
@@ -1046,6 +1089,9 @@ async def generate_chat_stream(
                 yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
                 yield f"data: [DONE]{sse_end}"
 
+        except asyncio.CancelledError:
+            logger.info("[Chat][INTERVIEW] 스트림 취소됨 (클라이언트 연결 해제)")
+            return
         except Exception as e:
             logger.error(f"Interview error: {e}", exc_info=True)
             yield sse_error_event(
@@ -1161,11 +1207,12 @@ async def generate_chat_stream(
 )
 async def chat(
     request: ChatRequest,
+    http_request: Request,
     session_store=Depends(get_session_store),
 ):
     """채팅 처리 (일반/면접)"""
     return StreamingResponse(
-        generate_chat_stream(request, session_store),
+        generate_chat_stream(request, session_store, http_request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
