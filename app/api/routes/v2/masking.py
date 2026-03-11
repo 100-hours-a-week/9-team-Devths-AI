@@ -129,7 +129,7 @@ async def masking_draft(
     return AsyncTaskResponse(
         task_id=task_id,
         status=TaskStatus.PROCESSING,
-        message="마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
+        message=f"마스킹 작업을 시작했습니다. /ai/task/{task_id}로 진행 상태를 확인하세요.",
         polling=PollingHint(interval_ms=2000, max_attempts=150),  # 최대 5분(150 × 2초)
     )
 
