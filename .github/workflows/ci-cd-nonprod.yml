@@ -147,7 +147,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
-      image_tag: ${{ steps.ecr-repo.outputs.env_tag }}-${{ github.sha }}
+      image_tag: ${{ steps.image-tag.outputs.value }}
       repo_name: ${{ steps.ecr-repo.outputs.repo_name }}
     steps:
       - name: Checkout Code
@@ -172,14 +172,16 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
             echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
-            echo "env_tag=dev" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == "refs/heads/release"* ]]; then
-             echo "repo_name=devths/ai-stg" >> $GITHUB_OUTPUT
-             echo "env_tag=stg" >> $GITHUB_OUTPUT
+            echo "repo_name=devths/ai-stg" >> $GITHUB_OUTPUT
           else
-             echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
-             echo "env_tag=dev" >> $GITHUB_OUTPUT
+            echo "repo_name=devths/ai-dev" >> $GITHUB_OUTPUT
           fi
+
+      - name: Generate Image Tag
+        id: image-tag
+        run: |
+          echo "value=$(date +'%Y%m%d_%H%M%S')-$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Build, tag, and push image to Amazon ECR
         uses: docker/build-push-action@v5
@@ -187,8 +189,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ steps.ecr-repo.outputs.env_tag }}-${{ github.sha }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ steps.ecr-repo.outputs.env_tag }}-latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ steps.image-tag.outputs.value }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
