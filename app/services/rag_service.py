@@ -912,6 +912,8 @@ class RAGService:
                 else:
                     dense_pairs = all_dense_pairs
 
+                logger.info("[Ensemble] Dense(MMR): %d건", len(dense_pairs))
+
                 results_per_type = await asyncio.gather(
                     *[
                         self.vectordb.get_all_documents_by_user(user_id=user_id, collection_type=ct)
@@ -929,6 +931,8 @@ class RAGService:
                 if settings.rag_bm25_max_docs > 0 and len(bm25_docs) > settings.rag_bm25_max_docs:
                     bm25_docs = bm25_docs[: settings.rag_bm25_max_docs]
 
+                logger.info("[Ensemble] BM25 인덱스: %d건", len(bm25_docs))
+
                 sparse_pairs: list[tuple[str, Document]] = []
                 if bm25_docs and query.strip():
                     k_bm25 = max(10, min(50, len(bm25_docs)))
@@ -941,6 +945,8 @@ class RAGService:
                     sparse_docs = await loop.run_in_executor(None, _bm25_invoke)
                     sparse_pairs = [(d.metadata.get("collection_type", ""), d) for d in sparse_docs]
 
+                logger.info("[Ensemble] Sparse(BM25): %d건", len(sparse_pairs))
+
                 dw = (
                     dense_weight if dense_weight is not None else settings.rag_ensemble_dense_weight
                 )
@@ -950,6 +956,12 @@ class RAGService:
                     else settings.rag_ensemble_sparse_weight
                 )
                 merged = _rrf_merge(dense_pairs, sparse_pairs, dw, sw, top_k=0)
+                logger.info(
+                    "[Ensemble] RRF 병합: %d건 (dense=%.1f, sparse=%.1f)",
+                    len(merged),
+                    dw,
+                    sw,
+                )
 
                 # ADR-106 Phase 4: RAPTOR 다단계 검색 결과 병합
                 if self._raptor:
