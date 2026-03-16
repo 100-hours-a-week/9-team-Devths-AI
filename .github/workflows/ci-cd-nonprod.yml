@@ -147,7 +147,7 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
-      image_tag: ${{ github.sha }}
+      image_tag: ${{ steps.ecr-repo.outputs.env_tag }}-${{ github.sha }}
       repo_name: ${{ steps.ecr-repo.outputs.repo_name }}
     steps:
       - name: Checkout Code
@@ -187,8 +187,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ github.sha }}
-            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ steps.ecr-repo.outputs.env_tag }}-${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.ecr-repo.outputs.repo_name }}:${{ steps.ecr-repo.outputs.env_tag }}-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -198,7 +198,7 @@ jobs:
   # ========================================================
   deploy-to-ec2:
     needs: [cd]
-    if: github.event_name == 'push'
+    if: false  # V3: ArgoCD Image Updater로 배포 방식 전환. CodeDeploy 롤백 시 이 줄 제거.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -380,7 +380,7 @@ jobs:
   # ========================================================
   notify-discord-ci:
     runs-on: ubuntu-latest
-    needs: [lint, static-analysis, test, cd, deploy-to-ec2]
+    needs: [lint, static-analysis, test, cd]
     if: always()
     steps:
       - name: Prepare Data
@@ -396,20 +396,19 @@ jobs:
         uses: sarisia/actions-status-discord@v1
         with:
           webhook: ${{ secrets.DISCORD_WEBHOOK_NON_PROD_URL }}
-          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 'success' || 'failure' }}
-          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
+          status: ${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && 'success' || 'failure' }}
+          title: "AI Service CI/CD Result [${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && '✅Success' || '❌Failure' }}]"
           description: |
             **Commit**: ${{ steps.prep.outputs.title }}
             **Branch**: `${{ steps.prep.outputs.branch }}`
-            
+
             **📊 Results**:
             - Lint: ${{ needs.lint.result == 'success' && '✅' || '❌' }}
             - Static Analysis: ${{ needs.static-analysis.result == 'success' && '✅' || '❌' }}
             - Test & Smoke: ${{ needs.test.result == 'success' && '✅' || '❌' }}
             - Docker Push: ${{ needs.cd.result == 'success' && '✅' || (needs.cd.result == 'skipped' && '⏭️ Skipped' || '❌') }}
-            - EC2 Deploy: ${{ needs.deploy-to-ec2.result == 'success' && '✅' || (needs.deploy-to-ec2.result == 'skipped' && '⏭️ Skipped' || '❌') }}
-            
+
             **🔗 Link**: [View Run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped') && (needs.deploy-to-ec2.result == 'success' || needs.deploy-to-ec2.result == 'skipped')) && 65280 || 16711680 }}"
+          color: "${{ (needs.lint.result == 'success' && needs.static-analysis.result == 'success' && needs.test.result == 'success' && (needs.cd.result == 'success' || needs.cd.result == 'skipped')) && 65280 || 16711680 }}"
           username: AI CI/CD Bot
           avatar_url: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
