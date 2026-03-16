@@ -1,9 +1,9 @@
 """
-통합 파일 기반 Task 저장소
+Task 저장소 — FileTaskStore (파일 기반) + RedisTaskStore (Redis 기반)
 
-모든 비동기 작업(text_extract, masking 등)을 통합 관리
-개발 환경에서 uvicorn --reload 모드에서도 task가 유지되도록 함
-프로덕션에서는 Redis 등으로 교체 필요
+모든 비동기 작업(text_extract, masking 등)을 통합 관리.
+- FileTaskStore: 순수 로컬 환경(Redis 없음) fallback용
+- RedisTaskStore: Redis가 있는 모든 환경(dev/nonprod/prod) 기본 사용 (ADR-130)
 """
 
 import json
@@ -89,12 +89,63 @@ class FileTaskStore:
         return deleted_count
 
 
+class RedisTaskStore:
+    """Redis 기반 Task 저장소 — FileTaskStore 드롭인 교체 (ADR-130).
+
+    FileTaskStore와 동일한 save() / get() / delete() / exists() 인터페이스를 제공하여
+    호출 측 코드(text_extract.py, masking.py, task.py) 변경 없이 교체 가능.
+
+    - Redis DB 0 사용, "legacy_task:" prefix로 세션 키와 네임스페이스 분리
+    - TTL 24시간(86400초) 자동 만료 → /tmp 파일 누적 문제 해소
+    - k8s 분리 Deployment 환경에서 FastAPI·Celery Worker 간 상태 공유 지원
+    """
+
+    def __init__(self, redis_url: str, ttl: int = 86400, prefix: str = "legacy_task:"):
+        import redis as _redis
+
+        self._redis = _redis.from_url(redis_url, decode_responses=True)
+        self._ttl = ttl
+        self._prefix = prefix
+
+    def _key(self, task_id: str) -> str:
+        return f"{self._prefix}{task_id}"
+
+    def save(self, task_id: str, data: dict[str, Any]) -> None:
+        """Task 저장 (TTL 포함)"""
+        serializable = data.copy()
+        if "created_at" in serializable and isinstance(serializable["created_at"], datetime):
+            serializable["created_at"] = serializable["created_at"].isoformat()
+        self._redis.setex(
+            self._key(task_id),
+            self._ttl,
+            json.dumps(serializable, ensure_ascii=False),
+        )
+
+    def get(self, task_id: str) -> dict[str, Any] | None:
+        """Task 조회"""
+        raw = self._redis.get(self._key(task_id))
+        if raw is None:
+            return None
+        data = json.loads(raw)
+        if "created_at" in data and isinstance(data["created_at"], str):
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        return data
+
+    def exists(self, task_id: str) -> bool:
+        """Task 존재 여부"""
+        return bool(self._redis.exists(self._key(task_id)))
+
+    def delete(self, task_id: str) -> None:
+        """Task 삭제"""
+        self._redis.delete(self._key(task_id))
+
+
 # 전역 인스턴스
 _task_store = None
 
 
 def get_task_store() -> FileTaskStore:
-    """Task Store 싱글톤"""
+    """Task Store 싱글톤 (FileTaskStore — 레거시 호환용)"""
     global _task_store
     if _task_store is None:
         _task_store = FileTaskStore()
