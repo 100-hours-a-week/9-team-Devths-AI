@@ -378,6 +378,26 @@ class Settings(BaseSettings):
     )
 
     # ============================================
+    # AWS / SageMaker Configuration (ADR-117, ADR-133)
+    # ============================================
+    aws_region: str = Field(
+        default="ap-northeast-2",
+        description="AWS 리전 (S3, SageMaker 공통)",
+    )
+    sagemaker_s3_bucket: str = Field(
+        default="devths-storage-dev",
+        description="SageMaker 학습 데이터 S3 버킷",
+    )
+    sagemaker_s3_training_prefix: str = Field(
+        default="uploads/training-data/",
+        description="학습 데이터 S3 경로 프리픽스",
+    )
+    sagemaker_pipeline_name: str = Field(
+        default="exaone-finetuning-pipeline",
+        description="SageMaker Pipeline 이름 (파인튜닝 파이프라인)",
+    )
+
+    # ============================================
     # Task Queue Configuration
     # ============================================
     task_storage_dir: str = Field(
