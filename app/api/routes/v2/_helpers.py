@@ -47,11 +47,17 @@ def get_services():
         if api_key == "":
             api_key = None
         _llm_service = LLMService(api_key=api_key)
-        _vectordb_service = VectorDBService(
-            api_key=api_key,
-            chroma_server_host=settings.chroma_server_host,
-            chroma_server_port=settings.chroma_server_port,
-        )
+        try:
+            _vectordb_service = VectorDBService(
+                api_key=api_key,
+                chroma_server_host=settings.chroma_server_host,
+                chroma_server_port=settings.chroma_server_port,
+            )
+        except Exception as e:
+            # VectorDB 초기화 실패 시 부분 상태 리셋 → 다음 요청에서 재시도 가능
+            logger.error("VectorDB 초기화 실패, 다음 요청에서 재시도합니다: %s", e)
+            _llm_service = None
+            return None
 
         # LangChain LCEL Gateway (면접/QnA 체인용, API 키 분산·폴백 지원)
         try:
