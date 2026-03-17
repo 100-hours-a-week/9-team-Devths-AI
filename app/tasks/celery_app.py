@@ -62,7 +62,7 @@ celery_app.conf.update(
     # Primary 장애 → Replica 승격(60~120초) 동안 워커가 크래시 없이 대기 후 자동 복구
     broker_connection_retry_on_startup=True,   # 스타트업 시 브로커 미준비 → 무한 재시도
     broker_connection_retry=True,              # 운영 중 브로커 연결 끊김 → 자동 재연결
-    broker_connection_max_retries=None,        # 재시도 횟수 제한 없음 (페일오버 대기)
+    broker_connection_max_retries=10,          # 최대 10회 재시도 (~150s) — ElastiCache 페일오버(60~120s) 커버 가능, 이후 종료 → K8s가 재시작
     broker_transport_options={
         "socket_timeout": 10,          # 브로커 소켓 타임아웃 (기본 None → 명시적 설정)
         "socket_connect_timeout": 5,   # 브로커 연결 타임아웃
