@@ -1081,14 +1081,14 @@ numpy = "*"
 
 [[package]]
 name = "chromadb"
-version = "0.4.24"
+version = "0.5.0"
 description = "Chroma."
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "chromadb-0.4.24-py3-none-any.whl", hash = "sha256:3a08e237a4ad28b5d176685bd22429a03717fe09d35022fb230d516108da01da"},
-    {file = "chromadb-0.4.24.tar.gz", hash = "sha256:a5c80b4e4ad9b236ed2d4899a5b9e8002b489293f2881cb2cadab5b199ee1c72"},
+    {file = "chromadb-0.5.0-py3-none-any.whl", hash = "sha256:8193dc65c143b61d8faf87f02c44ecfa778d471febd70de517f51c5d88a06009"},
+    {file = "chromadb-0.5.0.tar.gz", hash = "sha256:7954af614a9ff7b2902ddbd0a162f33f7ec0669e2429903905c4f7876d1f766f"},
 ]
 
 [package.dependencies]
@@ -1109,7 +1109,6 @@ opentelemetry-sdk = ">=1.2.0"
 orjson = ">=3.9.12"
 overrides = ">=7.3.1"
 posthog = ">=2.4.0"
-pulsar-client = ">=3.1.0"
 pydantic = ">=1.9"
 pypika = ">=0.48.9"
 PyYAML = ">=6.0.0"
@@ -5809,54 +5808,6 @@ dev = ["abi3audit", "black", "check-manifest", "coverage", "packaging", "psleak"
 test = ["psleak", "pytest", "pytest-instafail", "pytest-xdist", "setuptools"]
 
 [[package]]
-name = "pulsar-client"
-version = "3.9.0"
-description = "Apache Pulsar Python client library"
-optional = false
-python-versions = "*"
-groups = ["main"]
-files = [
-    {file = "pulsar_client-3.9.0-cp310-cp310-macosx_13_0_universal2.whl", hash = "sha256:7c55e49ee8694560bf47d7fcc87e88a1e02d0253eed4009a9003c1e5617890b2"},
-    {file = "pulsar_client-3.9.0-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:a0d20966cd2bff3e1c98c7c69c48081c92e93b5387c45758623bff985cf419b4"},
-    {file = "pulsar_client-3.9.0-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:3f756fe18c9f3b0b1660c0bcd193bc30a34c237edb8368e310dbc1f76632e40d"},
-    {file = "pulsar_client-3.9.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:b356b5c26c3b26360dcb911d1639a894f878ea12083487ec2dce31f0680ec995"},
-    {file = "pulsar_client-3.9.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:90e26a5e5efc0c757c1a46275dff6371618ea10b9b994a78391fc93f75f54dc3"},
-    {file = "pulsar_client-3.9.0-cp310-cp310-win_amd64.whl", hash = "sha256:6fca74d92ca07925b8585da8fde2edeece0c0eaefd294d74129458c8ae15a8de"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-macosx_13_0_universal2.whl", hash = "sha256:a947a8ff3f738bfd4776adf1216fd768c12bdbfb798492c1780cb95c5679872f"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:13c861d136e12ad4193a1958d599c91e530ce9291aa4b151775e07486ee53104"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:31a9cc4cef80144fc892b012983442bbed9b8c7c25ea36fc07afff8f48b4d9f4"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:e18cd6c4851c0adaa096414a251486513e9315e00ef5d6b257f16f2cc62b4501"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:9e657aeeb378bc6190159de19d074ca8a43c492134b421a3ef3ef0d2a02735da"},
-    {file = "pulsar_client-3.9.0-cp311-cp311-win_amd64.whl", hash = "sha256:df71a55d0b6617005677adb3094d96316ce4ddf22f77cfb4e553bd6039289876"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-macosx_13_0_universal2.whl", hash = "sha256:e40a78e23cc0321119248e7936cd204102e7924146c3952de1472a79333c0dcd"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:a275764eedbf8db02bfc4bfaaa86fe7c04b1991ded8e63d7614e1e25f730f632"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:765489cded1344b4e18694db92abd2e1bce9742015e21267d65fe442c024755b"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:c061027923e05843e4cee41ea7003dcecaa537c2f86b50b47f5bd68d84ccb93b"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:541409254539ece1d96a5e5ee045cad876a5b828024d6279327327e9c0224fd0"},
-    {file = "pulsar_client-3.9.0-cp312-cp312-win_amd64.whl", hash = "sha256:92c677f243db850d148ad1a29a355e8fb645e8b7837da165a242703e0097f25c"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-macosx_13_0_universal2.whl", hash = "sha256:43fe26ee75d9f238a8d675e14a694b7dd4b63d09643602348d42a2bc27b6c6c7"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:a67720c35a72b02691a72bf236de9a4d8f8eb38a034db84bcdd73d535a1ad779"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:9b18904d559a04b5b4ba00a70a719459dc71db766fbfdd09aa2b46a0721f9bf8"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:b19a6b0d02deaf876678d35a4327de44a09b14b55f4bc0a9044cb4f3c0c959c4"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:559737f80f2dff4fec283f918002d7356c35c909e857195d485f4c055af5f307"},
-    {file = "pulsar_client-3.9.0-cp313-cp313-win_amd64.whl", hash = "sha256:6bcb7477c61ad9e4976e7f7330d00a3ea4ed99a013754c8eaeee27d9c9c15e53"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-macosx_13_0_universal2.whl", hash = "sha256:481d714a1974a75179ff23217ea5552830349804d525ab20f426c119b154e0fe"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:a94ebf31a5b097f3f2b5cf0c410247c2a6e1f08da7f7726bd793a26d33a6a358"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:238d60f295d7faf5c915ec79bda90408e13b7654ec75e4ca4c40ccc5566ea7ff"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:8a30f7398c9fc66effe26232ccc26375c7c5c92a104805984fdaaf75185e8118"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:f6694acf47956d82f4d7ad599eaf1d0d1f6536141bd47696fefe86db5cf81a8c"},
-    {file = "pulsar_client-3.9.0-cp314-cp314-win_amd64.whl", hash = "sha256:e32da08d79fb144b46b1cb9988beff2d052fa12cc753c02a14d03ccc88dadbac"},
-]
-
-[package.dependencies]
-certifi = "*"
-
-[package.extras]
-all = ["apache-bookkeeper-client (>=4.16.1)", "fastavro (>=1.9.2)", "grpcio (>=1.59.3)", "prometheus-client", "protobuf (>=3.6.1)", "ratelimit"]
-avro = ["fastavro (>=1.9.2)"]
-functions = ["apache-bookkeeper-client (>=4.16.1)", "grpcio (>=1.59.3)", "prometheus-client", "protobuf (>=3.6.1)", "ratelimit"]
-
-[[package]]
 name = "pyarrow"
 version = "23.0.0"
 description = "Python library for Apache Arrow"
@@ -9693,4 +9644,4 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.10.19"
-content-hash = "47b6610be4daf0dea0575206b531331ff91f4fbbeb5c820bf70f5e73020e53fd"
+content-hash = "e298c9106e116f2589519d26bf2ad14d25d1c84c93b7411e6fab6154fb6f5a8f"
