@@ -15,10 +15,12 @@ AWS_REGION="ap-northeast-2" # Default region
 export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
 
 # 로그 디렉토리 권한 문제 방지 (ubuntu 홈 디렉토리 하위에 생성)
-mkdir -p "$LOG_DIR"
+# 2>/dev/null || true: 권한 부족 등으로 실패해도 스크립트는 계속 진행
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+touch "$LOG_FILE" 2>/dev/null || true
 
 # 디스크 용량 누적 방지를 위해 매 배포 시 이전 배포 로그를 빈 파일로 덮어쓰기(초기화)합니다.
-> "$LOG_FILE"
+> "$LOG_FILE" 2>/dev/null || true
 
 # Logging helper
 log() {
@@ -117,7 +119,14 @@ if [[ "$ENV_TAG" == "dev" ]]; then export PARAMETER_STORE_PATH="/Dev/AI/"; fi
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 if [ -f "$SCRIPT_DIR/load_env_from_parameter_store.sh" ]; then
-    source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
+    log "🔍 SCRIPT_DIR: $SCRIPT_DIR"
+    # 로그 파일이 존재하면 리다이렉트, 없으면 리다이렉트 없이 실행
+    # (bash는 >> 대상 파일이 없으면 source 자체를 실행하지 않으므로 분기 필수)
+    if [ -w "$LOG_FILE" ]; then
+        source "$SCRIPT_DIR/load_env_from_parameter_store.sh" >> "$LOG_FILE" 2>&1
+    else
+        source "$SCRIPT_DIR/load_env_from_parameter_store.sh"
+    fi
 else
     log "⚠️  load_env_from_parameter_store.sh not found at $SCRIPT_DIR. Skipping Parameter Store load."
 fi

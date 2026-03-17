@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: 'Manual production deployment'
+      skip_wait:
+        description: 'CodeDeploy 완료 대기 스킵 (배포 시작 후 즉시 완료 처리)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
@@ -233,7 +238,10 @@ jobs:
           echo "✅ Deployment started: $DEPLOYMENT_ID"
           echo "🔗 AWS Console: https://${{ env.AWS_REGION }}.console.aws.amazon.com/codesuite/codedeploy/deployments/$DEPLOYMENT_ID"
 
-          if aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
+          if [ "${{ inputs.skip_wait }}" = "true" ]; then
+            echo "⏭️  skip_wait=true: CodeDeploy 완료 대기를 스킵합니다."
+            echo "deployment_status=Skipped (no-wait)" >> $GITHUB_OUTPUT
+          elif aws deploy wait deployment-successful --deployment-id $DEPLOYMENT_ID; then
             echo "deployment_status=Success" >> $GITHUB_OUTPUT
             echo "✅ Deployment completed successfully!"
           else
