@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # ── 면접 파라미터 상수 ───────────────────────────────────────
 # 참고: total_questions(5), max_depth(3) 기본값은 schemas/chat.py Field default가 관리
-PERSONALITY_VECTORDB_SELECT = 4    # 인성 면접 VectorDB에서 선택할 질문 수
+PERSONALITY_VECTORDB_SELECT = 4  # 인성 면접 VectorDB에서 선택할 질문 수
 
 # 인성 면접 질문 선택 관련 상수
 PERSONALITY_SIMILARITY_THRESHOLD = 0.80  # 질문 간 유사도 임계값
@@ -109,6 +109,11 @@ async def generate_chat_stream(
     mode = request.context.mode if request.context else ChatMode.NORMAL
 
     rag = get_services()
+    if rag is None:
+        logger.error("서비스 초기화 실패 (VectorDB 연결 불가) — 요청 거부")
+        yield 'data: {"error": "서비스 초기화 실패. 잠시 후 다시 시도해주세요."}\n\n'
+        return
+
     newline = "\n"
     sse_end = "\n\n"
 
@@ -794,9 +799,7 @@ async def generate_chat_stream(
                                 if q.get("id", 0) >= 3
                             ]
                             questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
-                            logger.info(
-                                "인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)"
-                            )
+                            logger.info("인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)")
 
                     # 공통: 세션 생성 + 스트리밍 + 저장
                     new_session = InterviewSession(
@@ -960,7 +963,6 @@ async def generate_chat_stream(
                             )
                             current_q.is_completed = True
                         else:
-
                             safe_info(
                                 logger,
                                 "🔍 [꼬리질문 진단] should_continue=%s | followup 존재=%s",
@@ -986,7 +988,9 @@ async def generate_chat_stream(
                                 followup_text = f"{followup_header}{newline}{followup_q}"
                                 async for chunk in stream_text_chars(followup_text, sse_end):
                                     if await http_request.is_disconnected():
-                                        logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                        logger.info(
+                                            "[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료"
+                                        )
                                         return
                                     yield chunk
                             else:
@@ -1043,7 +1047,9 @@ async def generate_chat_stream(
                             question_text = f"{question_header}{newline}{next_q.question}"
                             async for chunk in stream_text_chars(question_text, sse_end):
                                 if await http_request.is_disconnected():
-                                    logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                    logger.info(
+                                        "[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료"
+                                    )
                                     return
                                 yield chunk
 
