@@ -43,7 +43,7 @@ rm -rf "$APP_DIR/.venv" 2>/dev/null || true
 # 4. 로그 디렉토리 생성
 echo "📁 Creating log directory..."
 mkdir -p "$APP_DIR/logs"
-chown ubuntu:ubuntu "$APP_DIR/logs"
+chown -R ubuntu:ubuntu "$APP_DIR" 
 
 # 5. 태스크 스토리지 디렉토리 유지 (기존 데이터 보존)
 echo "💾 Preserving task storage..."
