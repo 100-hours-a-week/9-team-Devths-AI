@@ -189,6 +189,60 @@ def create_generation(
         return None
 
 
+def create_retrieval_span(
+    trace: "LangfuseTraceContext | None",
+    name: str,
+    input_data: dict | None = None,
+    output_data: dict | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """ADR-134: RAG 검색 단계를 Langfuse span으로 기록.
+
+    LLM이 아닌 검색 파이프라인 단계(Dense-MMR, BM25 인덱스, Sparse-BM25, RRF 병합, Rerank)를 추적.
+    Langfuse Observations 탭에서 단계별 문서 수·가중치를 확인할 수 있다.
+    Langfuse 미설정 또는 오류 시 no-op으로 동작 (서비스 중단 없음).
+
+    Args:
+        trace: trace_llm_call()로 생성한 컨텍스트
+        name: span 이름 ("dense-mmr", "bm25-index", "sparse-bm25", "rrf-merge", "rerank")
+        input_data: 검색 파라미터 (query, weights 등)
+        output_data: 결과 통계 (count, merged_count 등)
+        metadata: 추가 메타데이터
+    """
+    if trace is None:
+        return
+    try:
+        client = trace["client"]
+        trace_id = trace["trace_id"]
+
+        observation = None
+        # Langfuse v3: start_observation(as_type="span")
+        if hasattr(client, "start_observation"):
+            with contextlib.suppress(Exception):
+                observation = client.start_observation(
+                    name=name,
+                    as_type="span",
+                    trace_context={"trace_id": trace_id},
+                    input=input_data,
+                    output=output_data,
+                    metadata=metadata or {},
+                )
+        # Langfuse v2 fallback: start_span
+        if observation is None and hasattr(client, "start_span"):
+            with contextlib.suppress(Exception):
+                observation = client.start_span(
+                    name=name,
+                    trace_context={"trace_id": trace_id},
+                    input=input_data,
+                    output=output_data,
+                    metadata=metadata or {},
+                )
+        if observation and hasattr(observation, "end"):
+            observation.end()
+    except Exception as e:
+        logger.error("Langfuse span 기록 실패 (name=%s): %s", name, e)
+
+
 def record_score(
     trace: "LangfuseTraceContext | None",
     name: str,
