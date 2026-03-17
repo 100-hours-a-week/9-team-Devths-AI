@@ -65,6 +65,12 @@ class ChromaVectorStore(BaseVectorStore):
             self.chroma_client = chromadb.HttpClient(
                 host=chroma_server_host,
                 port=chroma_server_port,
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    # chromadb 0.5.x 클라이언트 버그: orjson bytes 전송 시 Content-Type 미설정
+                    # httpx content=bytes 방식에서 헤더를 명시적으로 주입 (Issue #3899)
+                    chroma_server_headers={"Content-Type": "application/json"},
+                ),
             )
             logger.info(
                 f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
