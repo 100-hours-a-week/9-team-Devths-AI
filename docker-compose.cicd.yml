@@ -103,13 +103,14 @@ services:
       - ai_network
 
   # -----------------------------------------
-  # 2. Celery Worker — 트렌드 크롤링 전용 (ADR-094)
+  # 2. Celery Worker — 트렌드 크롤링 + SageMaker 동기화 (ADR-094, ADR-133)
   # -----------------------------------------
   celery-worker-trend:
     image: ${IMAGE_URI}
     container_name: celery_worker_trend
     restart: unless-stopped
-    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
+    # ADR-133: sagemaker_sync 큐 합산 (ChromaDB 공유, 주 1회 단발)
+    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl,sagemaker_sync
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=${REDIS_URL}
@@ -133,6 +134,13 @@ services:
       - RAG_MULTI_QUERY_COUNT=${RAG_MULTI_QUERY_COUNT:-}
       - RAG_USE_TIME_WEIGHTED=${RAG_USE_TIME_WEIGHTED:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # SageMaker (ADR-117, ADR-133) — S3 업로드 및 Pipeline 트리거
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - SAGEMAKER_S3_BUCKET=${SAGEMAKER_S3_BUCKET:-devths-storage-dev}
+      - SAGEMAKER_S3_TRAINING_PREFIX=${SAGEMAKER_S3_TRAINING_PREFIX:-uploads/training-data/}
+      - SAGEMAKER_PIPELINE_NAME=${SAGEMAKER_PIPELINE_NAME:-exaone-finetuning-pipeline}
     logging:
       driver: json-file
       options:
