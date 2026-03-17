@@ -54,8 +54,9 @@ services:
       - ai_network
 
   # -----------------------------------------
-  # 2. Celery Worker (트렌드 크롤링 태스크 처리) — ADR-094/096
+  # 2. Celery Worker (트렌드 크롤링 + SageMaker 동기화) — ADR-094/096, ADR-133
   # Redis/ElastiCache 연결은 환경변수로 주입
+  # ADR-133: sagemaker_sync 큐를 trend_crawl과 합산 (ChromaDB 공유, 주 1회 단발 실행)
   # -----------------------------------------
   celery-worker-trend:
     build:
@@ -63,7 +64,7 @@ services:
       dockerfile: Dockerfile
     image: ai-endpoint:v2
     container_name: celery_worker_trend
-    command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl
+    command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl,sagemaker_sync
     environment:
       - ENVIRONMENT=production
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
@@ -74,6 +75,13 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - TREND_CRAWL_URLS=${TREND_CRAWL_URLS:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # SageMaker 학습 데이터 동기화 (ADR-133)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - SAGEMAKER_S3_BUCKET=${SAGEMAKER_S3_BUCKET:-devths-storage-dev}
+      - SAGEMAKER_S3_TRAINING_PREFIX=${SAGEMAKER_S3_TRAINING_PREFIX:-uploads/training-data/}
+      - SAGEMAKER_PIPELINE_NAME=${SAGEMAKER_PIPELINE_NAME:-exaone-finetuning-pipeline}
     depends_on:
       vectordb:
         condition: service_started

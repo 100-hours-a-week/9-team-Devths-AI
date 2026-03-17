@@ -132,14 +132,15 @@ def get_session_store(
 ) -> "BaseSessionStore":
     """Get session store instance.
 
-    Returns Redis in production, in-memory otherwise.
-    In-memory store is a singleton so interview sessions are shared across requests.
+    redis_url 설정 시 RedisSessionStore 반환, 미설정 시 InMemorySessionStore 폴백.
+    k8s 멀티 파드 환경에서 파드 간 세션 공유를 보장하기 위해 is_production 대신
+    redis_url 체크로 변경 (ADR-130 패턴 적용).
     """
     global _session_store_instance
     if _session_store_instance is not None:
         return _session_store_instance
 
-    if settings.is_production:
+    if settings.redis_url:
         from app.infrastructure.session.redis import RedisSessionStore
 
         _session_store_instance = RedisSessionStore(
@@ -163,9 +164,11 @@ def get_task_queue(
 ) -> "BaseTaskQueue":
     """Get task queue instance.
 
-    Returns Celery in production, file-based otherwise.
+    redis_url 설정 시 CeleryTaskQueue 반환, 미설정 시 FileTaskQueue 폴백.
+    k8s 멀티 파드 환경에서 파드 간 태스크 유실을 방지하기 위해 is_production 대신
+    redis_url 체크로 변경 (ADR-130 패턴 적용).
     """
-    if settings.is_production:
+    if settings.redis_url:
         from app.infrastructure.queue.celery_queue import CeleryTaskQueue
 
         return CeleryTaskQueue(
@@ -182,7 +185,7 @@ def get_task_queue(
 # Legacy Task Storage (save/get dict - ai.py 호환)
 # ============================================
 
-_task_storage_instance = None        # FileTaskStore fallback 싱글톤
+_task_storage_instance = None  # FileTaskStore fallback 싱글톤
 _redis_task_storage_instance = None  # RedisTaskStore 싱글톤 (ADR-130)
 
 
@@ -221,7 +224,7 @@ def get_legacy_task_storage(
 
         _redis_task_storage_instance = RedisTaskStore(
             redis_url=actual_settings.redis_url,  # DB 0, prefix "legacy_task:"으로 세션과 네임스페이스 분리
-            ttl=actual_settings.redis_task_ttl,   # 기본 86400초 (24시간)
+            ttl=actual_settings.redis_task_ttl,  # 기본 86400초 (24시간)
         )
         return _redis_task_storage_instance
 

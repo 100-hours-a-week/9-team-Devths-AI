@@ -11,24 +11,21 @@ Redis를 통한 분산 태스크 처리.
   Prod VectorDB(ChromaDB) → 익명화 → S3 스테이징 버킷 → SageMaker Pipeline 트리거
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-import os
 import re
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.config.settings import Settings
 
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
-
-# S3 설정
-S3_BUCKET = os.getenv("SAGEMAKER_S3_BUCKET", "devths-storage-dev")
-S3_TRAINING_DATA_PREFIX = os.getenv("SAGEMAKER_S3_TRAINING_PREFIX", "uploads/training-data/")
-
-# SageMaker Pipeline 설정
-SAGEMAKER_PIPELINE_NAME = os.getenv("SAGEMAKER_PIPELINE_NAME", "exaone-finetuning-pipeline")
-AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
 
 # 학습에 사용할 VectorDB 컬렉션 목록
 TRAINING_COLLECTIONS = [
@@ -102,24 +99,26 @@ def _extract_collection_data(vectordb, collection_type: str) -> list[dict]:
     return records
 
 
-def _upload_to_s3(records: list[dict], collection_type: str, timestamp: str) -> str:
+def _upload_to_s3(
+    records: list[dict], collection_type: str, timestamp: str, settings: Settings
+) -> str:
     """학습 데이터를 JSONL 형식으로 S3에 업로드."""
     import boto3
 
-    s3_client = boto3.client("s3", region_name=AWS_REGION)
+    s3_client = boto3.client("s3", region_name=settings.aws_region)
 
-    s3_key = f"{S3_TRAINING_DATA_PREFIX}{timestamp}/{collection_type}.jsonl"
+    s3_key = f"{settings.sagemaker_s3_training_prefix}{timestamp}/{collection_type}.jsonl"
 
     jsonl_content = "\n".join(json.dumps(record, ensure_ascii=False) for record in records)
 
     s3_client.put_object(
-        Bucket=S3_BUCKET,
+        Bucket=settings.sagemaker_s3_bucket,
         Key=s3_key,
         Body=jsonl_content.encode("utf-8"),
         ContentType="application/jsonl",
     )
 
-    s3_uri = f"s3://{S3_BUCKET}/{s3_key}"
+    s3_uri = f"s3://{settings.sagemaker_s3_bucket}/{s3_key}"
     logger.info("[SageMakerSync] S3 업로드 완료: %s (%d건)", s3_uri, len(records))
     return s3_uri
 
@@ -179,7 +178,7 @@ async def _sync_training_data_async() -> dict:
             continue
 
         # S3 업로드
-        s3_uri = _upload_to_s3(records, collection_type, timestamp)
+        s3_uri = _upload_to_s3(records, collection_type, timestamp, settings)
         total_records += len(records)
         uploaded_files.append(
             {
@@ -193,7 +192,7 @@ async def _sync_training_data_async() -> dict:
         "status": "completed",
         "timestamp": timestamp,
         "total_records": total_records,
-        "s3_base_path": f"s3://{S3_BUCKET}/{S3_TRAINING_DATA_PREFIX}{timestamp}/",
+        "s3_base_path": f"s3://{settings.sagemaker_s3_bucket}/{settings.sagemaker_s3_training_prefix}{timestamp}/",
         "uploaded_files": uploaded_files,
     }
 
@@ -210,19 +209,25 @@ def trigger_sagemaker_pipeline_task(self, s3_data_path: str = ""):
     Args:
         s3_data_path: S3 학습 데이터 경로 (미지정 시 latest 사용)
     """
-    logger.info("[SageMakerSync] SageMaker Pipeline 트리거: %s", SAGEMAKER_PIPELINE_NAME)
-
     try:
+        from app.config.settings import get_settings
+
+        settings = get_settings()
+
+        logger.info(
+            "[SageMakerSync] SageMaker Pipeline 트리거: %s", settings.sagemaker_pipeline_name
+        )
+
         import boto3
 
-        sm_client = boto3.client("sagemaker", region_name=AWS_REGION)
+        sm_client = boto3.client("sagemaker", region_name=settings.aws_region)
 
         params = []
         if s3_data_path:
             params.append({"Name": "ChromaDataS3Uri", "Value": s3_data_path})
 
         response = sm_client.start_pipeline_execution(
-            PipelineName=SAGEMAKER_PIPELINE_NAME,
+            PipelineName=settings.sagemaker_pipeline_name,
             PipelineParameters=params,
             PipelineExecutionDescription=f"Auto-triggered by Celery Beat at {datetime.now().isoformat()}",
         )
@@ -232,7 +237,7 @@ def trigger_sagemaker_pipeline_task(self, s3_data_path: str = ""):
 
         return {
             "status": "pipeline_triggered",
-            "pipeline_name": SAGEMAKER_PIPELINE_NAME,
+            "pipeline_name": settings.sagemaker_pipeline_name,
             "execution_arn": execution_arn,
             "s3_data_path": s3_data_path,
         }
