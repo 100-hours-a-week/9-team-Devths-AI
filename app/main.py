@@ -14,7 +14,7 @@ from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
 from app.config.settings import get_settings
-from app.utils.chromadb_utils import apply_chromadb_query_fix
+from app.utils.chromadb_utils import apply_chromadb_content_type_fix, apply_chromadb_query_fix
 
 # ============================================================================
 # 로깅 설정 (운영 서버 호환)
@@ -85,6 +85,7 @@ setup_logging(settings)
 #   - 라우터 임포트 시점에 chromadb 클라이언트가 초기화될 수 있으므로
 #     FastAPI 앱 생성 이전에 패치를 적용해야 안전.
 apply_chromadb_query_fix()
+apply_chromadb_content_type_fix()
 
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
