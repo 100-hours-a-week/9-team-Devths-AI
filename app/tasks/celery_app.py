@@ -22,6 +22,11 @@ from celery import Celery
 from celery.schedules import crontab
 
 from app.config.settings import get_settings
+from app.core.telemetry import setup_tracing
+
+# OTel 초기화 — Worker/Beat 프로세스 시작 시 트레이싱 활성화
+# FastAPI 계측(instrument_fastapi_app)은 Worker에 불필요, Celery/httpx만 계측
+setup_tracing()
 
 # settings.py에서 설정 로드 (ADR-096: 설정 일관성)
 _settings = get_settings()
