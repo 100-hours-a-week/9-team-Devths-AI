@@ -45,7 +45,7 @@ def setup_tracing() -> None:
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatio, ALWAYS_ON
+        from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 
         service_name = os.getenv("OTEL_SERVICE_NAME", "devths-ai")
 

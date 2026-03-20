@@ -10,11 +10,11 @@ from prometheus_client import make_asgi_app
 
 import app.core.monitoring  # Register custom metrics
 from app.api.middleware.metrics import PrometheusMiddleware
-from app.core.telemetry import instrument_fastapi_app, setup_tracing
 from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
 from app.config.settings import get_settings
+from app.core.telemetry import instrument_fastapi_app, setup_tracing
 from app.utils.chromadb_utils import apply_chromadb_content_type_fix, apply_chromadb_query_fix
 
 # ============================================================================
