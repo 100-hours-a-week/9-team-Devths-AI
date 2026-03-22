@@ -64,7 +64,7 @@ def setup_tracing() -> None:
         exporter = OTLPSpanExporter(endpoint=endpoint)
         provider.add_span_processor(BatchSpanProcessor(exporter))
 
-        trace.set_global_tracer_provider(provider)
+        trace.set_tracer_provider(provider)
 
         # httpx 자동 계측 (외부 API 호출 — BE, Gemini, OpenAI 등)
         HTTPXClientInstrumentor().instrument()
