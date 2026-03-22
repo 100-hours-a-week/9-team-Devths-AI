@@ -23,10 +23,16 @@ from celery.schedules import crontab
 
 from app.config.settings import get_settings
 from app.core.telemetry import setup_tracing
+from app.utils.chromadb_utils import apply_chromadb_content_type_fix, apply_chromadb_query_fix
 
 # OTel 초기화 — Worker/Beat 프로세스 시작 시 트레이싱 활성화
 # FastAPI 계측(instrument_fastapi_app)은 Worker에 불필요, Celery/httpx만 계측
 setup_tracing()
+
+# chromadb 버그 패치 — Worker 프로세스는 main.py를 실행하지 않으므로 여기서 별도 적용
+# 0.4.x: where_document={} 버그 / 0.5.x: Content-Type 헤더 누락 버그 (Issue #3899)
+apply_chromadb_query_fix()
+apply_chromadb_content_type_fix()
 
 # settings.py에서 설정 로드 (ADR-096: 설정 일관성)
 _settings = get_settings()
