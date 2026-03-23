@@ -14,7 +14,8 @@ from app.api.routes import v2
 from app.api.routes.v1 import ai as v1_ai
 from app.api.routes.v1 import masking as v1_masking
 from app.config.settings import get_settings
-from app.utils.chromadb_utils import apply_chromadb_query_fix
+from app.core.telemetry import instrument_fastapi_app, setup_tracing
+from app.utils.chromadb_utils import apply_chromadb_content_type_fix, apply_chromadb_query_fix
 
 # ============================================================================
 # 로깅 설정 (운영 서버 호환)
@@ -80,11 +81,15 @@ settings = get_settings()
 # 로깅 초기화
 setup_logging(settings)
 
+# OTel 트레이싱 초기화 (OTEL_EXPORTER_OTLP_ENDPOINT 미설정 시 no-op)
+setup_tracing()
+
 # chromadb 0.4.x where_document={} 버그 패치.
 # lifespan/startup_event가 아닌 모듈 레벨에서 호출하는 이유:
 #   - 라우터 임포트 시점에 chromadb 클라이언트가 초기화될 수 있으므로
 #     FastAPI 앱 생성 이전에 패치를 적용해야 안전.
 apply_chromadb_query_fix()
+apply_chromadb_content_type_fix()
 
 logger = logging.getLogger(__name__)
 logger.info("=" * 60)
@@ -106,6 +111,9 @@ app = FastAPI(
     redoc_url="/redoc" if settings.environment == "development" else None,
     openapi_url="/openapi.json" if settings.environment == "development" else None,
 )
+
+# FastAPI OTel 계측 적용 (setup_tracing() 이후, 미들웨어 등록 전)
+instrument_fastapi_app(app)
 
 # CORS 미들웨어 설정
 # allow_origins=["*"] + allow_credentials=True 조합은 CORS 명세 위반

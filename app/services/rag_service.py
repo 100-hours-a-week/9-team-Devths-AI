@@ -34,6 +34,7 @@ from app.prompts import (
     create_followup_prompt,
 )
 from app.prompts.interview import create_feedback_prompt
+from app.utils.langfuse_client import create_retrieval_span, trace_llm_call
 from app.utils.log_sanitizer import sanitize_log_input
 
 from .example_selector import get_few_shot_for_general
@@ -862,6 +863,18 @@ class RAGService:
                 if not types_to_fetch:
                     return ""
 
+                # ADR-134: 앙상블 파이프라인 단계별 Langfuse span 추적
+                _lf_trace = trace_llm_call(
+                    name="rag-ensemble-retrieval",
+                    user_id=user_id,
+                    metadata={
+                        "context_types": context_types,
+                        "rag_use_bm25": True,
+                        "rag_use_parent_retriever": settings.rag_use_parent_retriever,
+                        "multi_query": len(queries) > 1,
+                    },
+                )
+
                 # ADR-077: 각 쿼리별 dense 검색 후 병합
                 # ADR-076: resumes/portfolios는 ParentDocumentRetriever 경로로 분기
                 all_dense_pairs: list[tuple[str, Document]] = []
@@ -912,6 +925,14 @@ class RAGService:
                 else:
                     dense_pairs = all_dense_pairs
 
+                logger.info("[Ensemble] Dense(MMR): %d건", len(dense_pairs))
+                create_retrieval_span(
+                    _lf_trace,
+                    "dense-mmr",
+                    input_data={"queries_count": len(queries), "context_types": types_to_fetch},
+                    output_data={"count": len(dense_pairs)},
+                )
+
                 results_per_type = await asyncio.gather(
                     *[
                         self.vectordb.get_all_documents_by_user(user_id=user_id, collection_type=ct)
@@ -929,6 +950,16 @@ class RAGService:
                 if settings.rag_bm25_max_docs > 0 and len(bm25_docs) > settings.rag_bm25_max_docs:
                     bm25_docs = bm25_docs[: settings.rag_bm25_max_docs]
 
+                logger.info("[Ensemble] BM25 인덱스: %d건", len(bm25_docs))
+                create_retrieval_span(
+                    _lf_trace,
+                    "bm25-index",
+                    output_data={
+                        "bm25_doc_count": len(bm25_docs),
+                        "bm25_max_docs_limit": settings.rag_bm25_max_docs,
+                    },
+                )
+
                 sparse_pairs: list[tuple[str, Document]] = []
                 if bm25_docs and query.strip():
                     k_bm25 = max(10, min(50, len(bm25_docs)))
@@ -941,6 +972,17 @@ class RAGService:
                     sparse_docs = await loop.run_in_executor(None, _bm25_invoke)
                     sparse_pairs = [(d.metadata.get("collection_type", ""), d) for d in sparse_docs]
 
+                logger.info("[Ensemble] Sparse(BM25): %d건", len(sparse_pairs))
+                create_retrieval_span(
+                    _lf_trace,
+                    "sparse-bm25",
+                    input_data={
+                        "query_stripped": bool(query.strip()),
+                        "bm25_skipped": not bm25_docs,
+                    },
+                    output_data={"count": len(sparse_pairs)},
+                )
+
                 dw = (
                     dense_weight if dense_weight is not None else settings.rag_ensemble_dense_weight
                 )
@@ -950,6 +992,22 @@ class RAGService:
                     else settings.rag_ensemble_sparse_weight
                 )
                 merged = _rrf_merge(dense_pairs, sparse_pairs, dw, sw, top_k=0)
+                logger.info(
+                    "[Ensemble] RRF 병합: %d건 (dense=%.1f, sparse=%.1f)",
+                    len(merged),
+                    dw,
+                    sw,
+                )
+                create_retrieval_span(
+                    _lf_trace,
+                    "rrf-merge",
+                    input_data={"dense_weight": dw, "sparse_weight": sw},
+                    output_data={
+                        "merged_count": len(merged),
+                        "dense_input": len(dense_pairs),
+                        "sparse_input": len(sparse_pairs),
+                    },
+                )
 
                 # ADR-106 Phase 4: RAPTOR 다단계 검색 결과 병합
                 if self._raptor:
@@ -971,7 +1029,17 @@ class RAGService:
 
                 # 재정렬: top_k 적용 (ADR-069 question → retriever → rerank → context)
                 rerank_k = settings.rag_rerank_top_k if settings.rag_rerank_top_k > 0 else 0
+                count_before_rerank = len(merged)
                 merged = await _rerank(merged, rerank_k, query=query)
+                create_retrieval_span(
+                    _lf_trace,
+                    "rerank-flashrank",
+                    input_data={"rerank_k": rerank_k, "use_flashrank": settings.rag_use_flashrank},
+                    output_data={
+                        "count_before": count_before_rerank,
+                        "count_after": len(merged),
+                    },
+                )
 
                 if settings.rag_use_compressor and merged:
                     llm = getattr(getattr(self._rag_chain, "_llm_gateway", None), "llm", None)

@@ -62,12 +62,20 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class PollingHint(BaseModel):
+    """폴링 힌트 — 클라이언트 폴링 간격 및 최대 횟수 권장치"""
+
+    interval_ms: int = Field(..., description="권장 폴링 간격 (밀리초)")
+    max_attempts: int = Field(..., description="최대 폴링 횟수 (초과 시 타임아웃 처리 권장)")
+
+
 class AsyncTaskResponse(BaseModel):
     """비동기 작업 초기 응답"""
 
     task_id: str | int = Field(..., description="작업 ID (text_extract: int, masking: str)")
     status: TaskStatus = Field(TaskStatus.PROCESSING, description="작업 상태")
     message: str | None = Field(None, description="상태 메시지")
+    polling: PollingHint | None = Field(None, description="클라이언트 폴링 힌트 (interval_ms, max_attempts)")
 
 
 class TaskStatusResponse(BaseModel):

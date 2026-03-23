@@ -117,23 +117,27 @@ async def get_few_shot_for_personality(
     if k <= 0:
         return ""
     try:
-        where = None
-        if interview_type_filter:
-            where = {"interview_type": interview_type_filter}
-        results = await vectordb.query(
-            query_text=query_text[:500],
-            collection_type="interview_feedback",
-            n_results=k,
-            where=where,
-            max_distance=max_distance,
-        )
-        if not results:
-            # 필터 결과 없으면 필터 없이 재시도
+        where = {"interview_type": interview_type_filter} if interview_type_filter else None
+        # 단계적 완화: 먼저 거리 임계값을 높여 재시도 → 최후 수단으로 필터 제거
+        # 이 방식은 필터 제거 즉시 재쿼리(이중 호출)보다 정확도를 유지한다
+        results: list[Any] = []
+        for dist in (max_distance, max_distance * 1.5):
             results = await vectordb.query(
                 query_text=query_text[:500],
                 collection_type="interview_feedback",
                 n_results=k,
-                max_distance=max_distance,
+                where=where,
+                max_distance=dist,
+            )
+            if results:
+                break
+        if not results and where is not None:
+            # 최후 수단: 필터 없이 재시도 (인터뷰 타입 무관 결과 허용)
+            results = await vectordb.query(
+                query_text=query_text[:500],
+                collection_type="interview_feedback",
+                n_results=k,
+                max_distance=max_distance * 1.5,
             )
         lines = []
         for r in results:

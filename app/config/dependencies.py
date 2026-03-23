@@ -132,14 +132,15 @@ def get_session_store(
 ) -> "BaseSessionStore":
     """Get session store instance.
 
-    Returns Redis in production, in-memory otherwise.
-    In-memory store is a singleton so interview sessions are shared across requests.
+    redis_url 설정 시 RedisSessionStore 반환, 미설정 시 InMemorySessionStore 폴백.
+    k8s 멀티 파드 환경에서 파드 간 세션 공유를 보장하기 위해 is_production 대신
+    redis_url 체크로 변경 (ADR-130 패턴 적용).
     """
     global _session_store_instance
     if _session_store_instance is not None:
         return _session_store_instance
 
-    if settings.is_production:
+    if settings.redis_url:
         from app.infrastructure.session.redis import RedisSessionStore
 
         _session_store_instance = RedisSessionStore(
@@ -147,6 +148,7 @@ def get_session_store(
             default_ttl=settings.redis_session_ttl,
             socket_timeout=settings.redis_socket_timeout,
             socket_connect_timeout=settings.redis_connect_timeout,
+            retry_on_timeout=settings.redis_retry_on_timeout,
         )
     else:
         from app.infrastructure.session.memory import InMemorySessionStore
@@ -162,9 +164,11 @@ def get_task_queue(
 ) -> "BaseTaskQueue":
     """Get task queue instance.
 
-    Returns Celery in production, file-based otherwise.
+    redis_url 설정 시 CeleryTaskQueue 반환, 미설정 시 FileTaskQueue 폴백.
+    k8s 멀티 파드 환경에서 파드 간 태스크 유실을 방지하기 위해 is_production 대신
+    redis_url 체크로 변경 (ADR-130 패턴 적용).
     """
-    if settings.is_production:
+    if settings.redis_url:
         from app.infrastructure.queue.celery_queue import CeleryTaskQueue
 
         return CeleryTaskQueue(
@@ -181,22 +185,53 @@ def get_task_queue(
 # Legacy Task Storage (save/get dict - ai.py 호환)
 # ============================================
 
-_task_storage_instance = None
+_task_storage_instance = None  # FileTaskStore fallback 싱글톤
+_redis_task_storage_instance = None  # RedisTaskStore 싱글톤 (ADR-130)
 
 
 def get_legacy_task_storage(
     settings: Settings = Depends(get_settings),
 ):
-    """Get legacy file-based task storage (save/get dict).
+    """Task 저장소 — Redis 우선, Redis 미설정 시 파일 폴백 (ADR-130).
 
-    Used by ai.py for text_extract and task status polling.
-    Same API as utils.task_store.FileTaskStore for drop-in replacement.
+    Redis URL이 설정된 환경(dev 포함)에서는 RedisTaskStore를 반환한다.
+    Redis가 없는 순수 로컬 환경에서만 FileTaskStore로 폴백한다.
+
+    k8s 분리 Deployment(FastAPI·Celery Worker 별도 파드) 환경에서
+    /tmp 파일 공유 불가 문제를 해결하기 위해 Redis로 통일.
+
+    Note:
+        Celery 태스크에서 인수 없이 호출 시 settings = Depends(get_settings) 객체가
+        전달되므로, 싱글톤 확인을 먼저 수행해 settings 접근을 최소화한다.
     """
+    global _redis_task_storage_instance, _task_storage_instance
+
+    # ── Fast path: 싱글톤이 이미 있으면 settings 접근 없이 즉시 반환 ──────────────
+    # Celery 태스크는 인수 없이 호출하므로 settings가 Depends 객체일 수 있음.
+    # 싱글톤 확인을 먼저 수행해 AttributeError를 방지한다.
+    if _redis_task_storage_instance is not None:
+        return _redis_task_storage_instance
+    if _task_storage_instance is not None:
+        return _task_storage_instance
+
+    # ── 최초 초기화: 실제 Settings 객체 확보 ──────────────────────────────────────
+    # FastAPI DI 없이 직접 호출(Celery 등)하면 settings = Depends 마커 객체이므로
+    # get_settings()를 직접 호출해 실제 설정을 가져온다.
+    actual_settings: Settings = settings if hasattr(settings, "redis_url") else get_settings()
+
+    if actual_settings.redis_url:
+        from app.utils.task_store import RedisTaskStore
+
+        _redis_task_storage_instance = RedisTaskStore(
+            redis_url=actual_settings.redis_url,  # DB 0, prefix "legacy_task:"으로 세션과 네임스페이스 분리
+            ttl=actual_settings.redis_task_ttl,  # 기본 86400초 (24시간)
+        )
+        return _redis_task_storage_instance
+
+    # Redis 없는 순수 로컬 환경 fallback
     from app.utils.task_store import FileTaskStore
 
-    global _task_storage_instance
-    if _task_storage_instance is None:
-        _task_storage_instance = FileTaskStore(storage_dir=settings.task_storage_dir)
+    _task_storage_instance = FileTaskStore(storage_dir=actual_settings.task_storage_dir)
     return _task_storage_instance
 
 

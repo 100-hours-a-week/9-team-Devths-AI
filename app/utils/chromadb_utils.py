@@ -39,6 +39,41 @@ def normalize_chromadb_filter(where: dict[str, Any] | None) -> dict[str, Any] | 
     return normalized or None
 
 
+def apply_chromadb_content_type_fix() -> None:
+    """
+    chromadb 0.5.x _make_request Content-Type 누락 버그 패치 (Issue #3899).
+
+    _make_request에서 json= → orjson bytes 변환 시 Content-Type: application/json이
+    누락되는 버그를 Request-level 헤더 주입으로 수정.
+    httpx ByteStream이 session-level Content-Type을 덮어써서
+    chroma_server_headers 워크어라운드가 무효화되는 문제 해결.
+
+    chromadb 1.0.0에서 공식 수정됨. 해당 버전 업그레이드 시 이 패치는 무해(harmless).
+    """
+    _patch_logger = logging.getLogger(__name__)
+
+    try:
+        from chromadb.api.fastapi import FastAPI as ChromaFastAPI
+
+        if getattr(ChromaFastAPI._make_request, "_content_type_patched", False):
+            _patch_logger.debug("ChromaDB Content-Type 패치 이미 적용됨, 스킵")
+            return
+
+        orig = ChromaFastAPI._make_request
+
+        def patched_make_request(self, method, path, **kwargs):
+            if "json" in kwargs:
+                kwargs.setdefault("headers", {})["Content-Type"] = "application/json"
+            return orig(self, method, path, **kwargs)
+
+        patched_make_request._content_type_patched = True
+        ChromaFastAPI._make_request = patched_make_request
+        _patch_logger.info("✅ ChromaDB _make_request Content-Type 패치 완료 (Issue #3899)")
+
+    except Exception as e:
+        _patch_logger.warning("ChromaDB Content-Type 패치 실패: %s", e)
+
+
 def apply_chromadb_query_fix() -> None:
     """
     chromadb 0.4.x 버그 패치.

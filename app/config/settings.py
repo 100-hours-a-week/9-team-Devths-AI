@@ -233,6 +233,31 @@ class Settings(BaseSettings):
         default=5,
         description="Tavily 검색당 최대 결과 수. ADR-101.",
     )
+    tavily_days: int = Field(
+        default=90,
+        ge=0,
+        description=(
+            "Tavily 검색 결과를 최근 N일 이내로 제한. 0이면 제한 없음. ADR-131. "
+            "예: 90 → 90일 이내 발행된 문서만 반환."
+        ),
+    )
+    tavily_min_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Tavily 결과 최소 relevance score (0.0~1.0). 미달 결과 제거. ADR-131. "
+            "0.0으로 설정 시 score 필터 비활성화."
+        ),
+    )
+    tavily_min_content_length: int = Field(
+        default=200,
+        ge=0,
+        description=(
+            "Tavily 결과 최소 본문 길이(문자 수). 미달 결과 제거. ADR-131. "
+            "0으로 설정 시 길이 필터 비활성화."
+        ),
+    )
     trend_crawl_queries: str = Field(
         default="",
         description=(
@@ -346,6 +371,30 @@ class Settings(BaseSettings):
     redis_connect_timeout: float = Field(
         default=2.0,
         description="Redis 연결 타임아웃 (초)",
+    )
+    redis_retry_on_timeout: bool = Field(
+        default=True,
+        description="Redis 타임아웃 시 자동 1회 재시도 여부 — ADR-126: ElastiCache 페일오버 중 순간적 TimeoutError 복구",
+    )
+
+    # ============================================
+    # AWS / SageMaker Configuration (ADR-117, ADR-133)
+    # ============================================
+    aws_region: str = Field(
+        default="ap-northeast-2",
+        description="AWS 리전 (S3, SageMaker 공통)",
+    )
+    sagemaker_s3_bucket: str = Field(
+        default="devths-storage-dev",
+        description="SageMaker 학습 데이터 S3 버킷",
+    )
+    sagemaker_s3_training_prefix: str = Field(
+        default="uploads/training-data/",
+        description="학습 데이터 S3 경로 프리픽스",
+    )
+    sagemaker_pipeline_name: str = Field(
+        default="exaone-finetuning-pipeline",
+        description="SageMaker Pipeline 이름 (파인튜닝 파이프라인)",
     )
 
     # ============================================

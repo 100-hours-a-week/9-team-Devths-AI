@@ -1,5 +1,5 @@
 """
-Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102.
+Celery Application Configuration — ADR-094, ADR-096, ADR-101, ADR-102, ADR-117, ADR-126.
 
 Celery Beat 스케줄러 설정 및 앱 초기화.
 Redis를 메시지 브로커 및 결과 저장소로 사용.
@@ -7,17 +7,32 @@ Redis를 메시지 브로커 및 결과 저장소로 사용.
 Beat 스케줄:
 - crawl-trend-weekly : Phase 1 (ADR-094) — URL 기반 WebBaseLoader 크롤링
 - search-trend-weekly: Phase 2 (ADR-101) — Tavily 검색 쿼리 기반 자동 발견 (TAVILY_API_KEY 필요)
+- sync-training-data-weekly: ADR-117 — VectorDB → S3 학습 데이터 동기화
 
 ADR-102 태스크:
 - text_extract_tasks : 이력서/채용공고 텍스트 추출 + 임베딩
 - masking_tasks      : PII 마스킹 처리
 - evaluation_tasks   : 면접 Q&A VectorDB 적재
+
+ADR-117 태스크:
+- sagemaker_sync_tasks: VectorDB → S3 동기화 + SageMaker Pipeline 트리거
 """
 
 from celery import Celery
 from celery.schedules import crontab
 
 from app.config.settings import get_settings
+from app.core.telemetry import setup_tracing
+from app.utils.chromadb_utils import apply_chromadb_content_type_fix, apply_chromadb_query_fix
+
+# OTel 초기화 — Worker/Beat 프로세스 시작 시 트레이싱 활성화
+# FastAPI 계측(instrument_fastapi_app)은 Worker에 불필요, Celery/httpx만 계측
+setup_tracing()
+
+# chromadb 버그 패치 — Worker 프로세스는 main.py를 실행하지 않으므로 여기서 별도 적용
+# 0.4.x: where_document={} 버그 / 0.5.x: Content-Type 헤더 누락 버그 (Issue #3899)
+apply_chromadb_query_fix()
+apply_chromadb_content_type_fix()
 
 # settings.py에서 설정 로드 (ADR-096: 설정 일관성)
 _settings = get_settings()
@@ -39,6 +54,7 @@ celery_app = Celery(
         "app.tasks.text_extract_tasks",  # ADR-102
         "app.tasks.masking_tasks",  # ADR-102
         "app.tasks.evaluation_tasks",  # ADR-102
+        "app.tasks.sagemaker_sync_tasks",  # ADR-117
     ],
 )
 
@@ -53,12 +69,23 @@ celery_app.conf.update(
     task_time_limit=3600,  # 1시간 타임아웃
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    # ADR-126: ElastiCache Replication Group 페일오버 대응
+    # Primary 장애 → Replica 승격(60~120초) 동안 워커가 크래시 없이 대기 후 자동 복구
+    broker_connection_retry_on_startup=True,   # 스타트업 시 브로커 미준비 → 무한 재시도
+    broker_connection_retry=True,              # 운영 중 브로커 연결 끊김 → 자동 재연결
+    broker_connection_max_retries=10,          # 최대 10회 재시도 (~150s) — ElastiCache 페일오버(60~120s) 커버 가능, 이후 종료 → K8s가 재시작
+    broker_transport_options={
+        "socket_timeout": 10,          # 브로커 소켓 타임아웃 (기본 None → 명시적 설정)
+        "socket_connect_timeout": 5,   # 브로커 연결 타임아웃
+        "visibility_timeout": 7200,    # 태스크 재큐 기준 (task_time_limit 2× 여유)
+    },
     # ADR-102: 태스크 라우팅 설정
     task_routes={
         "app.tasks.trend_tasks.*": {"queue": "trend_crawl"},
         "app.tasks.text_extract_tasks.*": {"queue": "text_extract"},
         "app.tasks.masking_tasks.*": {"queue": "masking"},
         "app.tasks.evaluation_tasks.*": {"queue": "evaluation"},
+        "app.tasks.sagemaker_sync_tasks.*": {"queue": "sagemaker_sync"},  # ADR-117
     },
     # 기본 큐 설정
     task_default_queue="celery",
@@ -87,5 +114,15 @@ celery_app.conf.beat_schedule = {
             day_of_week=TREND_CRAWL_CRON_DAY_OF_WEEK,
         ),
         "options": {"queue": "trend_crawl"},
+    },
+    # ADR-117: VectorDB → S3 학습 데이터 동기화 (트렌드 크롤링 1시간 후 실행)
+    "sync-training-data-weekly": {
+        "task": "app.tasks.sagemaker_sync_tasks.sync_training_data_task",
+        "schedule": crontab(
+            minute="0",
+            hour=str((int(TREND_CRAWL_CRON_HOUR) + 1) % 24),  # 크롤링 1시간 후 (23→0 wrap)
+            day_of_week=TREND_CRAWL_CRON_DAY_OF_WEEK,
+        ),
+        "options": {"queue": "sagemaker_sync"},
     },
 }

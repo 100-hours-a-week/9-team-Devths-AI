@@ -14,7 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, status
 
 from app.config.dependencies import get_legacy_task_storage
-from app.schemas.common import AsyncTaskResponse, TaskStatus
+from app.schemas.common import AsyncTaskResponse, PollingHint, TaskStatus
 from app.schemas.text_extract import TextExtractRequest
 
 logger = logging.getLogger(__name__)
@@ -232,4 +232,8 @@ async def text_extract(
             safe_task_key,
         )
 
-    return AsyncTaskResponse(task_id=task_id, status=TaskStatus.PROCESSING)
+    return AsyncTaskResponse(
+        task_id=task_id,
+        status=TaskStatus.PROCESSING,
+        polling=PollingHint(interval_ms=2000, max_attempts=150),  # 최대 5분(150 × 2초)
+    )

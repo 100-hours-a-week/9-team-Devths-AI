@@ -8,14 +8,18 @@ import asyncio
 import json
 import logging
 import random
-import re
 import time
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.routes.v2._helpers import get_services, get_session_key
+from app.api.routes.v2._helpers import (
+    extract_json_from_llm_response,
+    get_services,
+    get_session_key,
+    stream_text_chars,
+)
 from app.api.routes.v2._sse_errors import sse_error_event
 from app.config.dependencies import get_session_store
 from app.config.settings import get_settings
@@ -46,6 +50,10 @@ from app.utils.prompt_guard import RiskLevel, check_prompt_injection
 
 logger = logging.getLogger(__name__)
 
+# ── 면접 파라미터 상수 ───────────────────────────────────────
+# 참고: total_questions(5), max_depth(3) 기본값은 schemas/chat.py Field default가 관리
+PERSONALITY_VECTORDB_SELECT = 4  # 인성 면접 VectorDB에서 선택할 질문 수
+
 # 인성 면접 질문 선택 관련 상수
 PERSONALITY_SIMILARITY_THRESHOLD = 0.80  # 질문 간 유사도 임계값
 PERSONALITY_QUERY_COUNT = 6  # 검색할 카테고리 수
@@ -57,6 +65,7 @@ router = APIRouter()
 async def generate_chat_stream(
     request: ChatRequest,
     session_store,
+    http_request: Request,
 ):
     """채팅 응답 스트리밍 생성 (session_store: DI from get_session_store)"""
 
@@ -100,6 +109,11 @@ async def generate_chat_stream(
     mode = request.context.mode if request.context else ChatMode.NORMAL
 
     rag = get_services()
+    if rag is None:
+        logger.error("서비스 초기화 실패 (VectorDB 연결 불가) — 요청 거부")
+        yield 'data: {"error": "서비스 초기화 실패. 잠시 후 다시 시도해주세요."}\n\n'
+        return
+
     newline = "\n"
     sse_end = "\n\n"
 
@@ -270,6 +284,9 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt="당신은 채용 전문가입니다. 마크다운 문법(#, ##, **, ```)을 절대 사용하지 말고 일반 텍스트로만 응답하세요.",
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -295,6 +312,9 @@ async def generate_chat_stream(
                         model="gemini",
                         chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
+                        if await http_request.is_disconnected():
+                            logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                            return
                         record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -342,6 +362,9 @@ async def generate_chat_stream(
                             system_prompt="당신은 전문 면접관입니다. 지원자의 답변을 평가하고 구체적인 피드백을 제공합니다. 마크다운 문법을 사용하지 마세요.",
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -373,6 +396,9 @@ async def generate_chat_stream(
                             model=model,
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
@@ -403,12 +429,18 @@ async def generate_chat_stream(
                         model=model,
                         chat_mode=mode.value if hasattr(mode, "value") else str(mode),  # ADR-077
                     ):
+                        if await http_request.is_disconnected():
+                            logger.info("[Chat][NORMAL] 클라이언트 연결 해제 — 스트림 종료")
+                            return
                         record_ttft()
                         full_response += chunk
                         yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}{sse_end}"
 
                     logger.info("✅ 일반 대화 완료 (응답 길이: %d자)", len(full_response))
 
+        except asyncio.CancelledError:
+            logger.info("[Chat][NORMAL] 스트림 취소됨 (클라이언트 연결 해제)")
+            return
         except Exception as e:
             logger.error("채팅 처리 오류: %s", str(e), exc_info=True)
             yield sse_error_event(
@@ -428,6 +460,9 @@ async def generate_chat_stream(
         try:
             # SSE 스트림 즉시 오픈: Redis/RAG 등 첫 await 전에 keepalive를 전송해
             # 프록시(Nginx) 및 메인 백엔드의 첫 청크 대기 타임아웃을 방지한다.
+            if await http_request.is_disconnected():
+                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                return
             yield ": keepalive\n\n"
 
             interview_type = request.context.interview_type or "tech"
@@ -617,14 +652,14 @@ async def generate_chat_stream(
                             _selected_queries,
                         )
 
-                        # 유사도 기반 중복 제거하며 4개 선택
-                        if len(_all_candidates) >= 4:
+                        # 유사도 기반 중복 제거하며 PERSONALITY_VECTORDB_SELECT개 선택
+                        if len(_all_candidates) >= PERSONALITY_VECTORDB_SELECT:
                             random.shuffle(_all_candidates)
                             _selected: list[dict] = []
                             _selected_embeddings: list[list[float]] = []
 
                             for candidate in _all_candidates:
-                                if len(_selected) >= 4:
+                                if len(_selected) >= PERSONALITY_VECTORDB_SELECT:
                                     break
 
                                 q_text = candidate["metadata"]["question_only"]
@@ -645,7 +680,7 @@ async def generate_chat_stream(
                                     _selected.append(candidate)
                                     _selected_embeddings.append(q_embedding)
 
-                            if len(_selected) >= 4:
+                            if len(_selected) >= PERSONALITY_VECTORDB_SELECT:
                                 _fb_qs = [
                                     {
                                         "id": i + 2,
@@ -655,7 +690,7 @@ async def generate_chat_stream(
                                         "intent": "",
                                         "keywords": [],
                                     }
-                                    for i, r in enumerate(_selected[:4])
+                                    for i, r in enumerate(_selected[:PERSONALITY_VECTORDB_SELECT])
                                 ]
                                 logger.info(
                                     "✅ interview_feedback 인성 질문 4개 선택 (유사도 필터 적용)"
@@ -735,48 +770,36 @@ async def generate_chat_stream(
                         questions_data = behavior_questions_data
                     else:
                         # LLM 응답 파싱 (기존 경로)
-                        json_content = re.sub(r"```json\s*", "", full_response)
-                        json_content = re.sub(r"```\s*$", "", json_content)
-                        json_content = json_content.strip()
-
-                        json_start = json_content.find("{")
-                        json_end = json_content.rfind("}") + 1
-
-                        if json_start != -1 and json_end > json_start:
-                            json_str = json_content[json_start:json_end]
-                            logger.info(f"JSON 파싱 시도 (첫 200자): {json_str[:200]}")
-
-                            questions_data = json.loads(json_str)
-
-                            # 인성 면접 LLM 폴백: Q1+Q2 하드코딩 + Q3-Q5 LLM
-                            if interview_type == "behavior":
-                                fixed_q1 = {
-                                    "id": 1,
-                                    "category": "intro_self",
-                                    "category_name": "자기소개",
-                                    "question": "자기소개 해보세요.",
-                                    "intent": "지원자의 전반적인 역량과 경력 요약 파악",
-                                    "keywords": ["자기소개", "경력", "역량"],
-                                }
-                                fixed_q2 = {
-                                    "id": 2,
-                                    "category": "intro_motivation",
-                                    "category_name": "지원동기",
-                                    "question": "우리 회사를 지원하는 이유가 뭔가요?",
-                                    "intent": "지원 동기와 회사/직무 이해도 확인",
-                                    "keywords": ["지원동기", "회사이해", "직무"],
-                                }
-                                llm_questions = [
-                                    q
-                                    for q in questions_data.get("questions", [])
-                                    if q.get("id", 0) >= 3
-                                ]
-                                questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
-                                logger.info(
-                                    "인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)"
-                                )
-                        else:
+                        questions_data = extract_json_from_llm_response(full_response)
+                        if questions_data is None:
                             raise ValueError("JSON 형식을 찾을 수 없습니다")
+                        logger.info("JSON 파싱 시도 (첫 200자): %s", str(questions_data)[:200])
+
+                        # 인성 면접 LLM 폴백: Q1+Q2 하드코딩 + Q3-Q5 LLM
+                        if interview_type == "behavior":
+                            fixed_q1 = {
+                                "id": 1,
+                                "category": "intro_self",
+                                "category_name": "자기소개",
+                                "question": "자기소개 해보세요.",
+                                "intent": "지원자의 전반적인 역량과 경력 요약 파악",
+                                "keywords": ["자기소개", "경력", "역량"],
+                            }
+                            fixed_q2 = {
+                                "id": 2,
+                                "category": "intro_motivation",
+                                "category_name": "지원동기",
+                                "question": "우리 회사를 지원하는 이유가 뭔가요?",
+                                "intent": "지원 동기와 회사/직무 이해도 확인",
+                                "keywords": ["지원동기", "회사이해", "직무"],
+                            }
+                            llm_questions = [
+                                q
+                                for q in questions_data.get("questions", [])
+                                if q.get("id", 0) >= 3
+                            ]
+                            questions_data["questions"] = [fixed_q1, fixed_q2] + llm_questions
+                            logger.info("인성 면접 LLM 폴백 적용 (interview_feedback 결과 부족)")
 
                     # 공통: 세션 생성 + 스트리밍 + 저장
                     new_session = InterviewSession(
@@ -805,9 +828,11 @@ async def generate_chat_stream(
                         question_text = (
                             f"{format_main_question_label(1)}{newline}{first_q.question}"
                         )
-                        for char in question_text:
-                            yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
-                            await asyncio.sleep(0.015)
+                        async for chunk in stream_text_chars(question_text, sse_end):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
+                            yield chunk
 
                         session_meta = {
                             "type": "session_state",
@@ -885,6 +910,9 @@ async def generate_chat_stream(
                         current_q.current_depth,
                         current_q.max_depth,
                     )
+                    if await http_request.is_disconnected():
+                        logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                        return
                     yield ": keepalive\n\n"
 
                     if model_choice == "vllm" and rag.vllm:
@@ -894,6 +922,9 @@ async def generate_chat_stream(
                             history=[],
                             system_prompt=system_prompt,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield ": k\n\n"
@@ -905,6 +936,9 @@ async def generate_chat_stream(
                             system_prompt=system_prompt,
                             user_id=request.user_id,
                         ):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
                             record_ttft()
                             full_response += chunk
                             yield ": k\n\n"
@@ -914,11 +948,21 @@ async def generate_chat_stream(
                     )
 
                     try:
-                        json_start = full_response.find("{")
-                        json_end = full_response.rfind("}") + 1
-                        if json_start != -1 and json_end > json_start:
-                            followup_data = json.loads(full_response[json_start:json_end])
-
+                        followup_data = extract_json_from_llm_response(full_response)
+                        if followup_data is None:
+                            # JSON 파싱 실패 — 사용자에게 에러 알림 후 현재 질문 완료 처리
+                            logger.error(
+                                "꼬리질문 JSON 파싱 실패 (LLM 응답 앞 200자): %s",
+                                full_response[:200],
+                            )
+                            yield sse_error_event(
+                                code="PARSE_FAILED",
+                                status=500,
+                                message="꼬리질문 JSON 파싱 실패",
+                                fallback="꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
+                            )
+                            current_q.is_completed = True
+                        else:
                             safe_info(
                                 logger,
                                 "🔍 [꼬리질문 진단] should_continue=%s | followup 존재=%s",
@@ -942,9 +986,13 @@ async def generate_chat_stream(
                                     current_q_id, current_q.current_depth
                                 )
                                 followup_text = f"{followup_header}{newline}{followup_q}"
-                                for char in followup_text:
-                                    yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
-                                    await asyncio.sleep(0.015)
+                                async for chunk in stream_text_chars(followup_text, sse_end):
+                                    if await http_request.is_disconnected():
+                                        logger.info(
+                                            "[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료"
+                                        )
+                                        return
+                                    yield chunk
                             else:
                                 safe_info(
                                     logger,
@@ -974,12 +1022,12 @@ async def generate_chat_stream(
                                         )
                                     except Exception as e:
                                         logger.debug("ADR-066: 마스터 임베딩 실패: %s", e)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"꼬리질문 파싱 실패: {e}")
+                    except Exception as e:
+                        logger.error("꼬리질문 처리 중 예외 발생: %s", type(e).__name__)
                         yield sse_error_event(
                             code="PARSE_FAILED",
                             status=500,
-                            message=f"꼬리질문 JSON 파싱 실패: {e}",
+                            message=f"꼬리질문 처리 실패: {type(e).__name__}",
                             fallback="꼬리질문 생성 중 오류가 발생했습니다. 다음 질문으로 넘어갑니다.",
                         )
                         current_q.is_completed = True
@@ -997,9 +1045,13 @@ async def generate_chat_stream(
 
                             question_header = format_main_question_label(next_q_id)
                             question_text = f"{question_header}{newline}{next_q.question}"
-                            for char in question_text:
-                                yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
-                                await asyncio.sleep(0.015)
+                            async for chunk in stream_text_chars(question_text, sse_end):
+                                if await http_request.is_disconnected():
+                                    logger.info(
+                                        "[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료"
+                                    )
+                                    return
+                                yield chunk
 
                             next_q.conversation.append(
                                 {
@@ -1010,9 +1062,11 @@ async def generate_chat_stream(
                     else:
                         session.phase = "completed"
                         complete_msg = f"{newline}{newline}면접 결과 리포트를 생성 중입니다. 잠시만 기다려 주세요."
-                        for char in complete_msg:
-                            yield f"data: {json.dumps({'chunk': char}, ensure_ascii=False)}{sse_end}"
-                            await asyncio.sleep(0.015)
+                        async for chunk in stream_text_chars(complete_msg, sse_end):
+                            if await http_request.is_disconnected():
+                                logger.info("[Chat][INTERVIEW] 클라이언트 연결 해제 — 스트림 종료")
+                                return
+                            yield chunk
 
                 await session_store.set(session_key, session.model_dump())
                 safe_info(
@@ -1041,6 +1095,9 @@ async def generate_chat_stream(
                 yield f"data: {json.dumps({'chunk': complete_msg}, ensure_ascii=False)}{sse_end}"
                 yield f"data: [DONE]{sse_end}"
 
+        except asyncio.CancelledError:
+            logger.info("[Chat][INTERVIEW] 스트림 취소됨 (클라이언트 연결 해제)")
+            return
         except Exception as e:
             logger.error(f"Interview error: {e}", exc_info=True)
             yield sse_error_event(
@@ -1156,11 +1213,12 @@ async def generate_chat_stream(
 )
 async def chat(
     request: ChatRequest,
+    http_request: Request,
     session_store=Depends(get_session_store),
 ):
     """채팅 처리 (일반/면접)"""
     return StreamingResponse(
-        generate_chat_stream(request, session_store),
+        generate_chat_stream(request, session_store, http_request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -65,6 +65,7 @@ class ChromaVectorStore(BaseVectorStore):
             self.chroma_client = chromadb.HttpClient(
                 host=chroma_server_host,
                 port=chroma_server_port,
+                settings=Settings(anonymized_telemetry=False),
             )
             logger.info(
                 f"ChromaVectorStore initialized (server mode) at {chroma_server_host}:{chroma_server_port}"
