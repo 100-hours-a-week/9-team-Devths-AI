@@ -60,8 +60,9 @@ def setup_tracing() -> None:
         resource = Resource.create(resource_attrs)
         provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
 
-        # OTLP HTTP exporter — SDK가 /v1/traces 경로를 자동으로 추가
-        exporter = OTLPSpanExporter(endpoint=endpoint)
+        # OTLP HTTP exporter — OTEL_EXPORTER_OTLP_ENDPOINT env var를 SDK가 직접 읽어
+        # /v1/traces 경로를 자동 추가. endpoint= 명시 시 경로 자동 추가가 동작하지 않음.
+        exporter = OTLPSpanExporter()
         provider.add_span_processor(BatchSpanProcessor(exporter))
 
         trace.set_tracer_provider(provider)
