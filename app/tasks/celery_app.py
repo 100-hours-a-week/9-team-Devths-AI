@@ -126,3 +126,5 @@ celery_app.conf.beat_schedule = {
         "options": {"queue": "sagemaker_sync"},
     },
 }
+
+import app.tasks.signals  # noqa: E402,F401 — Prometheus 계측 시그널 핸들러 등록
