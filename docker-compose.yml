@@ -1,11 +1,18 @@
-# v2 서버 구성
-# 로컬 테스트: docker-compose up -d
-# GPU 포함: docker-compose --profile gpu up -d
-# 프로덕션: Redis는 AWS ElastiCache 사용 (환경변수로 주입)
+# v2 서버 구성 (온프레미스 ai-vm 전용 — Redis는 db-vm 공유, GPU 서비스 비활성화)
 #
 # ADR-102: Gunicorn 4 Uvicorn workers로 동시성 확장 (Compose 환경)
 # - ai-endpoint: Gunicorn -w 4 (deploy.replicas는 Swarm 전용으로 제거)
 # - celery-worker-extract: text_extract/masking/evaluation 전용 Worker
+#
+# 원본 대비 변경 사항 (온프레미스 전환):
+#   - redis 서비스 제거 → db-vm(192.168.10.203)의 Redis 공유 사용
+#   - ai_task_storage 볼륨 추가 (ai-endpoint ↔ celery-worker-extract 태스크 상태 공유)
+#   - GCP_VLLM_BASE_URL / EASYOCR_SERVER_URL 비움 (GPU 서비스 미기동 → Gemini/기본 OCR 폴백)
+#   - celery-worker-trend/extract: PROMETHEUS_MULTIPROC_DIR + 9200/9201 포트 추가
+#     (app/tasks/signals.py — Celery 실측 지표를 Prometheus로 노출)
+#   - GPU 서비스(exaone-8b/32b, easyocr-server) 제거 — GPU 없는 온프레미스 환경
+#   - AWS SageMaker 관련 env는 남겨뒀지만(AWS_ACCESS_KEY_ID 등) 값은 비어있어 해당 태스크는
+#     스킵되거나 실패함 — 온프레미스 단계에서는 사용하지 않는 기능
 services:
   # -----------------------------------------
   # 1. AI Endpoint Server (CPU) — ADR-102: Gunicorn 4 Uvicorn workers
@@ -23,40 +30,40 @@ services:
       # ChromaDB (VectorDB)
       - CHROMA_SERVER_HOST=vectordb
       - CHROMA_SERVER_PORT=8000
-      # OCR
-      - EASYOCR_SERVER_URL=http://easyocr-server:8000
+      # OCR — GPU EasyOCR 미기동이라 비움 (CLOVA/기본 경로로 폴백)
+      - EASYOCR_SERVER_URL=
       - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
       - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
       # LLM APIs
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # vLLM (로컬 테스트: Docker 서비스명, 프로덕션: 실제 서버 URL로 교체)
-      - GCP_VLLM_BASE_URL=http://exaone-8b:8000
-      - VLLM_32B_BASE_URL=http://exaone-32b:8000
+      # vLLM — GPU 서비스 미기동이라 비움 (Gemini 단독 모드로 자동 폴백)
+      - GCP_VLLM_BASE_URL=
+      - VLLM_32B_BASE_URL=
       # S3 Storage
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_REGION=${S3_REGION:-ap-northeast-2}
       - S3_BUCKET=${S3_BUCKET:-devths-dev}
-      # Redis/ElastiCache (세션/태스크 저장소) — ADR-096
-      # 프로덕션: AWS ElastiCache URL로 환경변수 주입
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      # Redis — db-vm 공유
+      - REDIS_URL=${REDIS_URL:-redis://192.168.10.203:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://192.168.10.203:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://192.168.10.203:6379/2}
       # Langfuse (모니터링)
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
       - LANGFUSE_HOST=${LANGFUSE_HOST:-https://cloud.langfuse.com}
+    volumes:
+      - ai_task_storage:/app/task_storage
     depends_on:
       - vectordb
-      - redis
     networks:
       - ai_network
 
   # -----------------------------------------
   # 2. Celery Worker (트렌드 크롤링 + SageMaker 동기화) — ADR-094/096, ADR-133
-  # Redis/ElastiCache 연결은 환경변수로 주입
   # ADR-133: sagemaker_sync 큐를 trend_crawl과 합산 (ChromaDB 공유, 주 1회 단발 실행)
+  # 온프레미스: AWS 자격증명 비어있어 sagemaker_sync 태스크 자체는 스킵/실패함(트렌드 크롤링은 정상)
   # -----------------------------------------
   celery-worker-trend:
     build:
@@ -64,29 +71,30 @@ services:
       dockerfile: Dockerfile
     image: ai-endpoint:v2
     container_name: celery_worker_trend
-    command: celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl,sagemaker_sync
+    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q trend_crawl,sagemaker_sync
     environment:
       - ENVIRONMENT=production
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      - REDIS_URL=${REDIS_URL:-redis://192.168.10.203:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://192.168.10.203:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://192.168.10.203:6379/2}
       - CHROMA_SERVER_HOST=vectordb
       - CHROMA_SERVER_PORT=8000
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - TREND_CRAWL_URLS=${TREND_CRAWL_URLS:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
-      # SageMaker 학습 데이터 동기화 (ADR-133)
+      # SageMaker 학습 데이터 동기화 (ADR-133) — 온프레미스에서는 미사용, 값 비움
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AWS_REGION:-ap-northeast-2}
       - SAGEMAKER_S3_BUCKET=${SAGEMAKER_S3_BUCKET:-devths-storage-dev}
       - SAGEMAKER_S3_TRAINING_PREFIX=${SAGEMAKER_S3_TRAINING_PREFIX:-uploads/training-data/}
       - SAGEMAKER_PIPELINE_NAME=${SAGEMAKER_PIPELINE_NAME:-exaone-finetuning-pipeline}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    ports:
+      - "9200:9200"
     depends_on:
       vectordb:
         condition: service_started
-      redis:
-        condition: service_healthy
     healthcheck:
       disable: true
     networks:
@@ -102,30 +110,30 @@ services:
       dockerfile: Dockerfile
     image: ai-endpoint:v2
     container_name: celery_worker_extract
-    command: celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
+    command: poetry run celery -A app.tasks.celery_app worker --loglevel=info -Q text_extract,masking,evaluation -c 2
     environment:
       - ENVIRONMENT=production
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      - REDIS_URL=${REDIS_URL:-redis://192.168.10.203:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://192.168.10.203:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://192.168.10.203:6379/2}
       - CHROMA_SERVER_HOST=vectordb
       - CHROMA_SERVER_PORT=8000
-      # LLM APIs (OCR, 분석에 필요)
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      # OCR
       - CLOVA_OCR_API_URL=${CLOVA_OCR_API_URL:-}
       - CLOVA_OCR_SECRET_KEY=${CLOVA_OCR_SECRET_KEY:-}
-      # S3 Storage
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_REGION=${S3_REGION:-ap-northeast-2}
       - S3_BUCKET=${S3_BUCKET:-devths-dev}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    ports:
+      - "9201:9200"
+    volumes:
+      - ai_task_storage:/app/task_storage
     depends_on:
       vectordb:
         condition: service_started
-      redis:
-        condition: service_healthy
     healthcheck:
       disable: true
     networks:
@@ -133,7 +141,6 @@ services:
 
   # -----------------------------------------
   # 3. Celery Beat (스케줄러) — ADR-094/096
-  # Redis/ElastiCache 연결은 환경변수로 주입
   # -----------------------------------------
   celery-beat:
     build:
@@ -141,42 +148,22 @@ services:
       dockerfile: Dockerfile
     image: ai-endpoint:v2
     container_name: celery_beat
-    command: celery -A app.tasks.celery_app beat --loglevel=info
+    command: poetry run celery -A app.tasks.celery_app beat --loglevel=info
     environment:
       - ENVIRONMENT=production
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
-      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://redis:6379/1}
-      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+      - REDIS_URL=${REDIS_URL:-redis://192.168.10.203:6379/0}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-redis://192.168.10.203:6379/1}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-redis://192.168.10.203:6379/2}
       - TREND_CRAWL_CRON_MINUTE=${TREND_CRAWL_CRON_MINUTE:-0}
       - TREND_CRAWL_CRON_HOUR=${TREND_CRAWL_CRON_HOUR:-9}
       - TREND_CRAWL_CRON_DAY_OF_WEEK=${TREND_CRAWL_CRON_DAY_OF_WEEK:-1}
-    depends_on:
-      redis:
-        condition: service_healthy
     healthcheck:
       disable: true
     networks:
       - ai_network
 
   # -----------------------------------------
-  # 4. Redis (로컬 개발용 — 프로덕션은 AWS ElastiCache)
-  # Celery broker/result backend + 세션 저장소
-  # -----------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: redis_local
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - ai_network
-
-  # -----------------------------------------
-  # 5. VectorDB (ChromaDB, CPU)
+  # 4. VectorDB (ChromaDB, CPU)
   # -----------------------------------------
   vectordb:
     image: chromadb/chroma:0.4.24
@@ -190,82 +177,9 @@ services:
     networks:
       - ai_network
 
-  # -----------------------------------------
-  # 5. Exaone 8B (vLLM, GPU) - profile: gpu
-  # -----------------------------------------
-  exaone-8b:
-    image: vllm/vllm-openai:latest
-    container_name: exaone_8b
-    ports:
-      - "8003:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: >
-      vllm serve LGAI-EXAONE/EXAONE-3.5-7.8B-Instruct
-      --host 0.0.0.0
-      --port 8000
-      --max-model-len 4096
-      --trust-remote-code
-    profiles:
-      - gpu
-    networks:
-      - ai_network
-
-  # -----------------------------------------
-  # 6. EasyOCR (GPU) - profile: gpu
-  # -----------------------------------------
-  easyocr-server:
-    build:
-      context: ./easyocr_server
-      dockerfile: Dockerfile
-    image: easyocr-server:v1
-    container_name: easyocr_server
-    ports:
-      - "8002:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    profiles:
-      - gpu
-    networks:
-      - ai_network
-
-  # -----------------------------------------
-  # 7. Exaone 32B (vLLM, GPU) - profile: gpu
-  # 로컬 테스트용. 프로덕션에서는 RunPod 서버리스 사용.
-  # 프로덕션 시 VLLM_32B_BASE_URL을 RunPod 엔드포인트로 변경.
-  # -----------------------------------------
-  exaone-32b:
-    image: vllm/vllm-openai:latest
-    container_name: exaone_32b
-    ports:
-      - "8004:8000"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: >
-      vllm serve LGAI-EXAONE/EXAONE-3.5-32B-Instruct
-      --host 0.0.0.0
-      --port 8000
-      --max-model-len 4096
-      --trust-remote-code
-    profiles:
-      - gpu
-    networks:
-      - ai_network
+  # GPU 서비스(exaone-8b/32b, easyocr-server)는 GPU 없는 온프레미스 환경이라
+  # 통째로 제외함 — 원본은 팀 develop 브랜치 참고, profiles: gpu로 막혀 있어
+  # 어차피 기본 실행에선 안 뜨지만 정의 자체를 없애 파일을 단순화함
 
 networks:
   ai_network:
@@ -273,3 +187,4 @@ networks:
 
 volumes:
   chroma_data:
+  ai_task_storage:
